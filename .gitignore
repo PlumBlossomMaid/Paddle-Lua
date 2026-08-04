@@ -1,0 +1,27 @@
+# 构建产物(P0 之后才会出现)
+build/
+build-*/
+*.so
+*.dll
+*.dylib
+*.o
+*.obj
+*.a
+*.lib
+*.pdb
+
+# luarocks
+*.rock
+.luarocks/
+lua_modules/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# 生成的算子绑定(P3 产出,不进版本库)
+csrc/generated/
+lua/paddle/_generated/
