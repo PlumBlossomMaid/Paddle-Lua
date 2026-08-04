@@ -126,10 +126,10 @@ grep -rn "class%.cast"                lua/                      -> 失败
 grep -rn "rawset(self"                lua/paddle/nn/            -> 失败(仅 FIELDS 一处豁免)
 grep -rn "require *['\"]middleclass"  lua/                      -> 失败(第二套 class)
 
-# ①b argcheck 的两条(foundations.md §4)
-grep -rn "argcheck"                   lua/paddle/_ops/          -> 失败(生成代码不许用,§4.5)
-tools/ci/check_vendor_patches.sh                                -> vendored 改动没带
-                                                                   `-- PADDLE-LUA PATCH:` 即失败
+# ①b 参数检查的两条(foundations.md §4)
+grep -rn "_args"                      lua/paddle/_ops/          -> 失败(生成算子构建期展开,§4.7)
+lua tools/ci/args_codegen_size.lua                              -> 30 个可选参数的规则表
+                                                                   生成 >10 KB 即失败(指数回归)
 
 # ② 5.1 语法子集(C3)
 grep -rnE "goto |::[a-z]+::|[^/]//[^/]|<close>|<const>"  lua/   -> 失败
@@ -155,11 +155,13 @@ Paddle 每加一个算子都可能要补标注。**默认放行会让 1-based �
 第 ⑤ 条挡的是"为了让某个测试过,顺手改了一行 Paddle" ——
 这会让整个项目的"零上游改动"承诺在无人察觉时失效。
 
-①b 的第二条不是洁癖。vendored argcheck 我们要改 5 个地方(`foundations.md` §4.6),
-其中 `graph.lua` 那处 **不改在 Windows 上根本不能用**。
-将来有人同步上游新版本时,如果改动没有标记,**会被无声地覆盖回去,
-然后 Windows CI 挂在一个看不懂的 `bad argument #4 to 'format'` 上。**
-标记的成本是一行注释,不标记的成本是一次考古。
+①b 的第二条是在防一类**具体的**退化。argcheck 之所以被否,
+就是因为它对参数「给了/没给/显式 nil」做 3^N 枚举,9 个可选参数就 1.37 MB、
+10 个直接编不出来,而 `Conv2D` 有 11 个、`DataLoader` 有 16 个(`foundations.md` §4.5)。
+
+**「为了支持某种更灵活的调用形式,顺手枚举一下组合」是一个非常自然的改动** ——
+它在 3 个参数的测试上完全正常,要到某个真实的层才炸。
+所以判据必须是**生成代码的体量**,而不是「有没有人想着别这么写」。
 
 **L0 就能跑这两条 —— 它们不需要 libpaddle。**
 

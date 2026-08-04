@@ -64,19 +64,20 @@
 | `__getitem__` | `:get(i)` 或 `t["1:3"]` | 数据访问用 `get`,张量切片用字符串索引(D14) |
 | `__call__` | `__call` 元方法 | `layer(x)` 能用 |
 | `super().__init__()` | `self:super()` | Penlight 约定 |
-| 关键字参数(**冷路径**) | **`argcheck`**(D-R25) | 构造期 API:`nn.Linear`、`DataLoader`、optimizer、transforms |
-| 关键字参数(**热路径**) | `_wrap` 三模式(D-R8) | `f{a=1,b=2}` / `f(1,2)` / `f(1,{b=2})`。每 step 调的一律走这条 |
+| 关键字参数 | **`_args` 规则表**(D-R26) | schema 抄 argcheck:`{name=,type=,default=,opt=,check=,help=}`;**求解器是我们自己的 O(N) 生成器**,不是 argcheck 本体 |
+| 位置参数中间省略 | **不支持** | `f(1, nil, 3)` 要跳过就用具名表 `f{a=1,c=3}`。**与 Python 一致**,且支持它要付 3^N 的代价(`foundations.md` §4.5)|
 
 **不做"Lua 风格化"改名。** 用户是冲着 Paddle API 来的,
 `paddle.add_n` 改成 `paddle.addN` 只会让所有 Python 文档失效。
 
-**关键字参数那两行的边界判据是「调用频次」,不是「好不好看」。**
-argcheck 实测 2.6 µs/call,和一个小 kernel 同量级(`foundations.md` §4.4);
-`_wrap` 是 0.42 µs。构造期一个模型几百次 = 0.5 ms,随便用;
-每 step 上千次的地方用它就是 25%-50% 的净损耗。
-**每份 api 文档要在导出清单里逐项标 `argcheck` 还是 `_wrap`** —— 和标 index 语义一样,不能留空。
+**第二行是硬规则,不是风格偏好。** 我们的调用形式**只有两种**:
+全位置(可以尾部省略)、或者一个具名表。**不允许位置参数中间留空靠类型猜** ——
+Python 不允许,而支持它要付 3^N 的生成代码代价,argcheck 就是死在这上面的
+(`foundations.md` §4.5)。
 
-P3 生成的 2000+ 算子**两者都不用**,走构建期静态展开(`foundations.md` §4.5)。
+**每份 api 文档在导出清单里给出规则表即可**,不必标「用哪个实现」——
+只有一套(C11)。P3 生成的 2000+ 算子共用同一份 schema,但**构建期展开**,
+运行时不调 `_args`。
 
 ### 2.2 索引:全 1-based,且必须在文档里逐个标出来
 

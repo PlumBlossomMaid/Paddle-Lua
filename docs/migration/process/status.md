@@ -78,13 +78,13 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 19 | `SaveTensor`/`LoadTensor` 格式稳定性 | ⬜ |
 | 20 | `string.dump` 往返比对(服务 M4) | ⬜ 可跳过 |
 | 21 | luacheck parser 独立跑 5.1(服务 M4) | ⬜ 可跳过 |
-| 22 | **LuaJIT 上 `debug.setupvalue` 注入 upvalue 是否可用**(argcheck 的命脉,Q-17) | ⬜ **纯 Lua,不依赖 libpaddle,现在就能做** |
-| 23 | **打过补丁的 argcheck 在 5 个 Lua × 3 OS 上跑通上游 `test/test.lua`** | ⬜ 同上,现在就能做 |
+| 22 | **LuaJIT 上 `debug.setupvalue` 注入 upvalue 是否可用**(`_args` 的命脉,Q-17) | ⬜ **纯 Lua,不依赖 libpaddle,现在就能做** |
+| 23 | **`loadstring`/`load` 在 5 个 Lua × 3 OS 上行为一致**(chunkname 与错误行号) | ⬜ 同上,现在就能做 |
 
 **必做 19 项(#20/#21 可跳过),预估 3 周。**
 
 > **#22/#23 不阻塞于 G0** —— 它们是纯 Lua 验证,`WITH_PYTHON=OFF` 编不编得出来与它们无关。
-> 挂了的后果是明确的:**冷路径 API 全线退回 `_wrap`**(`plan/foundations.md` §4.7①)。
+> 挂了的后果是明确的:`_args` 走**解释式降级路径**(`plan/foundations.md` §4.7)。
 > 越早知道越好,因为 P5 之后再改就要重写所有已写的构造期签名。
 
 ---
@@ -110,7 +110,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 |---|---|---|
 | `plan/overview.md` | 915 | ✅ |
 | `plan/roadmap.md` | 344 | ✅ |
-| `plan/foundations.md` | 684 | ✅ **+argcheck(§4)** |
+| `plan/foundations.md` | 745 | ✅ **+参数检查(§4)** |
 | `plan/layout.md` | 261 | ✅ **新增** |
 | `plan/ci.md` | 208 | ✅ **新增** |
 | `plan/api/README.md` | 139 | ✅ **新增** |
@@ -144,7 +144,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `process/status.md` | 本文件 | ✅ |
 | `process/tasks.md` | 137 | ✅ |
 | `process/conventions.md` | 280 | ✅ |
-| `process/decisions.md` | 199 | ✅ |
+| `process/decisions.md` | 232 | ✅ |
 | `process/open-questions.md` | 160 | ✅ |
 
 ### 5.4 `research/`
@@ -208,4 +208,4 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 2026-08-03 | **新增 `WORKPLAN.md`(总工程树)** —— 智能体按它 DFS 遍历,遍历完 = 工程完成;新增 `plan/layout.md`(权威目录树 + 文件级落地顺序 + 生成代码进版本库的决策)与 `plan/ci.md`(四层 CI、阶段解锁表、五条机器红线)。关键设计:**兄弟节点排成拓扑序**,使朴素 DFS 自动满足 DAG 依赖,`前置` 字段退化为断言 |
 | 2026-08-03 | 人的三条决定落盘:**① `nn.LayerList` 改为继承 `Layer`**(R22,Layer 优先;连带发现 5.1 的 `ipairs` 用 `lua_rawgeti`,`ipairs(ml)` 会静默跑空 -> 改用 `ml:iter()`,新增 Q-16);**② 「不引入新的强制 C 依赖」禁令取消**(R23,判据改为边际成本,`CLAUDE.md` §9.1;解禁 HTTP 下载与图像解码,Q-08 风险下降);**③ Insight7 的 `axis` 按 bug 修成 1-based**(R24,成员索引与维度索引都要 1-based,顺手做、P12 前完成;待拍板 P1 关闭、Q-12 转已决)。新增 D27–D29 |
 | 2026-08-03 | **新增 `plan/foundations.md`(生态基座)**:Penlight 定为一等公民(R19/R21),Insight7 顶替 numpy 的位置(R20)。新增硬约束 C11、决策 D23–D26、未解问题 Q-12–Q-15;`conventions.md` 章节重编号(§2 生态基座、§3 与 Python 的已知差异) |
-| 2026-08-03 | **argcheck 评估落盘(R25)** —— 实测推翻两个前提:「硬编码 Torch7」不成立(耦合共 32 行 2 处,`env.istype` 原注释就是 `-- user configurable function`);「过时」也不准,真实病灶是 `graph.lua:13` 拿 `tostring(t):match('0x…')` 当标识符,**MSVC 的 `%p` 不带 `0x`,所以带默认值的规则集在 Windows 上必崩** —— 改 2 行后上游全套测试在 Windows + Lua 5.1 + 无 Torch 下通过。但实测 **2597 ns/call**(`_wrap` 420 / 裸调用 43),与小 kernel 同量级,**违反 D1 那把尺子** -> 结论是**分层**:冷路径 argcheck、热路径 `_wrap`、生成算子构建期静态展开。新增 `foundations.md` §4、`decisions.md` §2.11、Q-17/Q-18、M0 #22/#23、CI 红线 ①b |
+| 2026-08-03 | **argcheck 评估落盘,当天翻案两次(R25 -> R26)** —— ① 先推翻人的两个前提:「硬编码 Torch7」不成立(耦合共 32 行 2 处,`env.istype` 原注释就是 `-- user configurable function`);「过时」也不准,真实病灶是 `graph.lua:13` 拿 `tostring(t):match(0x…)` 当标识符,**MSVC 的 `%p` 不带 `0x` -> 带默认值的规则集在 Windows 上必崩**(改 2 行后上游全套测试通过)。② 据性能(2597 ns/call)给出「冷路径 vendored argcheck」= **R25,当天即被自己推翻**。③ 补测「能不能表达」:argcheck 对每条规则枚举三态共 **3^N** 路径,9 个可选参数 1.37 MB / 840 ms,**10 个就 `control structure too long`** —— 而 `Conv2D` 11 个、`Adam` 12 个、`DataLoader` 16 个(3^16,**挂死**),**R25 说的「冷路径」正好就是这张表**。④ 定案 **R26:不 vendor,取 schema + `usage.lua`,自写 ~150 行 O(N) 生成器 `_args.lua`** —— 原型实测 3 参 403 ns(快 6.4 倍)、17 参 3.6 KB / <1 ms。教训写进 `decisions.md` §2.11:**找到第一个可接受的缺点会让人停止寻找第二个;「多慢」是程度问题,「能不能表达」是有无问题,应该先问有无** |
