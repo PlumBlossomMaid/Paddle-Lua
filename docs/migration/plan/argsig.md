@@ -35,8 +35,8 @@
 
 | 继承什么 | 出处 | 为什么 |
 |---|---|---|
-| **规则表 schema** `{name, type, help/doc, default, defaulta, defaultf, opt, check}` | `init.lua:82-96` | 十年验证过的字段划分,既有知识可迁移;这也是我们与 argcheck 的兼容锚点 |
-| **表级选项** `help` / `doc` / `quiet` / `debug` | `init.lua:74-80` | 同上 |
+| **规则表 schema** `{name, type, doc, default, defaulta, defaultf, opt, check}` | `init.lua:82-96` | 十年验证过的字段划分,既有知识可迁移;这也是我们与 argcheck 的兼容锚点。**只保留 `doc`,不要 `help`** —— argcheck 两个都有还要 assert「二选一」(`init.lua:80`),那是历史包袱;`doc` 更短,且写 `doc` 的规则表在 argcheck 里也能跑 |
+| **表级选项** `doc` / `noordered` / `nonamed` / `quiet` | `init.lua:74-80` | 同上。`noordered` / `nonamed` 是**解歧义的逃生舱**,见 §2.6 |
 | **`usage` 两段式渲染**:一行签名 `generateargp` + 对齐的参数表 `generateargt` | `usage.lua:9-60` | 这是 argcheck 最好的部分,报错时直接把整份 usage 打出来 |
 | **默认值三态**:`default`(常量)/ `defaulta`(取另一个参数的值)/ `defaultf`(函数求值) | `init.lua:87-88` | `defaulta` 正好对上 Paddle 里大量的 `if b is None: b = a` |
 | **生成源码 -> `loadstring` -> 注入 upvalue** 的机制 | `init.lua:105-116` | 机制本身没问题,问题在它特化了什么(`foundations.md` §4.4) |
@@ -70,56 +70,94 @@
 ## 2. API 面(最小,先冻这个)
 
 ```lua
-local sig = require "argsig"
-
--- 主形态:装饰器
-paddle.to_tensor = sig.check{
-  {name = "data",  type = {"number", "table", "paddle.Tensor", "insight.Array"},
-                   help = "input data"},
-  {name = "dtype", type = "string", opt = true},
-  {name = "place", type = "paddle.Place", defaultf = function() return paddle.get_device() end},
-  help = "Create a paddle.Tensor from data.",
-}(function(data, dtype, place)
-  -- 类型分派在这里,用 if,和 Python 一样
-  if is_tensor(data) then return data:astype(dtype) end
-  ...
-end)
-
--- argcheck 兼容形态(同一张表里带 call)
-local f = sig.check{ {name="x", type="number"}, call = function(x) ... end }
-
-sig.register_type("paddle.Tensor", function(o) return ... end)  -- 宿主注入
-sig.usage(f)   --> string,报错时自动打印的那份
-sig.source(f)  --> string,生成的 Lua 源码(排错用,对应 argcheck 的 rules.debug)
+local rule   = require "argrule.rule"        -- 主角:定义签名。一个词,天天用
+local method = require "argrule.method"      -- 同上,自动吃掉 self
+local argrule = require "argrule"            -- 管理面:注册类型、内省。少用
 ```
 
-**三种调用方式落到同一份规则表:**
+**模块分工**:热路径的 API 是两个装饰器,`require` 出来正好叫 `rule` / `method`,
+读起来就是自然语言。根模块 `argrule` 再导出一遍,外加
+`register` / `alias` / `usage` / `source` / `strict`。
+
+**规则表自己也遵守它自己的调用约定** —— `name` / `type` 可以位置写:
 
 ```lua
-f(1, "float32")                    -- 位置
-f{data = 1, dtype = "float32"}     -- 具名表
-f{1, "float32"}                    -- 表内位置(Insight7 `_wrap` 的第三种)
+{"x", "Tensor"}                    -- 等价于 {name = "x", type = "Tensor"}
+{"axis", "number", default = -1}   -- 混写:前两个位置,其余具名
+{name = "axis", type = "number"}   -- 全具名。**推荐在公开 API 里这么写**
 ```
+
+⚠️ **位置槽只到 2(`name`、`type`),再往后必须具名。**
+`{"x", "number", 1}` 里的 `1` 是 `default` 还是 `doc`?—— 不留这个问题。
+
+**推荐 vs 允许**:内部代码、原型、一次性脚本用短形式;
+**paddle-lua / Insight7 的公开 API 一律全具名** —— 那些规则表要拿来生成文档(Q-18),
+而且会被人当范例抄。这条写进 `process/conventions.md`,**不进 CI**(短形式本身没错)。
+
+### 2.1 完整签名
+
+```lua
+rule{
+  -- 规则,按位置顺序
+  {"x",    "paddle.Tensor", doc = "input"},
+  {"axis", "number", default = -1, doc = "1-based; -1 = last dim"},
+  -- 表级选项
+  doc       = "Softmax along an axis.",
+  nonamed   = false,   -- 禁用 f{...} 的两种表形式(见 §2.6)
+  noordered = false,   -- 禁用 f(a, b) 位置形式
+  quiet     = false,   -- 不抛错,返回 nil, err
+}(fn)                  -- fn 可以是任何函数,包括直接来自 C 侧的
+```
+
+| 规则字段 | 含义 |
+|---|---|
+| `name`(位置 1) | 参数名。具名调用的键,usage 里的显示名 |
+| `type`(位置 2) | **可调用契约**:字符串(查注册表)/ 数组(联合)/ 谓词函数 / 任何 callable 类型对象 |
+| `doc` | 一行说明。进 usage,也进将来生成的 API 文档 |
+| `default` | 常量默认值 |
+| `defaulta` | 取另一个参数的值(直译 `if b is None: b = a`) |
+| `defaultf` | 函数,每次调用求值 |
+| `opt` | 可省且**没有**默认值(省了就是 `nil`) |
+| `check` | 额外的取值校验(范围、枚举),类型之外的那一层 |
+
+**`name` 和 `type` 都可以省**:`{"x"}` = 只要有这个位置,不管类型;
+`{name = "opts", opt = true}` = 什么都收。但**公开 API 不要这么写**。
+
+### 2.2 类型短名与注册表冲突
+
+`{"x", "Tensor"}` 里的 `"Tensor"` 是**宿主注册进来的**,库自己不认识任何框架类型:
+
+```lua
+argrule.register("paddle.Tensor", function(o) return paddle.is_tensor(o) end)  -- 全名,规范
+argrule.alias("Tensor", "paddle.Tensor")                                       -- 短名,给人用
+```
+
+⚠️ **短名会撞** —— 一个进程里 paddle 和 Insight7 同时在。规则:
+**全名是规范,短名是 alias,重复注册同一个短名直接报错**(不是后者覆盖前者)。
+生态内先分好:`Tensor` / `Place` / `DType` 归 paddle,`Array` 归 Insight7。
 
 ---
 
 ## 2.5 用户端长什么样(按候选名 `argrule` 写,定名后全局替换)
 
-> 模块**本身可调用**,`argrule{...}` 吃一张规则表、返回一个装饰器。
+> `rule{...}` 吃一张规则表、返回一个装饰器,装饰器吃**任何**函数 ——
+> 包括直接来自 C 侧的 `_C_ops.softmax`,不需要包一层 lambda。
 > 这个形状是从 argcheck 继承的(它那张表在源码里就叫 `rules`),名字正好把 schema 写在了外面。
 
 ### ① 最简:一份规则表,三种调用方式
 
 ```lua
-local argrule = require "argrule"
+local rule = require "argrule.rule"
 
-paddle.nn.functional.softmax = argrule{
-  {name = "x",    type = "paddle.Tensor", help = "input"},
-  {name = "axis", type = "number", default = -1, help = "1-based; -1 = last dim"},
-  help = "Softmax along an axis.",
-}(function(x, axis)
-  return paddle._ops.softmax(x, axis)
-end)
+-- 短形式:原型和内部代码这么写
+softmax = rule{ {"x", "Tensor"}, {"axis", "number"}, doc = "blah blah" }(_C_ops.softmax)
+
+-- 全具名:公开 API 这么写
+paddle.nn.functional.softmax = rule{
+  {name = "x",    type = "paddle.Tensor", doc = "input"},
+  {name = "axis", type = "number", default = -1, doc = "1-based; -1 = last dim"},
+  doc = "Softmax along an axis.",
+}(_C_ops.softmax)
 
 softmax(t)                    -- 位置
 softmax(t, 2)
@@ -142,7 +180,7 @@ usage: softmax(
 ### ② 默认值三态:常量 / 取另一个参数 / 惰性求值
 
 ```lua
-paddle.nn.functional.conv2d = argrule{
+paddle.nn.functional.conv2d = rule{
   {name = "x",        type = "paddle.Tensor"},
   {name = "weight",   type = "paddle.Tensor"},
   {name = "bias",     type = "paddle.Tensor", opt = true},        -- 可空,且没有默认值
@@ -159,12 +197,12 @@ end)
 
 `opt` 与 `default` 的区别是**有没有值**,不是"能不能省" —— 两者都能省。
 
-### ③ 类构造函数:`argrule.method` 自动吃掉 `self`
+### ③ 类构造函数:`method` 自动吃掉 `self`
 
 ```lua
 local Conv2D = paddle.nn.Layer:subclass "Conv2D"
 
-Conv2D.__init = argrule.method{
+Conv2D.__init = method{
   {name = "in_channels",  type = "number"},
   {name = "out_channels", type = "number"},
   {name = "kernel_size",  type = {"number", "table"}},
@@ -176,7 +214,7 @@ Conv2D.__init = argrule.method{
   {name = "weight_attr",  type = "table", opt = true},
   {name = "bias_attr",    type = {"table", "boolean"}, opt = true},
   {name = "data_format",  type = "string", default = "NCHW"},
-  help = "2D convolution layer.",
+  doc = "2D convolution layer.",
 }(function(self, in_channels, out_channels, kernel_size, stride, padding, ...)
   self.weight = self:create_parameter{...}
 end)
@@ -184,13 +222,13 @@ end)
 local m = Conv2D{ in_channels = 3, out_channels = 64, kernel_size = 3, padding = "same" }
 ```
 
-**11 个参数、9 个可选 —— 这正是 argcheck 编不出来的那张表**(3^11 = 177147 条路径,
+**11 个参数、8 个可选 —— 这正是 argcheck 编不出来的那张表**(3^11 = 177147 条路径,
 `foundations.md` §4.5)。这里是 11 行 `if`,生成的源码约 1.6 KB。
 
 ### ④ 类型分派在函数体里,用 `if`,和 Python 一样
 
 ```lua
-paddle.to_tensor = argrule{
+paddle.to_tensor = rule{
   {name = "data", type = {"number", "boolean", "table",
                           "paddle.Tensor", "insight.Array"}},   -- 联合类型
   {name = "dtype", type = "string", opt = true},
@@ -224,7 +262,7 @@ argrule.register("insight.Array", function(o) return insight.is_array(o) end)
 ```lua
 local ts = require("tableshape").types
 
-paddle.optimizer.Adam = argrule.method{
+paddle.optimizer.Adam = method{
   {name = "learning_rate", type = {"number", "paddle.lr.LRScheduler"}, default = 0.001},
   {name = "betas", type = ts.array_of(ts.number):length(2), default = {0.9, 0.999}},
 }(function(self, lr, betas) ... end)
@@ -240,6 +278,36 @@ print(argrule.usage(softmax))    -- 那份 usage 文本
 print(argrule.source(softmax))   -- 生成的 Lua 源码,排错用(对应 argcheck 的 rules.debug)
 argrule.strict(false)            -- 全局关校验(只对此后定义的函数生效)
 ```
+
+### ⑧ ⚠️ 第一个参数就是 table 的时候:必须写 `nonamed = true`
+
+这是这套调用约定**唯一**的真歧义,而且踩中的正好是最常用的那批函数:
+
+```lua
+paddle.zeros{2, 3}      -- 是 shape = {2,3}?还是「表内位置」调用 shape=2, dtype=3?
+```
+
+**解法是逃生舱,不是启发式** —— `noordered` / `nonamed` 从 argcheck 继承(`init.lua:53-57`):
+
+```lua
+paddle.zeros = rule{
+  {name = "shape", type = "table"},
+  {name = "dtype", type = "string", default = "float32"},
+  nonamed = true,             -- 禁掉 f{...} 的两种表形式
+  doc = "Return a tensor filled with 0.",
+}(_C_ops.full)
+
+paddle.zeros{2, 3}            -- 现在无歧义:一个 table 实参
+paddle.zeros({2, 3}, "int64")
+```
+
+**判据机械可查,进 CI**:
+
+```
+规则 #1 的 type 允许 "table",且没写 nonamed  ->  失败
+```
+
+不靠「猜哪种意图更可能」—— 猜错的那次是**静默的错误结果**,不是报错。
 
 ---
 

@@ -135,6 +135,8 @@ lua tools/ci/args_codegen_size.lua                              -> 30 个可选�
 lua tools/ci/args_codegen_43.lua                                -> 用 Paddle 真实最大签名
                                                                    (43 参数 / 33 可选,resnet_block.py:434)
                                                                    编不出来即失败(upvalue/寄存器墙)
+lua tools/ci/args_nonamed.lua                                   -> 规则 #1 的 type 允许 table
+                                                                   却没写 nonamed 即失败(argsig.md §2.6)
 
 # ② 5.1 语法子集(C3)
 grep -rnE "goto |::[a-z]+::|[^/]//[^/]|<close>|<const>"  lua/   -> 失败
