@@ -112,10 +112,10 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `plan/overview.md` | 915 | ✅ |
 | `plan/roadmap.md` | 344 | ✅ |
 | `plan/foundations.md` | 1105 | ✅ **+参数检查(§4)+ 基座边界与解析器项目(§5)** |
-| `plan/argrule.md` | 645 | ✅ **新增**(孵化说明书,建仓后迁走;原 `argsig.md`)|
+| `plan/argrule.md` | 666 | ✅ **新增**(孵化说明书,建仓后迁走;原 `argsig.md`)|
 | `plan/layout.md` | 261 | ✅ **新增** |
 | `plan/ci.md` | 246 | ✅ **新增** |
-| `plan/api/README.md` | 201 | ✅ **新增** |
+| `plan/api/README.md` | 202 | ✅ **新增** |
 | `plan/api/io.md` | 236 | ✅ **新增**(样板)|
 | `plan/api/<其余 15 个模块>` | — | ⬜ 各模块开工时写 |
 | `plan/modules/README.md` | 70 | ✅ |
