@@ -75,8 +75,10 @@
 | D26 | **Insight7 顶替 numpy 的位置**,一等公民、软强制依赖 | `plan/foundations.md` §3 |
 | D27 | **`nn.LayerList` 继承 `Layer`**(Layer 优先)。`is_a(nn.Layer)` 必须为真;因此 `ipairs(ml)` 在 5.1 上跑空,**一律用 `ml:iter()` / `ml:len()`** | `plan/foundations.md` §2.4 |
 | D28 | **「不引入新的强制 C 依赖」已取消。** 判据改为**边际成本**:先看我们自己的 `.so` 能不能顺手做,做不了就引入 | 本文件 §9.1 |
+| D31 | **参数解析器是独立项目**,paddle-lua 与 Insight7 共用。纯 Lua、零框架硬编码、基于 Penlight、schema 与 argcheck 兼容。**必须先于 P5 可用,但不依赖 G0**(可与 M0 并行)。名字与 Penlight 分发方式待拍板(P9/P10) | `plan/foundations.md` §5.4 |
+| D32 | **类型判定层不自己写。** `type` 槽是**可调用契约**(字符串查注册表 / 数组=联合 / 任意谓词 / `tableshape` 类型对象直接可用)。我们只拥有「调用约定层」(位置↔具名 + 默认值 + usage,~200 行,**普查确认没人写过**) | `plan/foundations.md` §5.4.5 |
+| D33 | **生成器的 upvalue 数必须与参数个数无关**(单表 upvalue)。Lua 5.1 只有 60 个 upvalue,而 Paddle 最大签名 43 参数 —— argcheck 那套「一规则一 upvalue」即使没有 3^N 也编不出来 | `plan/foundations.md` §5.4.6 |
 | D29 | **Insight7 的 `axis` 按 bug 修成 1-based**(成员索引与维度索引都要 1-based)。顺手做,P12 之前完成 | `plan/foundations.md` §3.4 |
-| D31 | **参数解析器是独立项目**,paddle-lua 与 Insight7 共用。零依赖、纯 Lua、schema 与 argcheck 兼容。**它必须先于 P5 可用,但不依赖 G0**(纯 Lua,可与 M0 并行) | `plan/foundations.md` §5.4 |
 | D30 | **参数检查:取 argcheck 的形,不取它的实。** 规则表 schema + `usage.lua` 照搬,求解器自写 `_args.lua`(~150 行,O(N))。**不 vendor argcheck 本体** —— 它 3^N 枚举,编不出 `Conv2D`(11 可选)/`DataLoader`(16 可选) | `plan/foundations.md` §4.5 |
 
 ---
@@ -403,6 +405,8 @@ csrc/sol/gen_*.cpp      ← 生成,禁止手改
 | 保留 `_wrap.lua` 作为兜底 | 那是第二套参数处理,违反 C11。降级路径归解析器自己管 |
 | 直接依赖 `argcheck` 这个 rock | D30。它编不出 `Conv2D` / `DataLoader` 的签名(`plan/foundations.md` §4.5) |
 | 在参数检查里枚举「哪些参数被省略」的组合 | 那是 3^N。9 个可选参数 = 1.37 MB 生成代码,10 个直接编不出来 |
+| 生成一条规则一个 upvalue | D33。Lua 5.1 上限 60 个,Paddle 最大签名 43 参数,撞墙 |
+| 自己写一套类型判定 / 结构校验 | D32。`tableshape` 已经很好,而且它的类型对象本身可调用,塞进 `type` 槽就能用 |
 | 支持「位置参数中间省略、靠类型猜」 | Python 不允许这么写,而支持它要付上一行的代价。跳过参数就用具名表 |
 | 手写算子绑定"就这一个特例" | C8。特例会繁殖 |
 | 移植 `paddle.Model` / `paddle.metric.*` | D10 |

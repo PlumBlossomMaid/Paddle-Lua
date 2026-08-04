@@ -817,18 +817,58 @@ Insight7 的 dtype 常量和 Place 构造器已经是 Paddle 命名(§3.2),
 `x["1:3, :"]` 那个字符串索引的解析**不在这里**(它属于 paddle-lua 的 `slice.lua`,
 因为语义是张量的,不是通用的)。
 
-#### 5.4.2 零依赖是硬约束
+#### 5.4.2 依赖策略(2026-08-03 人的两条追加约束)
 
-它要给两个(将来更多)库当基座,**所以它自己不能有基座**:
+> 「新时代 argcheck **不能有任何的别的框架哪怕是 insight 和 paddle 的硬编码**,
+> 最好是**纯 lua**,**支持扩展类型**什么的,最好是**基于 penlight** 的。
+> 然后也**不能叫 argcheck 了**,名字不能在 luarocks 上面装了(= 名字不能已被占用)。
+> **一定要考虑大量参数如 50 个函数参数、类构造函数参数的情况。**」
+>
+> 「其实**最好别轻易造轮子**,如果有优秀的类似于 argcheck 的现代库也是可以接受的,
+> 而且**别太难用**,比如那种**要颠覆我们的语法**的,我们肯定也不会用。」
 
-- **不依赖 Penlight** —— 尽管 paddle-lua 依赖。一个通用 Lua rock 每多一个依赖,
-  就少一批愿意用它的人
-- **不依赖 Insight7 / paddle** —— 自定义类型识别**全部走注册接口**:
-  ```lua
-  args.register_type("paddle.Tensor", function(o) return ... end)
-  ```
-  这正是 argcheck `env.istype` 那个形状(§4.2),它的设计对,我们照抄
-- **纯 Lua**,5.1 语法子集,5.1/5.2/5.3/5.4/LuaJIT 全覆盖
+| 约束 | 落地 | 展开在 |
+|---|---|---|
+| 零框架硬编码 | 自定义类型**全部走注册接口**,库里搜不到 `paddle` / `insight` 字样 | 下面 |
+| 纯 Lua | 5.1 语法子集,5.1/5.2/5.3/5.4/LuaJIT 全覆盖;**不引入 C 模块** | 下面 |
+| 基于 Penlight | ⚠️ 与 §1.3「vendor 不走 rock 依赖」冲突,**新增待拍板 P9** | 下面 |
+| 别轻易造轮子 | 先做普查,再决定写多少 | **§5.4.5** |
+| 50 个参数 | Lua 自身有三道墙,其中一道 argcheck 也撞 | **§5.4.6** |
+| 换个名字 | luarocks 可用性实测 | **§5.4.7** |
+
+**零框架硬编码怎么做到:**
+
+```lua
+args.register_type("paddle.Tensor",  function(o) return ... end)
+args.register_type("insight.Array",  function(o) return ... end)
+```
+
+这正是 argcheck `env.istype` 那个形状(§4.2),它的设计对,我们照抄。
+库自己只认:Lua 基本类型、`pl.class` 的 `is_a`、以及注册进来的东西。
+
+**「基于 Penlight」值得做,因为它正好覆盖这个库最脆的地方:**
+
+| 用到 | 干什么 | 省掉的坑 |
+|---|---|---|
+| `pl.compat` | `load` / `loadstring` / `setfenv` / `unpack` 的跨版本差异 | 这库的命脉就是 `loadstring`(M0 #23) |
+| `pl.pretty.write` | usage 文本里渲染默认值(表、函数) | argcheck `usage.lua` 里那段自写序列化 |
+| `pl.utils.pack/unpack` | 带 `nil` 的变长实参 | `select('#', ...)` 的一堆边界 |
+| `pl.class` 的 `is_a` | 识别 Penlight 类实例 | 生态里的类**本来就是** `pl.class`(D25) |
+
+⚠️ **但它带来一个必须先解决的冲突,记为待拍板 P9:**
+Penlight 的 rockspec 声明 `dependencies = {"lua >= 5.1", "luafilesystem"}`
+(已核实,`penlight-dev-1.rockspec:31-34`)。而 §1.3 决定 paddle-lua **vendor**
+Penlight 正是为了避开 `lfs`。若解析器声明 `penlight` 依赖而 paddle-lua 继续 vendor,
+**生态里就有两份 Penlight —— 正好违反 C11。** 三个出路:
+
+| | 方案 | 代价 |
+|---|---|---|
+| **A(建议)** | 解析器声明 `penlight` 依赖;**paddle-lua 也改成声明依赖,不再 vendor** | 多一个 `lfs`(C 模块)。但 R23/D28 已取消「不引入 C 依赖」禁令,且 `lfs` 是 luarocks 上可移植性最好的 rock 之一 |
+| B | 解析器只**兼容** Penlight:有就用,没有就走自带的 20 行兜底 | 运行时分支 = 两条路径都要测,且违反「基座只有一套」的精神 |
+| C | 解析器依赖 rock,paddle-lua 继续 vendor | ❌ 两份 Penlight,违反 C11 |
+
+**在 P9 拍板前,按 A 写。** 理由:vendor 的三条理由(§1.3)里有两条是冲着 `lfs` 去的,
+而那两条成立的前提(禁 C 依赖)已经在 R23 被人自己取消了。
 
 #### 5.4.3 两个消费者带来的三个新问题
 
@@ -857,6 +897,113 @@ Insight7 的 dtype 常量和 Place 构造器已经是 Paddle 命名(§3.2),
 
 ⚠️ **`_wrap.lua` 从 `layout.md` 的 P5 清单里删掉** ——
 留着它就是第二套参数处理,正好违反 C11。
+
+#### 5.4.5 ★ 先普查再动手:现成的轮子有,但**不是这个形状的轮子**
+
+「别轻易造轮子」是对的,所以先把 luarocks 上的候选全过了一遍
+(2026-08-03 实测,`luarocks.org/search`):
+
+| 库 | 许可 / 依赖 | 位置调用 | **具名表调用** | **默认值** | **usage 渲染** | 自定义类型 | 50 参数 | 语法侵入 |
+|---|---|---|---|---|---|---|---|---|
+| **Torch `argcheck`** `b3b32c0` (2016) | BSD-3 / 无 | ✅ | ✅ | ✅ | ✅ | ✅ `env.istype` | ❌ **10 个就编不出**(3^N,§4.5) | 低 |
+| **`tableshape`** (leafo) | MIT / **仅 `lua>=5.1`** | ❌ | ✅ | ⚠️ 靠 transform | ❌ | ✅ 类型对象**本身可调用** | ✅(自带 `tableshape.codegen`) | 中(`+`/`*` 操作符 DSL,可不用) |
+| **`typecheck`** (gvvaughan) | MIT / `std._debug` | ✅ | ❌ | ❌ | ❌ 只有错误消息 | ⚠️ | ✅ | 中(`argscheck "f (int, ?table) => int" .. function ...`) |
+| **`checks`** (fab13n) | MIT / **C 模块** | ✅ | ❌ | ❌ | ❌ | ✅ 全局 `checkers` 表 | ✅ | 低 |
+| **`ltypekit`** (daelvn) | / Moonscript 味 | ✅ | ❌ | ❌ | ❌ | ✅ | — | ❌ **`number -> number` 柯里化签名 = 颠覆语法** |
+| `geoffleyland/argcheck` | MIT | ✅ | ❌ | ❌ | ❌ | ❌ | — | ❌ 规格写在**注释**里,且要 `lua -largcheck` 预加载;作者自称 proof of concept |
+| `lua-livr` / `valua` / `lua-schema-validation` | — | — | — | — | — | — | — | 面向 **web 表单/数据输入**,不是函数签名,不在同一问题域 |
+
+**结论:没有任何一个提供「同一份签名同时吃位置调用和具名表调用 + 默认值 + usage」。**
+这不是巧合 —— 那四件事凑在一起是 **Python kwargs 的形状**,
+而这些库是给 Lua 自己的 API 写的,Lua 自己没有 kwargs。
+我们要移植的恰恰是一套 kwargs API(`Conv2D(in_channels=3, ...)`),
+所以缺的那块必须自己写。**它大约 200 行,而且没人写过。**
+
+**但「类型判定」这块有轮子,不要自己写。** 做法是**把 `type` 槽定义成可调用契约**:
+
+```lua
+{name="x", type="paddle.Tensor"}                    -- 字符串 -> 查注册表(同 checks 的 checkers)
+{name="x", type={"number","table"}}                 -- 数组 -> 联合类型
+{name="x", type=function(o) return ... end}         -- 任意谓词
+{name="x", type=ts.array_of(ts.number)}             -- ★ tableshape 的类型对象**本身就是 callable**,直接塞进来就能用
+```
+
+于是 `tableshape` 是**可选增强**而不是依赖:要复杂结构校验的人自己
+`luarocks install tableshape`,我们一行代码都不用为它写。
+`checks` / `typecheck` 的谓词同理(包一层 `function(o) ... end`)。
+
+> **判据(§5.2 的同一把尺子):** 借来的是**功能**(类型判定),自己拥有的是**形状适配器**(调用约定)。
+> 这与「基座要尽可能不是我们的」(§5.3)一致 —— 我们只拥有那块必须由我们拥有的。
+
+#### 5.4.6 ★ 50 个参数:Lua 自身有三道墙,argcheck 撞了两道
+
+先确认这不是假想需求。Paddle Python API 的实测分布(`ast` 扫 `python/paddle/**`):
+
+| | 函数 | 参数总数 / 其中可选 |
+|---|---|---|
+| 最大 | `ResNetBasicBlock.__init__` `python/paddle/incubate/xpu/resnet_block.py:434` | **43 / 33** |
+| 次大 | `block_multihead_attention_xpu` `.../block_multihead_attention.py:430` | 38 / 25 |
+| | `fused_multi_transformer` `.../fused_transformer.py:1057` | 34 / 21 |
+| 分布 | ≥30 参数 **9 个**;≥20 参数 **18 个**;≥12 参数 **156 个** | |
+
+**所以「50 个参数」是对的量级,而 argcheck 在 10 个可选参数就编不出来了(§4.5)。**
+3^33 这个数字不需要评论。
+
+**Lua 5.1 自身的三道墙(本机实测,`lua5.1.exe`):**
+
+| 墙 | 上限 | 撞上时的报错 |
+|---|---|---|
+| 一个函数的 upvalue 数 | **60** | `function at line N has more than 60 upvalues` |
+| 一个函数的局部变量数 | **200** | `has more than 200 local variables` |
+| 寄存器 / 表达式复杂度 | **N=122**(见下表) | `function or expression too complex` |
+
+**第一道墙 argcheck 也撞:** 它是**每条规则若干个 upvalue**
+(`init.lua:22` 收集 `upvalues` 表,`init.lua:115-116` 逐个 `setupvalue`)。
+43 个参数 ×(类型谓词 + 默认值)≈ 86 个 upvalue > 60,**即使没有 3^N 也编不出来**。
+
+**由此定死三条生成规则:**
+
+1. **所有 per-rule 数据放进一个表 upvalue** —— 生成函数的 upvalue 数是**常数 2**(`R`, `err`),与 N 无关。代价是每次检查多一次 `R[i]` 表索引
+2. **每条规则最多一个局部变量**(`a1..aN`),不生成临时局部
+3. **N > 100 切换到「表形态」**:实参存进一个表 `a[i]`,不再一规则一局部 —— 实测 **N=1000 仍能编译**(139 KB)
+
+**原型实测(Lua 5.1,上述规则 1+2 的形态):**
+
+| N | 生成字节数 | 编译耗时 | 每次调用 |
+|---|---|---|---|
+| 3 | 609 B | <1 ms | **350 ns** |
+| 17 | 2 587 B | <1 ms | 1.5 µs |
+| **50** | **7 405 B** | **~1 ms** | **3.75 µs** |
+| 80 | 11 785 B | <1 ms | 5.85 µs |
+| 120 | 17 856 B | ~1 ms | 8.75 µs |
+| **123** | — | ❌ `function or expression too complex` | — |
+| 表形态 50 / 150 / 300 / 1000 | 6.7 KB / 20 KB / 41 KB / 139 KB | 全部通过 | (未测) |
+
+调用耗时含测试循环里 `unpack(args)` 的开销,增量约 **73 ns/参数,线性**。
+对照:argcheck 3 个参数 2597 ns,9 个可选参数生成 1.37 MB / 耗时 840 ms(§4.5-4.6)。
+
+> ⚠️ **这三道墙要写进 CI**(`plan/ci.md` 红线①b 已有生成体积回归,再加一条):
+> 用 43 参数(Paddle 的真实最大签名)做基准,**编不出来即失败**。
+
+#### 5.4.7 名字:不能叫 argcheck,且 luarocks 上不能已被占用
+
+`luarocks.org/search` 实测(2026-08-03,子串匹配):
+
+| 候选 | 结果 |
+|---|---|
+| `argcheck` | ❌ **已被占用**(`geoffleyland/argcheck`;Torch 的那个另算) |
+| `signature` / `atrium` / `portico` / `usher` | ❌ 有同名或近名 rock |
+| **`argsig`** | ✅ **空的** |
+| `callsig` / `sigcheck` / `arglet` / `argrule` | ✅ 空的 |
+| `signet` / `concierge` / `warden` / `clerk` / `lintel` / `sieve` | ✅ 空的 |
+
+**建议 `argsig`**(argument signature):
+- 说清了它是什么 —— **签名**层,不是"校验器"也不是"解析器"(§5.4.1 提过后者有歧义)
+- 与 argcheck 的知识可迁移关系一眼可见,又不冒名
+- 短,`local args = require "argsig"` 读起来正常
+- 不含任何框架名(C11 / 零硬编码)
+
+⬜ **最终定名由人拍板;定名当天在 luarocks 上占位,避免被抢。**
 
 ---
 

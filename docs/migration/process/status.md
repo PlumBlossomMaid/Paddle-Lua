@@ -28,7 +28,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 工程树位置 | `WORKPLAN.md` 节点 **0.14**(参数检查选型 argcheck)-> 下一个 **0.15 L0 CI 落地** |
 | 下一个动作 | **0.15** L0 CI(不需要 libpaddle,现在就能建,见 `plan/ci.md` §2),之后才是 **1.1 无 Python 构建**。**并行**:M0 #22/#23(argcheck 的 Q-17,纯 Lua,不阻塞于 G0,但必须在 P5 前闭掉) |
 | 全部 ⛔ 阻塞节点 | `WORKPLAN.md` 4.3 distributed —— 无多卡环境(待拍板 P2) |
-| 待人拍板 | ~~P1(Insight7 `axis`)~~ ✅ **2026-08-03 已拍板:改**(R24)。剩余待拍板:P3 / P4 / P6 / P7 —— 见 `process/decisions.md` §3 §4 |
+| 待人拍板 | ~~P1(Insight7 `axis`)~~ ✅ **2026-08-03 已拍板:改**(R24)。剩余待拍板:P3 / P4 / P6 / P7 / **P9(解析器还 vendor Penlight 吗)** / **P10(解析器叫什么)** —— 见 `process/decisions.md` §3 §4 |
 | 上次卡在哪 | — |
 
 ---
@@ -80,8 +80,9 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 21 | luacheck parser 独立跑 5.1(服务 M4) | ⬜ 可跳过 |
 | 22 | **LuaJIT 上 `debug.setupvalue` 注入 upvalue 是否可用**(`_args` 的命脉,Q-17) | ⬜ **纯 Lua,不依赖 libpaddle,现在就能做** |
 | 23 | **`loadstring`/`load` 在 5 个 Lua × 3 OS 上行为一致**(chunkname 与错误行号) | ⬜ 同上,现在就能做 |
+| 24 | **三道墙的实测值在 5 个 Lua 上各是多少**(upvalue 上限 / 局部变量上限 / 寄存器上限)。5.1 已测 = 60 / 200 / N=122 | ⬜ 同上。基准用 Paddle 最大签名 43 参数(`foundations.md` §5.4.6) |
 
-**必做 19 项(#20/#21 可跳过),预估 3 周。**
+**必做 20 项(#20/#21 可跳过),预估 3 周。**
 
 > **#22/#23 不阻塞于 G0** —— 它们是纯 Lua 验证,`WITH_PYTHON=OFF` 编不编得出来与它们无关。
 > 挂了的后果是明确的:`_args` 走**解释式降级路径**(`plan/foundations.md` §4.7)。
@@ -97,8 +98,8 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 
 | 文档 | 行数 | 状态 |
 |---|---|---|
-| **`WORKPLAN.md`(总工程树)** | 200 | ✅ **新增** |
-| `/CLAUDE.md` | 432 | ✅ |
+| **`WORKPLAN.md`(总工程树)** | 248 | ✅ **新增** |
+| `/CLAUDE.md` | 481 | ✅ |
 | `/README.md`(英文,默认) | 192 | ✅ |
 | `/README.zh-CN.md` | 186 | ✅ |
 | `/README.zh-TW.md` | 186 | ✅ |
@@ -110,9 +111,9 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 |---|---|---|
 | `plan/overview.md` | 915 | ✅ |
 | `plan/roadmap.md` | 344 | ✅ |
-| `plan/foundations.md` | 745 | ✅ **+参数检查(§4)** |
+| `plan/foundations.md` | 1082 | ✅ **+参数检查(§4)+ 基座边界与解析器项目(§5)** |
 | `plan/layout.md` | 261 | ✅ **新增** |
-| `plan/ci.md` | 208 | ✅ **新增** |
+| `plan/ci.md` | 232 | ✅ **新增** |
 | `plan/api/README.md` | 139 | ✅ **新增** |
 | `plan/api/io.md` | 236 | ✅ **新增**(样板)|
 | `plan/api/<其余 15 个模块>` | — | ⬜ 各模块开工时写 |
@@ -144,7 +145,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `process/status.md` | 本文件 | ✅ |
 | `process/tasks.md` | 137 | ✅ |
 | `process/conventions.md` | 280 | ✅ |
-| `process/decisions.md` | 232 | ✅ |
+| `process/decisions.md` | 240 | ✅ |
 | `process/open-questions.md` | 160 | ✅ |
 
 ### 5.4 `research/`
@@ -209,3 +210,4 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 2026-08-03 | 人的三条决定落盘:**① `nn.LayerList` 改为继承 `Layer`**(R22,Layer 优先;连带发现 5.1 的 `ipairs` 用 `lua_rawgeti`,`ipairs(ml)` 会静默跑空 -> 改用 `ml:iter()`,新增 Q-16);**② 「不引入新的强制 C 依赖」禁令取消**(R23,判据改为边际成本,`CLAUDE.md` §9.1;解禁 HTTP 下载与图像解码,Q-08 风险下降);**③ Insight7 的 `axis` 按 bug 修成 1-based**(R24,成员索引与维度索引都要 1-based,顺手做、P12 前完成;待拍板 P1 关闭、Q-12 转已决)。新增 D27–D29 |
 | 2026-08-03 | **新增 `plan/foundations.md`(生态基座)**:Penlight 定为一等公民(R19/R21),Insight7 顶替 numpy 的位置(R20)。新增硬约束 C11、决策 D23–D26、未解问题 Q-12–Q-15;`conventions.md` 章节重编号(§2 生态基座、§3 与 Python 的已知差异) |
 | 2026-08-03 | **argcheck 评估落盘,当天翻案两次(R25 -> R26)** —— ① 先推翻人的两个前提:「硬编码 Torch7」不成立(耦合共 32 行 2 处,`env.istype` 原注释就是 `-- user configurable function`);「过时」也不准,真实病灶是 `graph.lua:13` 拿 `tostring(t):match(0x…)` 当标识符,**MSVC 的 `%p` 不带 `0x` -> 带默认值的规则集在 Windows 上必崩**(改 2 行后上游全套测试通过)。② 据性能(2597 ns/call)给出「冷路径 vendored argcheck」= **R25,当天即被自己推翻**。③ 补测「能不能表达」:argcheck 对每条规则枚举三态共 **3^N** 路径,9 个可选参数 1.37 MB / 840 ms,**10 个就 `control structure too long`** —— 而 `Conv2D` 11 个、`Adam` 12 个、`DataLoader` 16 个(3^16,**挂死**),**R25 说的「冷路径」正好就是这张表**。④ 定案 **R26:不 vendor,取 schema + `usage.lua`,自写 ~150 行 O(N) 生成器 `_args.lua`** —— 原型实测 3 参 403 ns(快 6.4 倍)、17 参 3.6 KB / <1 ms。教训写进 `decisions.md` §2.11:**找到第一个可接受的缺点会让人停止寻找第二个;「多慢」是程度问题,「能不能表达」是有无问题,应该先问有无** |
+| 2026-08-03 | **参数解析器独立成项目(R27/D31),并按人的两条追加约束定型** —— ① **不轻易造轮子**:普查了 luarocks 全部候选(`tableshape` / `typecheck` / `checks` / `ltypekit` / `geoffleyland/argcheck`),**没有一个提供「同一份签名同时吃位置调用与具名表调用 + 默认值 + usage」** —— 因为那是 **Python kwargs 的形状**,而 Lua 自己没有 kwargs。所以只自写「调用约定层」(~200 行),**类型判定层借现成的**:`type` 槽定为可调用契约,`tableshape` 的类型对象本身就是 callable,塞进去就能用(R28/D32)。② **50 个参数**不是假想需求:Paddle 真实最大签名 `ResNetBasicBlock.__init__` **43 参数 / 33 可选**(`resnet_block.py:434`),≥12 参数的有 156 个。实测 Lua 5.1 三道墙 = **60 upvalue / 200 局部变量 / N=122 寄存器**,而 argcheck 是**一规则若干 upvalue** -> 43 参数 ≈ 86 个 upvalue,**即使没有 3^N 也编不出 Paddle 最大的签名**(R29/D33)。改成单表 upvalue 后实测 50 参数 7.4 KB / ~1 ms / 3.75 µs,N>100 走表形态(1000 参数仍可编译)。③ 名字不能叫 `argcheck`(已被 `geoffleyland/argcheck` 占用),建议 `argsig`(待拍板 P10);④ 「基于 Penlight」与 §1.3 的 vendor 决定冲突(Penlight rockspec 依赖 `lfs`),**新增待拍板 P9**,拍板前按「两边都改声明依赖」写。CI 红线 ①b 从 2 条扩到 4 条,新增 43 参数基准 |

@@ -38,6 +38,8 @@
 | ~~R25~~ | ~~分层:冷路径 vendored `argcheck`,热路径 `_wrap`~~ | **本条已被 R26 推翻,当天** | 当时只测了性能(2597 ns/call),**没测「能不能表达」**。见 R26 | — |
 | R26 | (R25 的结论)冷路径 vendored `argcheck` | **不 vendor argcheck。取它的规则表 schema + `usage.lua`,自写 ~150 行 O(N) 生成器 `_args.lua`** | argcheck 对每条规则枚举「给了/没给/显式 nil」三态,共 **3^N** 条路径。实测 9 个可选参数即 1.37 MB 生成代码 / 840 ms,**10 个就 `control structure too long` 编不出来**。而 `Conv2D` 11 个可选、`Adam` 12 个、`DataLoader` 16 个(3^16 = 4300 万,**直接挂死**)—— **R25 说的「冷路径」就是这张表,那条建议在它自己举的每个例子上都不成立**。更讽刺的是这个指数是为「位置参数中间省略、靠类型猜」付的,**而 Python 根本不允许这么写**。去掉枚举后同样的机制:代码量 O(N),3 参数 403 ns(快 6 倍),17 参数 3.6 KB / < 1 ms | `plan/foundations.md` §4.5 §4.6 |
 | R27 | 参数解析器是 paddle-lua 的内部文件 `lua/paddle/_args.lua` | **独立项目 / 独立 rock,paddle-lua 与 Insight7 共用** | (人的决定)基座的作用域**本来就该是跨仓库的** —— 否则用户在同一脚本里面对两套规则表方言和两种报错格式,而 Insight7 的 dtype 常量与 Place 构造器已经是 Paddle 命名,接口层对齐是这个生态的既定做法。连带:**`_wrap.lua` 从 P5 清单删除**(留着就是第二套参数处理,违反 C11);降级路径归解析器自己管 | `plan/foundations.md` §5.4 |
+| R28 | (R26 的落地形态)自写 `_args.lua`,零依赖 | **先普查再写:类型判定层借现成的,只自写「调用约定层」(~200 行);库基于 Penlight** | (人的追加约束)「最好别轻易造轮子,如果有优秀的类似于 argcheck 的现代库也是可以接受的」。普查了 luarocks 上全部候选:`tableshape`(MIT,零依赖,类型对象**本身可调用**)、`typecheck`(MIT,argcheck 式,但只有位置参数)、`checks`(**C 模块**)、`ltypekit`(`number -> number` 柯里化签名,颠覆语法)。**没有一个提供「同一份签名同时吃位置调用与具名表调用 + 默认值 + usage」** —— 因为那是 **Python kwargs 的形状**,而 Lua 自己没有 kwargs。所以:缺的那 ~200 行自己写;**类型判定不自己写** —— `type` 槽定义成可调用契约,`tableshape` 的类型对象直接塞进去就能用,它是可选增强不是依赖 | `plan/foundations.md` §5.4.5 |
+| R29 | 生成器「一条规则一个 upvalue」(argcheck 的做法) | **所有 per-rule 数据放进一个表 upvalue,生成函数的 upvalue 数恒为 2** | Lua 5.1 实测三道墙:**60 个 upvalue** / 200 个局部变量 / **N=122 时 `function or expression too complex`**。Paddle 的真实最大签名是 `ResNetBasicBlock.__init__` **43 参数(33 可选)**(`python/paddle/incubate/xpu/resnet_block.py:434`),≥30 参数的有 9 个、≥12 参数的有 156 个。43 ×(谓词 + 默认值)≈ 86 个 upvalue **> 60** —— **argcheck 即使没有 3^N 也编不出 Paddle 最大的那个签名。** 改成单表 upvalue 后实测:50 参数 7.4 KB / ~1 ms / 3.75 µs;N > 100 切「表形态」,实测 1000 参数仍能编译 | `plan/foundations.md` §5.4.6 |
 
 ---
 
@@ -232,5 +234,7 @@ argcheck 的思路是:把「遍历规则表、逐个查类型」这件解释式�
 |---|---|---|
 | ~~P5~~ | ~~`state_dict` 容器下标破例为 0-based(R15)是否认可?~~ | ✅ **已认可(2026-08-03)。** 认可理由(人):"确实是被迫的 0-based,不过一般人也不会去看权重里面的东西"。已写进 `plan/modules/09-nn.md` §3.5 |
 | ~~P8~~ | ~~`_args` 是否做成独立 rock~~ | ✅ **已拍板(2026-08-03):做。** 人的原话:「Insight 的那个解析器还是太简陋了,我打算弄一个单独的解析器项目,然后给 paddle 和 Insight 用」。记为 R27,落地细节见 `plan/foundations.md` §5.4 |
+| **P10** | **解析器叫什么名字?** 不能叫 `argcheck`(luarocks 上已被 `geoffleyland/argcheck` 占用) | **建议 `argsig`**(argument signature)—— luarocks 实测为空;说清了它是**签名层**;与 argcheck 的关系一眼可见又不冒名;不含任何框架名。备选(均实测为空):`callsig` / `sigcheck` / `arglet` / `argrule` / `signet` / `clerk`。**定名当天就在 luarocks 上占位**(`plan/foundations.md` §5.4.7) |
 | P6 | P18 script 模式若工期紧张,是否同意直接砍掉? | 建议同意 —— trace 模式已覆盖绝大多数场景,做半个比不做更糟 |
+| **P9** | **解析器「基于 Penlight」,那 Penlight 还 vendor 吗?** Penlight 的 rockspec 声明 `luafilesystem`(已核实 `penlight-dev-1.rockspec:31-34`),而 §1.3 决定 vendor 正是为了避开 `lfs`。解析器声明 rock 依赖 + paddle-lua 继续 vendor = **生态里两份 Penlight,违反 C11** | **建议 A:两边都改成声明 rock 依赖,不再 vendor。** 代价是多一个 `lfs`,但 R23/D28 已取消「不引入 C 依赖」禁令,而 vendor 的三条理由里有两条是冲着 `lfs` 去的 —— 前提没了,结论也该重估。**拍板前按 A 写**(`plan/foundations.md` §5.4.2) |
 | P7 | vendored Penlight 的版本锁定策略:锁 tag 还是锁 commit? | 建议锁 commit + CI 校验 sha256。`pl.class` 若改了 `_create` 语义,我们的 `nn.Layer` 会**静默**坏掉,不是编译错误 |

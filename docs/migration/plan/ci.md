@@ -126,10 +126,14 @@ grep -rn "class%.cast"                lua/                      -> 失败
 grep -rn "rawset(self"                lua/paddle/nn/            -> 失败(仅 FIELDS 一处豁免)
 grep -rn "require *['\"]middleclass"  lua/                      -> 失败(第二套 class)
 
-# ①b 参数检查的两条(foundations.md §4)
-grep -rn "_args"                      lua/paddle/_ops/          -> 失败(生成算子构建期展开,§4.7)
+# ①b 参数检查的四条(foundations.md §4 §5.4.6)
+grep -rn "argsig"                     lua/paddle/_ops/          -> 失败(生成算子构建期展开,§4.7)
+grep -rniE "paddle|insight"           <解析器仓库>/lua/          -> 失败(零框架硬编码,§5.4.2)
 lua tools/ci/args_codegen_size.lua                              -> 30 个可选参数的规则表
                                                                    生成 >10 KB 即失败(指数回归)
+lua tools/ci/args_codegen_43.lua                                -> 用 Paddle 真实最大签名
+                                                                   (43 参数 / 33 可选,resnet_block.py:434)
+                                                                   编不出来即失败(upvalue/寄存器墙)
 
 # ② 5.1 语法子集(C3)
 grep -rnE "goto |::[a-z]+::|[^/]//[^/]|<close>|<const>"  lua/   -> 失败
@@ -144,6 +148,11 @@ python tools/gen/check_index_semantics.py                       -> 未标注即�
 # ⑤ 上游零改动(项目级硬约束)
 git -C $PADDLE_ROOT diff --exit-code                            -> 非零即失败
 ```
+
+`args_codegen_43.lua` 挡的是**第二类指数**:不是生成代码的长度,而是 **Lua 自身的三道墙**
+(5.1 实测:60 个 upvalue / 200 个局部变量 / N=122 的寄存器上限,`foundations.md` §5.4.6)。
+它必须在**全部 5 个 Lua 实现**上跑 —— 5.1 与 5.2+ 的 upvalue 上限不同(60 vs 255),
+只测一个版本会漏。基准签名用 Paddle 真实存在的最大那个,不用假想值。
 
 第 ③ 条是 `layout.md` §5 的安全绳:60k 行生成代码里手改一处,
 当时能跑,下次重新生成被**静默覆盖**,改动消失且无任何报错。
