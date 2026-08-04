@@ -90,8 +90,12 @@ M.sum = wrap("sum", {"x", "axis", "dtype", "keepdim"},
 ```lua
 paddle.sum(x, 1)                      -- 位置
 paddle.sum{ x = x, axis = 1 }         -- 关键字
-paddle.sum(x, { axis = 1 })           -- 混合
+paddle.sum{ x, axis = 1 }             -- 混合表:数组部分 + 具名键
 ```
+
+> ⚠️ 混合是**一张表内部**的事(`argrule.md` §2.5⑧)。
+> `paddle.sum(x, {axis=1})` 这种「位置参数 + 尾随选项表」的写法**不成立** ——
+> 那是两个实参的位置调用,规则 #2 `axis:number` 会收到一张 table 并报错。
 
 **`axis1based` 标记是 1-based 决策(D-R6)的落地点。**
 生成器根据 yaml 里的参数名判定哪些参数是轴,自动插入 `axis > 0 and axis - 1 or axis`。

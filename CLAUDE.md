@@ -416,7 +416,8 @@ csrc/sol/gen_*.cpp      ← 生成,禁止手改
 | 把「容器」写成类名单(`{"table","pl.List","insight.Array"}`) | 判据是**结构**:是个容器 + 装的是整数。写成名单就把框架名硬编码进类型系统,用户自己的容器类被无理由挡住(`plan/argrule.md` §2.3) |
 | 用 `requires_grad` / `device` / `dim` 这些 PyTorch 名字 | C12。`requires_grad` 与 `stop_gradient` **取反且默认值也反**,两个名字并存 = 静默地训不动(`plan/api/README.md` §2.1.4) |
 | 移植 `python/paddle/utils/decorator_utils.py` 那一层(别名 291 处、变长 size、`reshape(2,3)`…) | D35。**它整层是 Paddle 给 PyTorch 用户的兼容壳**(全文 51 处提 `PyTorch`/`torch.`),而糖的收益在 Lua 侧是 0 —— 表调用本来就省括号,`zeros{2,3}` 已经和 `zeros(2,3)` 一样短(`plan/api/README.md` §2.1.3) |
-| 让 `shape` / `axes` 接受裸数字 | Python 侧 `paddle.zeros(5)` 本来就是错的。放行它还会把 §2.6 的调用消歧一起破坏(`plan/api/README.md` §2.1.2) |
+| 让 `shape` / `axes` 接受裸数字 | 上游 `paddle.zeros(5)` 能跑,靠的是兼容装饰器(`decorator_utils.py:406-437`),而那层我们整层不移植(D35)。放行它还会把调用消歧一起破坏(`plan/api/README.md` §2.1.2) |
+| 写 `paddle.f(x, { opt = 1 })` 这种「尾随选项表」(**文档里也不行**) | R36。**没有选项表这回事,只有一张参数表**:`paddle.f{ x, opt = 1 }`。前者是两个实参的位置调用,规则 #2 会收到一张 table 而报错 —— 它是**错的**,不只是啰嗦。两种写法只差一个字符,评审看不出来,只能靠 CI(`plan/api/README.md` §2.1.5) |
 | 支持「位置参数中间省略、靠类型猜」 | Python 不允许这么写,而支持它要付上一行的代价。跳过参数就用具名表 |
 | 手写算子绑定"就这一个特例" | C8。特例会繁殖 |
 | 移植 `paddle.Model` / `paddle.metric.*` | D10 |

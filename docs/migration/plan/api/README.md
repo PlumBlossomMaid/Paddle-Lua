@@ -234,6 +234,42 @@ grep -rnE 'name *= *"(requires_grad|device|dim|input|tensors|pin_memory)"'  lua/
 
 ---
 
+### 2.1.5 ★ 只有**一张参数表**,没有「选项表」这回事
+
+> 人的话:「我觉得似乎 DataLoader 不应有额外的 `{}` 进行包装」
+> 「**你还不如直接 `{ds, batch_size=...}`**。」
+
+大多数 Lua 库的习惯是「几个位置参数 + 最后跟一张配置表」:`f(x, {opt = 1})`。
+**我们不用这个形状**,也**不可能**用 —— 在 `argrule` 的调用约定里它直接就是错的:
+
+```lua
+paddle.io.DataLoader(ds, { batch_size = 64, num_workers = 4 })  -- ❌ 报错
+--  这是两个实参的位置调用。规则 #2 是 batch_size:number,收到一张 table
+paddle.io.DataLoader{ ds, batch_size = 64, num_workers = 4 }    -- ✅ 一张混合表
+```
+
+一张表里可以同时有**数组部分**(按位置填前 k 条规则)和**具名键**(按名字填),
+规则与 Python 的「位置实参在前、关键字实参在后」一致,同一个参数被给两次即报错
+—— 完整定义在 `plan/argrule.md` §2.5⑧。
+
+**所以每个 API 只有三种合法写法,文档示例里不许出现第四种:**
+
+```lua
+paddle.sum(x, 1)                 -- 位置
+paddle.sum{ x = x, axis = 1 }    -- 全具名
+paddle.sum{ x, axis = 1 }        -- 混合表  ← 日常最常用
+```
+
+⚠️ 这条**吃过亏**:项目三份 README 的首屏示例里就写着 `DataLoader(ds, {…})`,
+在纸面上活了很久没人发现(R36)。`f(x, {…})` 和 `f{x, …}` 在 Lua 里只差一个字符,
+**评审时肉眼极难发现,必须靠 CI**。
+
+**CI 判据(`ci.md` 红线①b):** 所有 `.md` / `.lua` 里出现
+`paddle.<某函数>(…, { <标识符> = …})` 这一形状即失败 ——
+最后一个实参是一张**键全是标识符**的 table,几乎必然是写成了选项表。
+
+---
+
 ## 2.2 索引:全 1-based,且必须在文档里逐个标出来
 
 每份 api 文档**必须有一节列出该模块所有吃 index 语义的参数**,

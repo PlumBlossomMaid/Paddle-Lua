@@ -241,7 +241,7 @@ void LoadTensor(const std::string& file_path, DenseTensor* out);
 paddle.load(path)          → 嗅探格式:pickle → 纯 Lua 解析器
                                         原生 → LoadTensor
 paddle.save(obj, path)     → 默认写原生格式(快、简单、无 pickle 依赖)
-paddle.save(obj, path, {format="pickle"}) → 写 Python 可读格式
+paddle.save{obj, path, format="pickle"}   → 写 Python 可读格式(混合表,§argrule 2.5⑧)
 ```
 
 **净收益:M1 的存档/续训功能可以在 pickle 解析器写完之前就跑起来。**

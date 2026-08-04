@@ -216,7 +216,7 @@
 | 详细设计 | `modules/11-io.md` |
 | 开工条件 | P5 完工 |
 | 产出 | `Dataset` / `Sampler` / `DataLoader`(`num_workers = 0`) |
-| 完工判据 | `for i, batch in DataLoader(ds, {batch_size=64})` 能正确迭代并 shuffle |
+| 完工判据 | `for i, batch in DataLoader{ds, batch_size=64}` 能正确迭代并 shuffle |
 | 预估 | 1.5 周 |
 
 ### ★ M1 验收:MNIST

@@ -330,7 +330,7 @@ ops.yaml ──► gen_capi.py    ──► paddle_capi_ops.{h,c}   纯 C 声明
 ```
 
 第三份很重要:Lua 没有关键字参数,**默认值和参数名必须在 Lua 侧有元数据**,
-否则 `paddle.sum(x, {axis=1, keepdim=true})` 这种 table 传参没法实现。
+否则 `paddle.sum{x, axis=1, keepdim=true}` 这种 table 传参没法实现。
 
 ---
 
@@ -422,7 +422,7 @@ local net = Net()
 local opt = paddle.optimizer.Adam{ learning_rate = 1e-3,
                                    parameters = net:parameters() }
 
-for _, batch in paddle.io.DataLoader(ds, { batch_size = 64, num_workers = 4 }) do
+for _, batch in paddle.io.DataLoader{ ds, batch_size = 64, num_workers = 4 } do
   local loss = F.cross_entropy(net(batch[1]), batch[2])
   loss:backward()
   opt:step()
@@ -652,8 +652,8 @@ local Acc = class(metrics.Metric)   -- pl.class,三仓库共用同一基座
 function Acc:init(cfg)
   Acc.super.init(self)
   self.threshold = (cfg and cfg.threshold) or 0.5
-  self:add_state("correct", paddle.zeros{1}, { dist_reduce_fx = "sum" })
-  self:add_state("total",   paddle.zeros{1}, { dist_reduce_fx = "sum" })
+  self:add_state{"correct", paddle.zeros{1}, dist_reduce_fx = "sum"}
+  self:add_state{"total",   paddle.zeros{1}, dist_reduce_fx = "sum"}
 end
 
 function Acc:update(preds, target)
@@ -709,7 +709,7 @@ trainer:fit(model, train_loader, val_loader)
 -- ② Keras 风格:快速原型
 local model = ocean.Model{ net = paddle.nn.Sequential(...) }
 model:prepare{ optimizer = opt, loss = loss_fn, metrics = { acc } }
-model:fit(train_loader, { epochs = 10 })
+model:fit{ train_loader, epochs = 10 }
 ```
 
 **M3 范围内的 Ocean 子集(Ocean 有 ~140 个源文件,我们不全做):**

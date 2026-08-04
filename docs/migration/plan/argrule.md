@@ -368,7 +368,12 @@ softmax(t)                    -- 位置
 softmax(t, 2)
 softmax{x = t, axis = 2}      -- 具名表
 softmax{t, 2}                 -- 表内位置
+softmax{t, axis = 2}          -- 混合表:数组部分 + 具名键(§2.5⑧)
 ```
+
+> ⚠️ **没有第五种。** 特别地,`softmax(t, {axis = 2})`(位置参数 + 尾随选项表)
+> 是**错的** —— 那是两个实参的位置调用,规则 #2 `axis:number` 会收到一张 table。
+> 见 §2.5⑧ 与 `api/README.md` §2.1.5。
 
 传错时报错指向**调用点**,并把整份 usage 打出来(argcheck 的做法):
 
@@ -497,6 +502,7 @@ paddle.zeros{2, 3}      -- shape = {2,3}?还是「表内位置」调用 shape=2,
 ```
 n == 1 且实参是无元表的 table 时:
   ① 表里有任何一个键等于某条规则的 name    -> 具名模式
+       数组部分 t[1..k] 同时按位置补前 k 条规则(混合表,见下)
   ② 否则,试「表内位置」:t[1], t[2], …
        全部类型通过 **且必填参数都有值**    -> 表内位置模式
   ③ 否则,且规则 #1 的 type 接受 table
@@ -506,6 +512,39 @@ n == 1 且实参是无元表的 table 时:
 
 ⚠️ **一个解释「成立」= 类型全过 + 必填参数全有值。** 只查类型是不够的 ——
 少了后半句会凭空造出一堆假歧义。
+
+**① 是混合的:一张表里可以既有数组部分、又有具名键。**
+规则和 Python 的「位置实参在前、关键字实参在后」完全一样:
+
+```lua
+paddle.io.DataLoader{ ds, batch_size = 64, num_workers = 4 }
+--  t[1] = ds        -> 规则 #1 dataset
+--  batch_size / num_workers 按名字对号入座
+```
+
+```
+数组部分 t[1], t[2], …, t[k]  -> 依次填规则 #1..#k
+具名键 t[name]                -> 填同名规则
+同一条规则被两边同时给到       -> error("<f>: 参数 'axis' 给了两次(位置 #2 和具名)")
+数组部分比规则条数还长         -> error(参数过多,附 usage)
+```
+
+**因此「选项表 / options table」这个概念在这里不存在** —— 只有**一张参数表**,
+不存在「前面几个位置参数 + 最后一张配置表」的写法(`api/README.md` §2.1.5)。
+
+```lua
+paddle.io.DataLoader(ds, { batch_size = 64 })   -- ❌ 不是风格问题,是**错的**
+--    这是两个实参的位置调用:规则 #2 是 batch_size:number,收到了一张 table -> 报错
+paddle.io.DataLoader{ ds, batch_size = 64 }     -- ✅
+paddle.sum(x, { axis = 1 })                     -- ❌ 同理:axis 收到 table
+paddle.sum{ x, axis = 1 }                       -- ✅
+```
+
+> ⚠️ 这两种写法在 Lua 里只差一个字符,肉眼几乎分不出来,而 `f(x, {...})` 恰好是
+> 大多数 Lua 库的习惯写法 —— 所以**报错信息必须点破**:
+> 当规则 #k 收到一张「键全是规则名」的 table 时,追加一行
+> `did you mean:  paddle.sum{ x, axis = 1 }`(把整个调用改写出来,和 §2.4 同一手法)。
+> 早期我们自己的 README 就写错过这一行(R36),用户比规则先发现。
 
 **`paddle.zeros{2, 3}` 因此是确定的:** ② 里 `shape = 2` 过不了 `IntList`(数字不是容器,
 §2.3),`dtype = 3` 也过不了枚举检查 -> 落到 ③ -> `shape = {2, 3}`。**不需要写任何标注。**

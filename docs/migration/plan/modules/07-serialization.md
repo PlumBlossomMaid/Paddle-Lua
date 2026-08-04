@@ -70,7 +70,7 @@ model.pdlua/                  ← 是目录不是单文件
 2. manifest 是**可读的 Lua 源码**,出问题时用户能直接看、直接改
 3. 增量加载成为可能 —— 大模型只加载需要的部分
 
-代价是不方便传输,所以额外提供 `paddle.save(obj, path, {archive = true})` 打 tar 包。
+代价是不方便传输,所以额外提供 `paddle.save{obj, path, archive = true}` 打 tar 包。
 
 ### 3.4 manifest 的样子
 

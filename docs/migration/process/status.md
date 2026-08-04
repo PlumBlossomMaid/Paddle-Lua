@@ -99,7 +99,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 文档 | 行数 | 状态 |
 |---|---|---|
 | **`WORKPLAN.md`(总工程树)** | 248 | ✅ **新增** |
-| `/CLAUDE.md` | 491 | ✅ |
+| `/CLAUDE.md` | 492 | ✅ |
 | `/README.md`(英文,默认) | 192 | ✅ |
 | `/README.zh-CN.md` | 186 | ✅ |
 | `/README.zh-TW.md` | 186 | ✅ |
@@ -109,20 +109,20 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 
 | 文档 | 行数 | 状态 |
 |---|---|---|
-| `plan/overview.md` | 915 | ✅ |
-| `plan/roadmap.md` | 344 | ✅ |
+| `plan/overview.md` | 935 | ✅ |
+| `plan/roadmap.md` | 341 | ✅ |
 | `plan/foundations.md` | 1105 | ✅ **+参数检查(§4)+ 基座边界与解析器项目(§5)** |
-| `plan/argrule.md` | 650 | ✅ **新增**(孵化说明书,建仓后迁走;原 `argsig.md`)|
+| `plan/argrule.md` | 689 | ✅ **新增**(孵化说明书,建仓后迁走;原 `argsig.md`)|
 | `plan/layout.md` | 261 | ✅ **新增** |
-| `plan/ci.md` | 246 | ✅ **新增** |
-| `plan/api/README.md` | 304 | ✅ **新增** |
+| `plan/ci.md` | 258 | ✅ **新增** |
+| `plan/api/README.md` | 340 | ✅ **新增** |
 | `plan/api/io.md` | 236 | ✅ **新增**(样板)|
 | `plan/api/<其余 15 个模块>` | — | ⬜ 各模块开工时写 |
 | `plan/modules/README.md` | 70 | ✅ |
 | `plan/modules/00-build.md` | 115 | ✅ |
 | `plan/modules/01-c-abi.md` | 150 | ✅ |
 | `plan/modules/02-binding.md` | 173 | ✅ |
-| `plan/modules/03-codegen.md` | 164 | ✅ |
+| `plan/modules/03-codegen.md` | 168 | ✅ |
 | `plan/modules/04-packaging.md` | 96 | ✅ |
 | `plan/modules/05-tensor.md` | 156 | ✅ |
 | `plan/modules/06-autograd.md` | 147 | ✅ |
@@ -130,7 +130,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `plan/modules/08-jit-infer.md` | 115 | ✅ |
 | `plan/modules/09-nn.md` | 360 | ✅ |
 | `plan/modules/10-optimizer.md` | 135 | ✅ |
-| `plan/modules/11-io.md` | 123 | ✅ |
+| `plan/modules/11-io.md` | 131 | ✅ |
 | `plan/modules/12-dataset-vision.md` | 129 | ✅ |
 | `plan/modules/13-lanes.md` | 163 | ✅ |
 | `plan/modules/14-gc.md` | 145 | ✅ |
@@ -146,7 +146,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `process/status.md` | 本文件 | ✅ |
 | `process/tasks.md` | 137 | ✅ |
 | `process/conventions.md` | 280 | ✅ |
-| `process/decisions.md` | 246 | ✅ |
+| `process/decisions.md` | 247 | ✅ |
 | `process/open-questions.md` | 197 | ✅ |
 
 ### 5.4 `research/`
@@ -223,3 +223,4 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 2026-08-03 | **`sizeargs` 整个砍掉,并升成一条通则:上游的兼容糖一律不移植(R33)** —— 人:「用得少的东西,为了 API 简洁似乎就该去掉」。决定性的不是"用得少",是**上游加糖的原因在 Lua 侧不存在**:Python 的 `zeros([2,3])` 又是括号又是方括号才需要 `zeros(2,3)`;Lua 的表调用本来就省括号,**`zeros{2,3}` 一样短** —— 收益 0,成本照付。同一条理由挡住整层兼容装饰器:**291 处参数别名**(`concat(tensors=,dim=)`)、5 处变长 size、`reshape(2,3)` 等。别名还额外带两个坑:`concat{x=a, tensors=b}` 要复制 291 次「不能同时给」的检查(上游 `decorator_utils.py:181-184` 抛 ValueError);`dim`/`axis` 两个名字 = index 语义标注表两条记录,漏标一条就是静默 off-by-one。**代替方案:教学式报错 `did you mean: paddle.zeros{2, 3}`**,只在错误路径上,零运行时成本。新增 `api/README.md` §2.1.3,例外判据「这个写法在 Lua 里比规范写法更短或更清楚吗」,**理由不能是"上游有"** |
 | 2026-08-03 | **`decorator_utils.py` 整层不移植(R34/D35)** —— 人的原话:「这东西就是 Paddle 为了 PyTorch 用户用得惯才搞的,lua 里面不用考虑这些,**我们 Paddle 框架就应该用自己的语法和规范**」。范围从「逐个判断哪些糖要移植」升成「整层跳过」:1451 行 / 30+ 装饰器 / 68 个模块 import 它,全文 **51 处** `PyTorch`/`torch.`(docstring 直写 `PyTorch: torch.block_diag(x,y,z)` / `Paddle: paddle.block_diag([x,y,z])`,`:923-940`),甚至有专门劝返 torch 关键字的 `forbid_keywords`(`:517-542`)。**关键证据:35 处 `wrapper.__signature__ = inspect.signature(func)`** —— 上游自己把规范签名保留在内层,**所以我们的生成器读到的本来就是规范签名,忽略这层是默认行为而不是额外工作量**。⚠️ 唯一要逐个确认的:少数装饰器可能不只改参数(`legacy_reduction_decorator` / `view_decorator`),判据「壳只动参数、内层签名不变」,发现改了行为的记 OPEN_QUESTION |
 | 2026-08-03 | **新增硬约束 C12:用户可见的 API 一律用 Paddle 自己的规范,不引入 PyTorch 的命名与惯例(R35/D35)** —— 人:「所以我们的 paddle-lua 也不要那些 PyTorch 的东西」。**光跳过 `decorator_utils.py` 挡不住** —— 一批 torch 风格参数**已经进了上游的规范签名本身**:`zeros(shape, dtype, name, *, out, device, requires_grad, pin_memory)`(`creation.py:1807`),而 Paddle 自己的名字在 `to_tensor` 里原样留着(`place` / `stop_gradient`,`:1124-1129`)。取 Paddle 那套:`stop_gradient` / `place` / `axis` / `x` / `shape` / `place=CUDAPinnedPlace()`。**`requires_grad` 必须挡住的真正理由:它与 `stop_gradient` 取反、默认值也反**(`False` vs `True`)—— 两个名字并存时搞混一次就是**静默地训不动**,没有报错只有 loss 不降。⚠️ 例外:`Tensor.size`(元素总数)是 Paddle 原生属性,不在禁用之列。**边界写死:约束用户看得见的表面,实现层不受限**(GC 抄 Torch7 九层 D5、schema 抄 argcheck D30 照做,因为用户不会写到它们)。CI 判据 `grep -rnE 'name *= *"(requires_grad|device|dim|input|tensors|pin_memory)"' lua/`。新增 Q-19(`out=` 是能力不是命名,倾向 v1 不做)、Q-20(`decorator_utils.py` 里是否有"壳改了语义"的例外,P3 前查完)|
+| 2026-08-03 | **「尾随选项表」这个写法不存在,一张表就是全部参数(R36)** —— 人指着 README 首屏说:「DataLoader 不应有额外的 `{}` 进行包装」「**你还不如直接 `{ds, batch_size=...}`**」。查下来**不是风格问题,那一行按我们自己的规则直接报错**:`DataLoader(ds, {batch_size=64})` 是两个实参的**位置调用**,规则 #2 `batch_size:number` 收到了一张 table。修法不是逐处订正,是把**混合表**写进 `argrule` 解析顺序的第 ① 步 —— 一张表里数组部分按位置填前 k 条规则、具名键按名字填、同一参数给两次即 `error`,语义与 Python「位置在前、关键字在后」一致。于是每个 API 只有三种合法写法(位置 / 全具名 / 混合表),**没有第四种**。⚠️ **教训:`f(x, {…})` 与 `f{x, …}` 只差一个字符,而前者是绝大多数 Lua 库的习惯** —— 我自己写的 README 错了,还反复读过多次都没发现,人一眼看出来。这类「读着完全正常、却跑不通」的错误只能靠机器:CI 红线 ①b 新增 `args_no_opts_table.lua`,**且必须扫 `docs/`**(文档是用户抄走的第一份代码)。连带订正 3 份 README + `overview.md`(4)+ `03-codegen.md` + `11-io.md`(2)+ `roadmap.md` + `07-serialization.md` + `research/reuse.md`;新增 `api/README.md` §2.1.5 |

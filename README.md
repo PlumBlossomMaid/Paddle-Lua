@@ -55,7 +55,7 @@ function Net:forward(x) return self.fc(x) end
 local net = Net()
 local opt = paddle.optimizer.Adam{ learning_rate = 1e-3, parameters = net:parameters() }
 
-for _, batch in paddle.io.DataLoader(ds, { batch_size = 64, num_workers = 4 }) do
+for _, batch in paddle.io.DataLoader{ ds, batch_size = 64, num_workers = 4 } do
   local loss = F.cross_entropy(net(batch[1]), batch[2])
   loss:backward()
   opt:step()
