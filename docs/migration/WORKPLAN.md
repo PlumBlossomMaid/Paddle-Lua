@@ -100,8 +100,9 @@
  |    +-- [✅] 0.9 生态基座                  -> plan/foundations.md
  |    +-- [✅] 0.10 代码目录与模块           -> plan/layout.md
  |    +-- [✅] 0.11 CI 计划                  -> plan/ci.md
- |    +-- [🔵] 0.12 工程树(本文件)         -> WORKPLAN.md
- |    +-- [⬜] 0.13 L0 CI 落地               -> plan/ci.md §2   前置:0.11
+ |    +-- [✅] 0.12 工程树(本文件)         -> WORKPLAN.md
+ |    +-- [🔵] 0.13 API 设计规范 + 样板       -> plan/api/README.md + api/io.md
+ |    +-- [⬜] 0.14 L0 CI 落地               -> plan/ci.md §2   前置:0.11
  |
  +-- [⬜] 1. M0 可行性闸门 (G0/G1)          -> plan/modules/00-build.md
  |    +-- [⬜] 1.1 无 Python 构建 ★生死判定  -> process/tasks.md T-M0-01
@@ -131,21 +132,27 @@
  |    |    +-- [⬜] 2.3.4 全量生成 + regen-diff CI
  |    +-- [⬜] 2.4 构建与打包                -> plan/modules/04-packaging.md
  |    +-- [⬜] 2.5 paddle.Tensor             -> plan/modules/05-tensor.md
+ |    |    +-- [⬜] 2.5.0 API 设计                -> plan/api/{top,tensor,dtype-device}.md ★先接口后实现
  |    +-- [⬜] 2.6 自动微分与生命周期        -> plan/modules/06-autograd.md
+ |    |    +-- [⬜] 2.6.0 API 设计                -> plan/api/{autograd,scope}.md
  |    +-- [⬜] 2.7 序列化                    -> plan/modules/07-serialization.md
  |    +-- [⬜] 2.8 jit::Layer 推理 ★可先交付 -> plan/modules/08-jit-infer.md
  |    +-- [⬜] 2.9 paddle.nn ★最大一块       -> plan/modules/09-nn.md
+ |    |    +-- [⬜] 2.9.0 API 设计                -> plan/api/{nn,nn-functional,nn-initializer}.md
  |    |    +-- [⬜] 2.9.1 Layer 基类 + 它的测试   ★ 同时写
  |    |    +-- [⬜] 2.9.2 Linear 打通闭环
  |    |    +-- [⬜] 2.9.3 functional
  |    |    +-- [⬜] 2.9.4 其余 39 层
  |    |    +-- [⬜] 2.9.5 容器(Sequential/LayerList/LayerDict)
  |    +-- [⬜] 2.10 paddle.optimizer         -> plan/modules/10-optimizer.md
+ |    |    +-- [⬜] 2.10.0 API 设计               -> plan/api/optimizer.md
  |    +-- [⬜] 2.11 paddle.io(单 worker)   -> plan/modules/11-io.md
+ |    |    +-- [✅] 2.11.0 API 设计               -> plan/api/io.md  ★已完成(样板)
  |    +-- [⬜] 2.12 M1 验收:MNIST > 95%     -> plan/roadmap.md §1
  |
  +-- [⬜] 3. M2 可用                         前置:2
  |    +-- [⬜] 3.1 dataset + vision          -> plan/modules/12-dataset-vision.md
+ |    |    +-- [⬜] 3.1.0 API 设计               -> plan/api/{dataset,vision}.md
  |    |    +-- [⬜] 3.0 前置:Insight7 axis 改 1-based  ★ 跨仓库,见 foundations §3.4
  |    +-- [⬜] 3.2 Lanes 多 worker           -> plan/modules/13-lanes.md
  |    +-- [⬜] 3.3 GC 九层机制               -> plan/modules/14-gc.md
@@ -162,6 +169,10 @@
       +-- [⬜] 5.1 script 模式(AST)        -> plan/modules/18-script.md
 ```
 
+**关于 `x.y.0 API 设计` 节点:** 每个模块的第一个子节点都是「先写 api 文档」。
+这不是形式主义 —— **实现先行会让 API 长成实现的形状**,
+而 api 文档一旦发布就是契约,改起来要走废弃流程。见 `plan/api/README.md`。
+
 **关于 1.x 的任务编号缺口:** `tasks.md` 里没有 `T-M0-12/13/16` ——
 12(sol2+5.5)和 13(Lanes 可选性)**已经关闭并转成决策**(D4、D-R5),
 16 **并入 T-M0-01 一起做**。缺口是有意的,不是漏了。
@@ -170,10 +181,14 @@
 
 ## 5. 现在在哪
 
-**🔵 0.12** —— 本文件。完成后 DFS 的下一个是 **0.13(L0 CI 落地)**,
-然后回溯到根,进入 **1. M0**,第一个叶子是 **1.1 无 Python 构建**(生死判定)。
+**🔵 0.13** —— API 设计规范已立(`plan/api/README.md`),样板已写(`plan/api/io.md`)。
+其余模块的 api 文档**不在这里一次写完**,而是挂在各自模块下的 `x.y.0` 节点上,
+在那个模块开工时写 —— 提前写会写成猜测。
 
-⚠️ **注意 0.13 排在 M0 之前不是笔误。** L0 CI 不需要 libpaddle(`ci.md` §2),
+DFS 的下一个是 **0.14(L0 CI 落地)**,然后回溯到根,进入 **1. M0**,
+第一个叶子是 **1.1 无 Python 构建**(生死判定)。
+
+⚠️ **注意 0.14 排在 M0 之前不是笔误。** L0 CI 不需要 libpaddle(`ci.md` §2),
 现在就能建;而且它检查的 `doctree` 正好保护这棵树本身。
 先建它,后面每个节点都受保护。
 

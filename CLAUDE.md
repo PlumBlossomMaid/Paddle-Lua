@@ -208,7 +208,10 @@ docs/
     │   ├── layout.md          ★ 代码目录与模块清单 + 文件级落地顺序
     │   ├── ci.md              ★ CI 计划:四层、阶段解锁表、红线
     │   ├── foundations.md     ★ 生态基座:Penlight 与 Insight7(跨阶段,P0 前就该读)
-    │   └── modules/           ★ 19 份模块详细设计,每阶段一份
+    │   ├── api/               ★ 按 Lua 模块的接口设计(先接口后实现)
+    │   │   ├── README.md          模块总清单 + 跨模块硬规则 + 骨架
+    │   │   └── io.md              paddle.io —— 样板文档
+    │   └── modules/           ★ 19 份实现设计,每阶段一份
     │       ├── README.md          模块索引 + 固定写作骨架
     │       ├── 00-build.md        无 Python 构建
     │       ├── ...                (完整清单见 modules/README.md)
@@ -245,6 +248,8 @@ docs/
 | **`process/tasks.md`** | 任务板,原子任务 + 验收标准 | 每次开工必读 |
 | `process/conventions.md` | Lua 5.1 子集规则、命名、API 映射规则 | 写代码前 |
 | **`plan/roadmap.md`** | P0–P18 的顺序与门槛 | **每次开工必读** |
+| **`plan/api/README.md`** | 模块清单 + 命名映射 + 返回类型 + 惰性加载规则 | **设计任何模块接口前** |
+| **`plan/api/<模块>.md`** | 该模块的导出契约 | **实现该模块前先写完它** |
 | **`plan/layout.md`** | 目录树、模块清单、文件级落地顺序 | **建目录 / 决定先写哪个文件时** |
 | **`plan/ci.md`** | 四层 CI、阶段解锁表、红线 | **每个阶段完工前**(没 CI 不算完工) |
 | **`plan/foundations.md`** | 生态基座:Penlight / Insight7 的选型、闭包、坑 | **写任何 Lua 代码前必读一次** |

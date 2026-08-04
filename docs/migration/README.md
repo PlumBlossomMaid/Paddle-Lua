@@ -19,7 +19,8 @@ docs/migration/
 │   ├── layout.md          ★ 代码目录与模块清单 + 文件级落地顺序
 │   ├── ci.md              ★ CI 计划:四层、阶段解锁表、红线
 │   ├── foundations.md     ★ 生态基座:Penlight 与 Insight7(跨阶段)
-│   └── modules/           ★ 19 份模块详细设计,每个阶段一份
+│   ├── api/               ★ 按 Lua 模块的接口设计(paddle.io.* / paddle.nn.* …)
+│   └── modules/           ★ 19 份实现设计,每个阶段一份
 ├── process/           作业流程:状态、任务板、约定、决策、未解问题
 └── research/          技术论证:可行性、架构、GC、DataLoader、复用、动转静
     └── _ref/          第三方参考源码片段
@@ -96,6 +97,7 @@ docs/migration/
 |---|---|
 | `plan/overview.md` | 范围与总账:仓库划分、A/B 四象限分类、排除清单、分层架构、工作量、API 设计、M0 验证清单、风险登记 |
 | **`plan/roadmap.md`** | **总计划。** P0–P18 的依赖图、每阶段的开工条件与完工判据、三条排期原则、允许打乱顺序的边界 |
+| **`plan/api/`** | **按 Lua 模块的接口设计。** 导出清单、签名、参数名、返回类型、index 语义参数、与 Python 的差异、未实现项。**`plan/modules/` 是「怎么造」,这里是「造出来长什么样」** |
 | **`plan/layout.md`** | **代码目录与模块清单。** 权威目录树、每个模块的阶段/体量/性质、**文件级落地顺序**(每个阶段第一个敲哪个文件)、生成代码进不进版本库 |
 | **`plan/ci.md`** | **CI 计划。** 四层 CI(为什么不能每次 push 都编 Paddle)、阶段解锁表、必须机器挡住的五条红线、golden 数据 |
 | **`plan/foundations.md`** | **生态基座。** 为什么类系统用 `pl.class`、集合用 `pl.List`、numpy 的位置给 Insight7;Penlight 的 11 文件闭包与四个坑;`LayerList` 为什么继承 `Layer`(以及 `ipairs` 在 5.1 上的坑);Insight7 互操作与 `axis` 改 1-based 的落地方式 |
