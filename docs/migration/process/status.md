@@ -112,10 +112,10 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `plan/overview.md` | 915 | ✅ |
 | `plan/roadmap.md` | 344 | ✅ |
 | `plan/foundations.md` | 1082 | ✅ **+参数检查(§4)+ 基座边界与解析器项目(§5)** |
-| `plan/argsig.md` | 384 | ✅ **新增**(孵化说明书,建仓后迁走)|
+| `plan/argsig.md` | 414 | ✅ **新增**(孵化说明书,建仓后迁走)|
 | `plan/layout.md` | 261 | ✅ **新增** |
-| `plan/ci.md` | 235 | ✅ **新增** |
-| `plan/api/README.md` | 139 | ✅ **新增** |
+| `plan/ci.md` | 239 | ✅ **新增** |
+| `plan/api/README.md` | 171 | ✅ **新增** |
 | `plan/api/io.md` | 236 | ✅ **新增**(样板)|
 | `plan/api/<其余 15 个模块>` | — | ⬜ 各模块开工时写 |
 | `plan/modules/README.md` | 70 | ✅ |
@@ -214,3 +214,4 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 2026-08-03 | **参数解析器独立成项目(R27/D31),并按人的两条追加约束定型** —— ① **不轻易造轮子**:普查了 luarocks 全部候选(`tableshape` / `typecheck` / `checks` / `ltypekit` / `geoffleyland/argcheck`),**没有一个提供「同一份签名同时吃位置调用与具名表调用 + 默认值 + usage」** —— 因为那是 **Python kwargs 的形状**,而 Lua 自己没有 kwargs。所以只自写「调用约定层」(~200 行),**类型判定层借现成的**:`type` 槽定为可调用契约,`tableshape` 的类型对象本身就是 callable,塞进去就能用(R28/D32)。② **50 个参数**不是假想需求:Paddle 真实最大签名 `ResNetBasicBlock.__init__` **43 参数 / 33 可选**(`resnet_block.py:434`),≥12 参数的有 156 个。实测 Lua 5.1 三道墙 = **60 upvalue / 200 局部变量 / N=122 寄存器**,而 argcheck 是**一规则若干 upvalue** -> 43 参数 ≈ 86 个 upvalue,**即使没有 3^N 也编不出 Paddle 最大的签名**(R29/D33)。改成单表 upvalue 后实测 50 参数 7.4 KB / ~1 ms / 3.75 µs,N>100 走表形态(1000 参数仍可编译)。③ 名字不能叫 `argcheck`(已被 `geoffleyland/argcheck` 占用),建议 `argsig`(待拍板 P10);④ 「基于 Penlight」与 §1.3 的 vendor 决定冲突(Penlight rockspec 依赖 `lfs`),**新增待拍板 P9**,拍板前按「两边都改声明依赖」写。CI 红线 ①b 从 2 条扩到 4 条,新增 43 参数基准 |
 | 2026-08-03 | **人拍板 P9:Penlight 不再 vendor,改为全生态地基级 rock 依赖(R30/D34)** —— 原话「pl 为默认依赖项,pl 在咱们所有的项目里面为地基级别的东西」。vendor 的四条理由里第 1 条(避 `lfs`)在 R23 已作废、第 3/4 条是便利性,只剩版本锁定,而它靠 rockspec 锁 minor + CI 语义测试就能达成。决定性的是 vendor 自带的代价:**两份 `pl.class` 的实例互不 `is_a`** —— 生态里有 paddle-lua / Insight7 / `argsig` / metrics / ocean 五个消费者,这个坑会在每两个库之间各出现一次。连带:`_vendor/pl/`(5374 行)从 `layout.md` / `04-packaging.md` / `overview.md` 删除;`luafilesystem` 进入传递依赖(但我们自己不 `require "lfs"`);待拍板 P7 改写为「rock 版本区间怎么定」;CI 新增红线 `grep -rn "_vendor/pl" -> 失败`。同时新增 `plan/argsig.md`(176 行)——「新时代 argcheck」的孵化说明书,对着 argcheck 列出继承/丢弃/新增三列账,每行带上游 `file:line` |
 | 2026-08-03 | **签名层的用户端表面定型(`plan/argsig.md` §2 §2.5,384 行)** —— 人给的形状:`local rule = require "argrule.rule"`;规则里 `name`/`type` 可位置写(`{"x","Tensor"}`),**规则表自己也遵守它自己的调用约定**;`help` 砍掉只留 `doc`(argcheck 两个都有还要 assert 二选一,`init.lua:80`);装饰器直接吃 `_C_ops.softmax`,不包 lambda。落地时补了四条:① **位置槽只到 2**(第三个位置是 `default` 还是 `doc` 说不清);② 类型短名 `"Tensor"` 走 `alias`,**全名是规范,短名重复注册直接报错**(一个进程里 paddle 和 Insight7 同时在);③ 公开 API 一律全具名(要拿来生成文档,且会被当范例抄)—— 写进 conventions,不进 CI;④ ★ **`paddle.zeros{2,3}` 的真歧义**:第一个参数就是 table 时,表形式调用无法与「一个 table 实参」区分,**必须显式 `nonamed = true`**(逃生舱从 argcheck 继承,`init.lua:53-57`),判据机械可查已进 CI 红线 ①b —— 不用启发式,因为猜错的那次是静默的错误结果 |
+| 2026-08-03 | **新增跨模块硬规则「枚举参数一律不接受裸数字」(`api/README.md` §2.1.1)** —— 人的原话:「dtype 必须是 paddle.dtype 类型或者是 string,数字不应该代表类型」。三条理由里第二条是意外收获:**它把 `paddle.zeros{2,3}` 的调用歧义消掉了** —— `{2,3}` 当「表内位置」解释时 `dtype = 3` 过不了类型检查,于是确定性地落到「整个表是第一个实参」,**不需要写 `nonamed`**。因此 `argsig.md` §2.6 从「必须写 `nonamed`」改成**四步定死的解析顺序**,只有「表内位置」与「整表实参」两种解释**同时**成立时(如 `full{{2,3},1.0}`)才要求显式声明。两条规则相互依赖,**要改一起改**。同时定下短名原则:**类型短名 = 用户能 `local Tensor = paddle.Tensor` 拿到的那个导出名**(对应 Python 的 `from paddle import Tensor`),`Tensor`/`Place`/`DType` 归 paddle、`Array` 归 Insight7,短名重复注册直接报错。CI 红线 ①b 增至 6 条 |

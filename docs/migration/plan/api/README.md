@@ -64,7 +64,8 @@
 | `__getitem__` | `:get(i)` 或 `t["1:3"]` | 数据访问用 `get`,张量切片用字符串索引(D14) |
 | `__call__` | `__call` 元方法 | `layer(x)` 能用 |
 | `super().__init__()` | `self:super()` | Penlight 约定 |
-| 关键字参数 | **`_args` 规则表**(D-R26) | schema 抄 argcheck:`{name=,type=,default=,opt=,check=,help=}`;**求解器是我们自己的 O(N) 生成器**,不是 argcheck 本体 |
+| 关键字参数 | **`argrule` 规则表**(R26/R27) | schema 抄 argcheck:`{name=,type=,default=,defaulta=,defaultf=,opt=,check=,doc=}`(**只留 `doc`,没有 `help`**);求解器是我们自己的 O(N) 生成器。独立 rock,见 `plan/argsig.md` |
+| `from paddle import Tensor` | `local Tensor = paddle.Tensor` | **短名要能直接 local 化** —— Python 侧就是这么用的。因此 `argrule` 里的类型短名 `"Tensor"` 与这个导出名**必须是同一个标识符** |
 | 位置参数中间省略 | **不支持** | `f(1, nil, 3)` 要跳过就用具名表 `f{a=1,c=3}`。**与 Python 一致**,且支持它要付 3^N 的代价(`foundations.md` §4.5)|
 
 **不做"Lua 风格化"改名。** 用户是冲着 Paddle API 来的,
@@ -77,7 +78,28 @@ Python 不允许,而支持它要付 3^N 的生成代码代价,argcheck 就是死
 
 **每份 api 文档在导出清单里给出规则表即可**,不必标「用哪个实现」——
 只有一套(C11)。P3 生成的 2000+ 算子共用同一份 schema,但**构建期展开**,
-运行时不调 `_args`。
+运行时不调 `argrule`。
+
+### 2.1.1 ★ 枚举参数一律不接受裸数字
+
+`dtype` / `device` / `layout` / `reduction` 这类枚举参数,**只接受两种东西**:
+
+| ✅ 接受 | ❌ 不接受 |
+|---|---|
+| 字符串:`"float32"` / `"cpu"` / `"NCHW"` / `"mean"` | **裸整数** `5`(某个 enum 的序号) |
+| 类型化常量:`paddle.float32` / `paddle.CPUPlace()` | Python 侧偶尔能塞进去的 C++ enum 值 |
+
+三个理由,按重要性:
+
+1. **数字不表示类型。** `zeros({2,3}, 5)` 应该报错,而不是"dtype 取第 5 个"。
+   enum 序号是 C++ 的实现细节,一旦上游插入一个新 dtype,所有写死数字的代码**静默错**
+2. **它消掉调用歧义。** 见 `plan/argsig.md` §2.6:`paddle.zeros{2, 3}` 之所以能被
+   确定性地解析成「一个 table 实参」,正是因为 `{2, 3}` 当作「表内位置」时
+   `dtype = 3` 过不了类型检查。**枚举一旦收数字,这个判定就塌了**
+3. 与 1-based 同源:我们不让用户去数序号
+
+⚠️ 这条对**生成的算子**同样成立 —— 生成器给 `DataType` / `Place` / `DataLayout`
+参数发的类型是 `{"string", "paddle.dtype"}`,不含 `"number"`。
 
 ### 2.2 索引:全 1-based,且必须在文档里逐个标出来
 

@@ -134,7 +134,20 @@ argrule.alias("Tensor", "paddle.Tensor")                                       -
 
 ⚠️ **短名会撞** —— 一个进程里 paddle 和 Insight7 同时在。规则:
 **全名是规范,短名是 alias,重复注册同一个短名直接报错**(不是后者覆盖前者)。
-生态内先分好:`Tensor` / `Place` / `DType` 归 paddle,`Array` 归 Insight7。
+生态内已分好:**`Tensor` / `Place` / `DType` 归 paddle,`Array` 归 Insight7**。
+
+**短名不是随便起的,它必须等于用户能直接 local 化的那个导出名:**
+
+```lua
+local Tensor = paddle.Tensor          -- 对应 Python 的 from paddle import Tensor
+local Array  = insight.Array
+```
+
+Python 侧 `from paddle import Tensor` 之后代码里直接写 `Tensor`,很顺手;
+Lua 的等价写法就是上面这一行。既然用户会这么写,
+规则表里的 `type = "Tensor"` 就该是**同一个标识符** ——
+否则会出现"代码里叫 `Tensor`,规则表里叫别的"这种两套词汇。
+这条同时写进 `api/README.md` §2.1 的命名映射表。
 
 ---
 
@@ -279,35 +292,52 @@ print(argrule.source(softmax))   -- 生成的 Lua 源码,排错用(对应 argche
 argrule.strict(false)            -- 全局关校验(只对此后定义的函数生效)
 ```
 
-### ⑧ ⚠️ 第一个参数就是 table 的时候:必须写 `nonamed = true`
+### ⑧ ⚠️ 第一个参数就是 table:解析顺序是**定死的**,不是猜的
 
-这是这套调用约定**唯一**的真歧义,而且踩中的正好是最常用的那批函数:
+这是这套调用约定唯一的真歧义,踩中的正好是最常用的那批函数:
 
 ```lua
-paddle.zeros{2, 3}      -- 是 shape = {2,3}?还是「表内位置」调用 shape=2, dtype=3?
+paddle.zeros{2, 3}      -- shape = {2,3}?还是「表内位置」调用 shape=2, dtype=3?
 ```
 
-**解法是逃生舱,不是启发式** —— `noordered` / `nonamed` 从 argcheck 继承(`init.lua:53-57`):
+**解析顺序(生成的代码里就是这个顺序,四步,确定性):**
+
+```
+n == 1 且实参是无元表的 table 时:
+  ① 表里有任何一个键等于某条规则的 name    -> 具名模式
+  ② 否则,试「表内位置」:t[1], t[2], … 逐条过类型检查
+       全部通过                             -> 表内位置模式
+  ③ 否则,且规则 #1 的 type 接受 table      -> 整个表就是第一个实参
+  ④ 否则                                    -> 按表内位置报错(错得最像用户的本意)
+```
+
+**`paddle.zeros{2, 3}` 因此是确定的:** ② 里 `shape = 2` 过不了 `table` 检查 ->
+落到 ③ -> `shape = {2, 3}`。**不需要写任何标注。**
+
+> 这一步能成立,靠的是 `api/README.md` §2.1.1 那条:
+> **枚举参数不接受裸数字**。如果 `dtype` 能收 `3`,②就通过了,歧义就真的存在。
+> **一条 API 约定消掉了一整类调用歧义** —— 这两条要一起改,不能只动一边。
+
+**②③ 同时成立的签名才是真歧义**,那时必须显式声明意图:
 
 ```lua
-paddle.zeros = rule{
-  {name = "shape", type = "table"},
-  {name = "dtype", type = "string", default = "float32"},
-  nonamed = true,             -- 禁掉 f{...} 的两种表形式
-  doc = "Return a tensor filled with 0.",
+paddle.full = rule{
+  {name = "shape",      type = "table"},
+  {name = "fill_value", type = "number"},
+  nonamed = true,          -- 或 noordered = true,二选一,必须写
 }(_C_ops.full)
-
-paddle.zeros{2, 3}            -- 现在无歧义:一个 table 实参
-paddle.zeros({2, 3}, "int64")
+-- full{ {2,3}, 1.0 }:② 通过(shape={2,3}, fill=1.0),③ 也通过(整表当 shape)
 ```
 
-**判据机械可查,进 CI**:
+**CI 判据(静态可查,在生成期就知道):**
 
 ```
-规则 #1 的 type 允许 "table",且没写 nonamed  ->  失败
+规则 #1 的 type 接受 table,且「表内位置」解释在类型上可能成立
+  -> 必须显式写 nonamed 或 noordered,否则失败
 ```
 
-不靠「猜哪种意图更可能」—— 猜错的那次是**静默的错误结果**,不是报错。
+不留启发式的理由:猜错的那次是**静默的错误结果**,不是报错 ——
+`zeros{2,3}` 会安安静静给你一个 shape 为 2 的东西。
 
 ---
 
