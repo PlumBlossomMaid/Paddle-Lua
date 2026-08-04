@@ -205,6 +205,9 @@ argcheck 的思路是:把「遍历规则表、逐个查类型」这件解释式�
 - **求解器自写**(~150 行)—— 只做「尾部省略 + 具名表」两条 O(N) 路径
 - **`_wrap` 保留** —— `_args` 依赖 `debug` + `loadstring`,沙箱宿主里不通,
   这时降级为解释式实现。**这是 `_args` 比 argcheck 多出来的一件事**
+- **有限重载要保留**,但形式是「作者显式列举 2-3 个变体」而不是「库枚举 3^N 种缺席组合」。
+  `paddle.to_tensor` / `reshape` / optimizer 的 `parameters` 在 Paddle 里都是 `isinstance` 分派,
+  只是写在函数体里没有声明化(`foundations.md` §4.8)
 - **生成的 2000+ 算子不调 `_args`** —— 构建期展开,但**共用同一份 schema 与错误信息格式**(C11)
 
 ---

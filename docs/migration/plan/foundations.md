@@ -652,7 +652,50 @@ lua/paddle/_wrap.lua        【P5】保留。移植自 Insight7,不依赖 debug 
 算完的事不要推到运行时)。**但两边共用同一份规则表 schema 和同一套错误信息格式** ——
 这是「基座只有一套」(C11)在参数检查上的落点。
 
-### 4.8 必须验的三点
+### 4.8 重载:要,但要**显式列举**,不要**隐式枚举**
+
+> ⚠️ 本小节修正 §4.5 的一句话。那里说「我们不需要类型重载」——**说过头了。**
+
+argcheck 的 README 第一行就是 "function overloading system"。3^N 那棵树不只是为省略,
+是为**重载**:同一个名字多套签名,靠参数类型走到不同分支。
+Torch7 的惯用法(`torch.rand([gen,] sizes)`、`t:add([res,] [v,] other)`)正需要它。
+
+**Paddle 也需要,只是它把这件事写在函数体里而不是签名里:**
+
+| API | 分派 | 上游怎么写的 |
+|---|---|---|
+| `paddle.to_tensor(data)` | scalar / ndarray / Tensor / list | `creation.py:794-798` 一串 `isinstance` |
+| `paddle.reshape(x, shape)` | list / `Variable` / `pir.Value` | `manipulation.py:1056,1105` |
+| `optimizer(parameters=)` | 参数列表 / 参数组 dict 列表 | 函数体内判断 |
+
+所以「不需要重载」是错的。**对的说法是:需要的量差了几个数量级。**
+
+| | argcheck | 我们 |
+|---|---|---|
+| 谁决定有哪些变体 | **库去枚举**「哪些参数可能缺席」的全组合 | **作者显式写下**「这个函数有这 2 种签名」 |
+| 变体数 | 3^N(N=16 时 4300 万) | 通常 1,偶尔 2-3 |
+| 代价 | 指数 | **O(变体数 × N)** |
+| 写错了会怎样 | 库猜错,报一个看不懂的 usage | 作者少列一个变体,报「没有匹配的签名」并列出已知的 |
+
+落到 `_args.lua` 的形态:
+
+```lua
+paddle.to_tensor = args.overload{
+  { {name="data",  type="number"},  {name="dtype", type="string", opt=true} },
+  { {name="data",  type="table"},   {name="dtype", type="string", opt=true} },
+  { {name="data",  type="paddle.Tensor"} },
+}   -- 3 个变体,顺序尝试,每个 O(N)
+```
+
+**这是本节所有结论里最能一句话概括的一条:**
+**把「组合爆炸」换成「作者写清楚」。**
+argcheck 那个时代的假设是「函数小,库可以替你穷举」;
+关键字参数时代这个假设不成立了,但**声明式规则表这个形式仍然成立** ——
+要换掉的只是求解器,不是接口。
+
+---
+
+### 4.9 必须验的三点
 
 **① `debug.setupvalue` 在 LuaJIT 上给 `load` 出来的函数注入 upvalue 是否可用**(Q-17,M0 #22)。
 挂了就全线走解释式降级路径。**纯 Lua,不需要 libpaddle,必须在 P5 之前有答案。**
