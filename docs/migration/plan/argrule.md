@@ -63,8 +63,8 @@
 | **N > 100 切「表形态」** | 绕开 122 的寄存器墙;实测 1000 参数仍可编译 |
 | **无 `debug` / 无 `loadstring` 时的解释式降级** | LuaJIT 沙箱、`-DLUA_NODEBUG` 之类的环境 |
 | **报错指向调用点**,不是库内部 | `checks` 做得对的地方:`debug.getinfo(2)` 拿调用者的 `file:line` |
-| **`sizeargs` 表级选项** | 上游用 `@size_args_decorator` 在签名外面把 `zeros(1,2,3)` 归一化成 `shape=[1,2,3]`(`decorator_utils.py:406-437`)。**类型系统保持干净,兼容糖在外层** —— 我们照抄这个分层(§2.4) |
 | **容器协议分 plain / opaque** | 逐元素访问贵不贵是**语义相关**的:对 GPU 上的 Tensor 逐元素查类型 = n 次设备同步。选路机械,且算出来的行为与上游一字不差(§2.3) |
+| **类型层只查「消歧需要的」** | 其余检查下放到转换层(反正要遍历一次)。判据机械:去掉它之后调用仍唯一 -> 可下放(§2.3) |
 | **`pl.compat` / `pl.pretty` 复用** | 跨版本 `load`/`unpack`/`setfenv` 与默认值渲染,不自己写(R30:Penlight 是地基级依赖) |
 
 ---
@@ -217,30 +217,52 @@ type = "IntList"     -- 是个容器,且装的是整数
 > 而 `Tensor` / `Array` 都是 userdata,**它们反而没这个问题** —— 有问题的是 `pl.List`
 > 这类带元表的 table(靠数组部分,`#` 照样对)。探测顺序必须有 fallback,进 M0 #24 实测。
 
-#### 元素怎么查:两条路,选哪条是**机械**的
+#### 元素怎么查:**类型层只查消歧需要的,剩下的下放**
+
+> 人的提议:「**我想的是在函数里面有个 if 判断,如果有小数直接 error 抛出异常**」。
+> **对,而且比放进类型层更好** —— 但要分两种情况,分界线是机械的:
 
 ```
-list_of(E) 判 o:
-  o 是 plain 容器   -> 逐元素套 E                       O(n)
-  o 是 opaque 容器  -> E 是标量类型(integer/number/…)?
-                         是 -> 拿 o 自报的 dtype + ndim==1 证明,不碰元素   O(1)
-                         否 -> **没有 O(1) 证明,且不许逐元素** -> 判否
+某个元素检查,去掉它之后调用仍然只有唯一解释?
+    是  -> 下放到转换层(反正要遍历,顺手查,零额外成本)
+    否  -> 必须留在类型层(解析器要靠它选解释)
+```
+
+| 类型 | 类型层查什么 | 元素检查在哪 | 为什么 |
+|---|---|---|---|
+| **`IntList`** | **只查「是不是容器」**(opaque 容器另看 `ndim==1` + dtype,O(1)) | **转换层的 `if`,`error` 抛出** | 去掉元素检查,`zeros{2,3}` 仍然唯一 —— ② 里 `2` 本来就不是容器 |
+| **`TensorList`** | 容器 **+ 逐元素是不是 Tensor** | 类型层 | 去掉就有歧义:`concat{{a,b},2}` 的 ③ 正是靠「元素 `2` 不是 Tensor」出局(⑧) |
+
+**为什么 `IntList` 的元素检查放转换层更好,而不只是"也行":**
+
+1. **零额外成本。** table -> `std::vector<int64_t>` 那一步**本来就要遍历 n 次**,
+   顺手判一下是不是整数是免费的;放类型层就是**同一个表扫两遍**
+2. **0-D Tensor 元素只有那一层处理得了。** 上游允许元素是 0-D Tensor(`creation.py:1831`),
+   取值要 device->host;类型层要么重复这套逻辑,要么假装看不见
+3. **报错反而更准** —— 转换层知道下标:
+
+```
+shape[3] must be an integer, got 2.5
+  in paddle.zeros, called from train.lua:42
+```
+
+⚠️ **两条硬要求,否则这个下放就变成放水:**
+- **必须 `error`,不许静默取整。** `math.floor(2.5)` 式的宽容会造出静默错误的 shape
+- **必须指向调用点**(`debug.getinfo` 拿调用者的 `file:line`),不是报在绑定层内部
+- C++ 侧的检查不得让异常穿过 Lua(C7),走 C ABI 的 status 码转 `lua_error`
+
+#### opaque 容器:只有 O(1) 一条路
+
+```
+list_of(E) 判一个 opaque 容器 o(Tensor / Array):
+  E 是标量类型(Int / number / …)?
+      是 -> 用 o 自报的 dtype + ndim == 1 证明,**不碰元素**      O(1)
+      否 -> 没有 O(1) 证明,且**不许逐元素** -> 判否
 ```
 
 ⛔ **绝不对 opaque 容器逐元素访问。** 这不是性能优化,是红线:
 `t[i]` 对一个 GPU 上的 Tensor 是一次 device->host 同步,n 个元素就是 n 次 ——
 **类型检查触发设备同步**,用户永远查不出自己的训练为什么慢。
-
-**这条判据自己推出了上游的行为,两边一字不差:**
-
-| | 我们的判据 | 上游 |
-|---|---|---|
-| 一维 int Tensor 当 `shape` | `E = Int` 是标量 -> 自报 dtype 证明 -> **收** | **收**(`creation.py:1832`)|
-| 二维 Tensor 当 `concat` 的 `x` | `E = Tensor` 非标量 -> 无 O(1) 证明 -> **不收** | **不收**(`manipulation.py:1507`)|
-
-> 这是个好信号:**没有为了对齐上游而写特例**,是同一条规则算出来的。
-> 反过来看也对 —— 把 2-D Tensor 当 n 个 Tensor,底层 `_C_ops.concat` 收的是
-> `std::vector<Tensor>`,我们得替它切 n 个 view,那是**发明语义**,不是绑定。
 
 #### 一般形式:`list_of(elem)`
 
@@ -267,7 +289,7 @@ argrule.register("TensorList", argrule.list_of("Tensor"))   -- concat / stack �
 
 | ✅ 接受 | ❌ 不接受 |
 |---|---|
-| 整数的裸 table:`{2, 3}` | 有小数:`{2.5}` |
+| 整数的裸 table:`{2, 3}` | 有小数:`{2.5}` —— **在转换层报错,不在类型层** |
 | 整数的 `pl.List`:`List{2, 3}` | 二维 / 非整数 dtype 的 Array 或 Tensor |
 | 整数 dtype 的**一维** `insight.Array` / **`paddle.Tensor`** | 裸数字 —— 但**它另有出路**,见 §2.4 |
 | 元素是 0-D 整数 Tensor 的 table(上游明说) | |
@@ -279,10 +301,12 @@ argrule.register("TensorList", argrule.list_of("Tensor"))   -- concat / stack �
 
 ---
 
-### 2.4 `zeros(2, 3)` 怎么办:归一化在类型系统**外面**
+### 2.4 `zeros(2, 3)` 怎么办:**宿主侧的 10 行装饰器,不进签名层**
 
-⚠️ **我昨天写的「`paddle.zeros(5)` 本来就是错的」在当前 develop 上不成立。**
-上游加了 torch 风格的变长 size:
+> ⚠️ **这一节是我上一轮临时提出来的,之前没讨论过。** 人问「`sizeargs` 之前有讨论过吗」——
+> 没有。它是我读到 `decorator_utils.py` 之后当场加的表级选项,**现已否掉**,理由见下。
+
+⚠️ **先纠正一个我写错的断言:「`paddle.zeros(5)` 本来就是错的」在当前 develop 上不成立。**
 
 ```python
 # python/paddle/utils/decorator_utils.py:423-431
@@ -293,21 +317,33 @@ if 'shape' in kwargs and isinstance(kwargs['shape'], int):
                                 kwargs['shape'] = [kwargs['shape']]
 ```
 
-`paddle.ones(1, 2, 3, dtype=...)` / `ones(5)` / `ones(size=[1,2,3])` 全合法
-(`decorator_utils.py:406-437`,用在 `creation.py:1644, 1807, 3081` …)。
-
 **但注意上游是怎么做的:它没有把 `int` 加进 `ShapeLike`**(`_typing/shape.py:22-33` 里确实没有),
-而是用一个**装饰器在签名外面**归一化。**类型系统保持干净,兼容性糖在外层。**
+而是用一个**装饰器套在签名外面**。类型系统保持干净,兼容性糖在外层。
 
-我们照抄这个分层 —— 表级选项,`type` 仍然是 `IntList`:
+**用量小到不值得进签名层 —— 全 Paddle 只有 5 个函数:**
+
+| 函数 | 出处 |
+|---|---|
+| `ones` / `zeros` / `empty` | `python/paddle/tensor/creation.py:1644, 1807, 3081` |
+| `randn` / `rand` | `python/paddle/tensor/random.py:961, 2343` |
+| (另有 8 处 `size_args_decorator_patch` / `VariableArgsDecorator`,给 Tensor 方法与 `dims`/`repeats`) | `decorator_utils.py:440-485` |
+
+所以**照抄上游的分层,不发明表级选项**:
 
 ```lua
-paddle.zeros = rule{
+-- lua/paddle/_sizeargs.lua ——  paddle-lua 自己的 ~10 行,不进 argrule
+paddle.zeros = sizeargs("shape", rule{
   {name = "shape", type = "IntList"},
-  {name = "dtype", type = "DType",  default = paddle.float32},
-  sizeargs = "shape",        -- ← 归一化发生在解析之前
-}(_C_ops.full)
+  {name = "dtype", type = "DType", default = paddle.float32},
+}(_C_ops.full))
 ```
+
+**为什么不做成 `rule{ ..., sizeargs = "shape" }`:**
+
+1. **5 个函数**换签名层一个永久概念,不划算 —— 而签名层的卖点之一就是小(~400 行)
+2. 上游自己就是**装饰器**,不是签名的一部分。照抄分层比照抄行为更重要
+3. 它是 torch 兼容糖,**将来可能被上游改**;放在宿主侧,改动止于一个文件
+4. 如果哪天证明它是通用需求(不止 paddle),再从宿主提升进库 —— **反向很难**
 
 `sizeargs` 的语义与上游逐字对应:
 
@@ -317,12 +353,11 @@ shape 拿到的是单个整数 -> 包成 {n}
 ```
 
 ⚠️ **`zeros(2, "int64")` 因此不是「shape=2, dtype=int64」,而是错的** ——
-上游同样如此(`args[0]` 是 int 就把**全部**位置实参当 shape)。
-这是上游行为,不是我们的限制;要给 dtype 就写 `zeros({2}, "int64")` 或 `zeros(2, {dtype="int64"})`。
+上游同样如此(`args[0]` 是 int 就把**全部**位置实参当 shape)。要给 dtype 就写
+`zeros({2}, "int64")`。这是上游行为,不是我们的限制。
 
-**消歧不受影响,而且更稳:** `zeros{2, 3}` 现在有两条独立的路得到同一答案 ——
-②「表内位置」里 `dtype = 3` 过不了枚举检查(`api/README.md` §2.1.1),落到 ③ 整表当 shape;
-而 `sizeargs` 那条路直接说「全是整数 -> 就是 shape」。**两条路同一答案,不是巧合。**
+**消歧不受影响:** `zeros{2, 3}` 是表调用,装饰器不碰它(上游的装饰器也只看位置实参);
+②「表内位置」里 `shape = 2` 不是容器、`dtype = 3` 过不了枚举检查 -> 落到 ③ 整表当 shape。
 
 ## 2.5 用户端长什么样(按候选名 `argrule` 写,定名后全局替换)
 

@@ -121,9 +121,13 @@ Python 不允许,而支持它要付 3^N 的生成代码代价,argcheck 就是死
 
 ⚠️ **但 `paddle.zeros(2, 3)` / `zeros(5)` 是合法的** —— 上游有
 `@size_args_decorator`(`python/paddle/utils/decorator_utils.py:406-437`),
-**在签名外面**把变长 int 归一化成 `shape`。我们照抄这个分层:
-签名里写 `sizeargs = "shape"`,`type` 仍然是 `IntList`(`plan/argrule.md` §2.4)。
+**在签名外面**把变长 int 归一化成 `shape`(全 Paddle 只用在 5 个函数上:
+`ones` / `zeros` / `empty` / `randn` / `rand`)。我们照抄这个分层:
+**paddle-lua 侧一个 ~10 行装饰器,不进签名层**(`plan/argrule.md` §2.4)。
 连带:**第一个位置实参是整数时,全部位置实参都归 `shape`,`dtype` 只能具名** —— 上游同此。
+
+**元素是不是整数,在转换层查(table -> `vector<int64_t>` 那步反正要遍历),
+不在类型层查** —— 但必须 `error`、必须带下标、必须指向调用点,不许静默取整。
 **归一化必须在类型系统外面** —— 把 `number` 塞进 `shape` 的 `type` 里,
 `{"number", "IntList"}` 就会让「表内位置」解释重新成立,凭空造出调用歧义。
 上游没这么干,我们也不干。

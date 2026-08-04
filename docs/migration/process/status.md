@@ -112,10 +112,10 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `plan/overview.md` | 915 | ✅ |
 | `plan/roadmap.md` | 344 | ✅ |
 | `plan/foundations.md` | 1105 | ✅ **+参数检查(§4)+ 基座边界与解析器项目(§5)** |
-| `plan/argrule.md` | 631 | ✅ **新增**(孵化说明书,建仓后迁走;原 `argsig.md`)|
+| `plan/argrule.md` | 645 | ✅ **新增**(孵化说明书,建仓后迁走;原 `argsig.md`)|
 | `plan/layout.md` | 261 | ✅ **新增** |
 | `plan/ci.md` | 246 | ✅ **新增** |
-| `plan/api/README.md` | 198 | ✅ **新增** |
+| `plan/api/README.md` | 201 | ✅ **新增** |
 | `plan/api/io.md` | 236 | ✅ **新增**(样板)|
 | `plan/api/<其余 15 个模块>` | — | ⬜ 各模块开工时写 |
 | `plan/modules/README.md` | 70 | ✅ |
@@ -146,7 +146,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `process/status.md` | 本文件 | ✅ |
 | `process/tasks.md` | 137 | ✅ |
 | `process/conventions.md` | 280 | ✅ |
-| `process/decisions.md` | 242 | ✅ |
+| `process/decisions.md` | 243 | ✅ |
 | `process/open-questions.md` | 160 | ✅ |
 
 ### 5.4 `research/`
@@ -219,3 +219,4 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 2026-08-03 | **`shape` 一类参数改用 `IntList`,且判据是「是个容器 + 装的是整数」而不是类名单(R31)** —— 人的原话:「paddle 里面 shape 必须是 tuple or list or np.ndarray 不能是数字」「**反正需要是个容器**」「**而且装的是整数**」。我先写成 `{"table","pl.List","insight.Array"}`,**当天即被自己推翻**:那是把「容器」硬编码成框架名单,用户自己的容器类会被无理由挡住,正是 §4 零框架硬编码要挡的。改为组合子 `argrule.list_of(elem)`(探容器协议 + 逐元素套 `elem`),`IntList` / `TensorList` 只是宿主注册的别名。容器协议:长度 `#o` -> `:len()` -> `:size()`(⚠️ **5.1 的 `__len` 对 table 无效**,进 M0 #24 实测)、取元素 `o[i]` 1-based、自报 dtype 走 O(1) 快路否则逐元素 O(n)。**意外收获:元素逐个查把 `concat` 的歧义也消掉了** —— `concat{a,b}` 的②里 `x=a` 是 Tensor 不是 TensorList、`concat{{a,b},2}` 的③里元素 `2` 不是 Tensor,各自出局。**所以上一版「第一个参数是列表的函数必须写 `nonamed`」作废**,真歧义要求 `list_of(E)` 且 `E` 自己接受容器,现有 API 里一个都没有。教训与「必填参数是天然消歧器」同源:**判据越弱,假歧义越多** |
 | 2026-08-03 | **`Tensor` 也满足容器协议(人的决定),并纠正我自己的两处断言** —— 人:「Tensor 也应该满足容器协议,毕竟只要是个 int 容器按说都应该行」。① 上游核实通过:`ShapeLike = Sequence[int|Tensor|None] | Tensor`(`_typing/shape.py:22-33`),"若 shape 是 Tensor,须是一维"(`creation.py:1832`),**且 list 的元素可以是 0-D Tensor**(`:1831`)。② 因此容器协议分 **plain / opaque** 两级 —— 区别不是"谁写的",是**逐元素访问贵不贵**:对 GPU 上的 Tensor 逐元素查类型 = n 次设备同步,**红线,禁止**。选路机械:`E` 是标量类型就用容器自报的 dtype+ndim 做 O(1) 证明,否则逐元素;没有 O(1) 证明又不许逐元素 -> 判否。**这条判据自己算出了上游的行为:一维 int Tensor 是合法 `shape`(收),二维 Tensor 不是 `TensorList`(`concat` 的 `x` 是 `Sequence[Tensor]`,`manipulation.py:1482,1507`,不收)—— 没写任何特例。** ③ ⚠️ **纠正**:我昨天写的「`paddle.zeros(5)` 本来就是错的」在当前 develop 上**不成立** —— 上游有 `@size_args_decorator`(`decorator_utils.py:406-437`),`ones(1,2,3)` / `ones(5)` / `ones(size=[...])` 全合法。但注意上游的做法:**没有把 `int` 加进 `ShapeLike`,而是用装饰器在签名外面归一化**。我们照抄这个分层 —— 表级选项 `sizeargs = "shape"`,`type` 仍是 `IntList`(`argrule.md` §2.4)。连带:第一个位置实参是整数时全部位置实参归 `shape`、`dtype` 只能具名(上游同此) |
 | 2026-08-03 | **P10 拍板:签名层定名 `argrule`** —— `plan/argsig.md` -> `plan/argrule.md`,全仓库引用、rockspec 依赖项、WORKPLAN 节点 1.7.0 同步改名;`foundations.md` §5.4.7 与 `decisions.md` P10 记下"我建议的是 `argsig`,人选了 `argrule`"。**剩下的动作:去 luarocks 占位** |
+| 2026-08-03 | **`sizeargs` 降级出签名层,`IntList` 的元素检查下放转换层(R32)** —— 人的两问:「`sizeargs` 之前有讨论过吗」**没有,是我上一轮临时加的**;「我想的是在函数里面有个 if 判断如果有小数直接 error」**对,而且比放类型层更好**。① `sizeargs` 全 Paddle 只用在 5 个函数(`ones`/`zeros`/`empty`/`randn`/`rand`,`creation.py:1644,1807,3081`、`random.py:961,2343`),而上游自己就是**装饰器在签名外面** —— 照抄分层比照抄行为更重要,做成 paddle-lua 侧 ~10 行,签名层零改动。② 元素检查下放的判据是机械的:**去掉它之后调用仍唯一解释 -> 可下放**。`IntList` 满足 -> 转换层 `if` + `error`(那步反正要遍历 n 次,类型层再扫一遍是查两遍;0-D Tensor 元素也只有那层处理得了;报错还能带下标 `shape[3] must be an integer, got 2.5`);`TensorList` 不满足(`concat{{a,b},2}` 靠元素类型出局)-> 留类型层。**红线:必须 error 不许静默取整、必须指向调用点、C++ 异常不得穿过 Lua(C7)** |
