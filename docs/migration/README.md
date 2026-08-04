@@ -23,7 +23,7 @@ docs/migration/
 │   ├── api/               ★ 按 Lua 模块的接口设计(paddle.io.* / paddle.nn.* …)
 │   └── modules/           ★ 19 份实现设计,每个阶段一份
 ├── process/           作业流程:状态、任务板、约定、决策、未解问题
-└── research/          技术论证:可行性、架构、GC、DataLoader、复用、动转静
+└── research/          技术论证:可行性、架构、GC、DataLoader、复用、动转静、生态构想
     └── _ref/          第三方参考源码片段
 ```
 
@@ -134,6 +134,7 @@ docs/migration/
 | `research/dataloader.md` | 多 worker | 线程胜过进程;Lanes deep userdata |
 | `research/reuse.md` | 可复用 C++ 资产 | 五套执行器辨析;`InterpreterCore` + `run_program_ad_func` |
 | `research/to-static.md` | 动转静 | trace 先于 script;luacheck parser;源码契约可验证 |
+| `research/ecosystem.md` | **生态构想与顺序** | 「语言无关」= C ABI + 内存描述协议;索引惯例属于绑定层;**构想记录,不是承诺** |
 
 ---
 

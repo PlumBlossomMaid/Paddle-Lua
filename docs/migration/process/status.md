@@ -27,6 +27,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 阶段 | **论证 / 文档** |
 | 工程树位置 | `WORKPLAN.md` 节点 **0.14**(参数检查选型 argcheck)-> 下一个 **0.15 L0 CI 落地** |
 | 下一个动作 | **0.15** L0 CI(不需要 libpaddle,现在就能建,见 `plan/ci.md` §2),之后才是 **1.1 无 Python 构建**。**并行**:M0 #22/#23(argcheck 的 Q-17,纯 Lua,不阻塞于 G0,但必须在 P5 前闭掉) |
+| 人点名的三件调研 | **① Q-22** phi 层有没有不依赖 pybind 的 DLPack 通道(决定 Insight7 内存协议怎么定);**② 数出「跑通 MNIST 训练,Insight7 至少要哪些函数」**(从上游代码里数,不凭感觉 —— 已知 `python/paddle` 全层只用 132 个 `np.*` 符号、真函数约 15 个,见 `research/ecosystem.md` §5.1);**③ Q-23** Array API Standard 是否如记忆所述(要走代理核实)。三件都**不阻塞** `WORKPLAN` 主线 |
 | 全部 ⛔ 阻塞节点 | `WORKPLAN.md` 4.3 distributed —— 无多卡环境(待拍板 P2) |
 | 待人拍板 | ~~P1(Insight7 `axis`)~~ ✅ **2026-08-03 已拍板:改**(R24)。~~P9(还 vendor Penlight 吗)~~ ✅ **2026-08-03 已拍板:不 vendor,全生态 rock 依赖**(R30)。~~P10(签名层叫什么)~~ ✅ **2026-08-03 已拍板:`argrule`**。剩余待拍板:P3 / P4 / P6 / P7(改写)—— 见 `process/decisions.md` §3 §4 |
 | 上次卡在哪 | — |
@@ -99,7 +100,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 文档 | 行数 | 状态 |
 |---|---|---|
 | **`WORKPLAN.md`(总工程树)** | 248 | ✅ **新增** |
-| `/CLAUDE.md` | 492 | ✅ |
+| `/CLAUDE.md` | 502 | ✅ |
 | `/README.md`(英文,默认) | 192 | ✅ |
 | `/README.zh-CN.md` | 186 | ✅ |
 | `/README.zh-TW.md` | 186 | ✅ |
@@ -112,10 +113,10 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `plan/overview.md` | 935 | ✅ |
 | `plan/roadmap.md` | 341 | ✅ |
 | `plan/foundations.md` | 1105 | ✅ **+参数检查(§4)+ 基座边界与解析器项目(§5)** |
-| `plan/argrule.md` | 689 | ✅ **新增**(孵化说明书,建仓后迁走;原 `argsig.md`)|
+| `plan/argrule.md` | 694 | ✅ **新增**(孵化说明书,建仓后迁走;原 `argsig.md`)|
 | `plan/layout.md` | 261 | ✅ **新增** |
-| `plan/ci.md` | 258 | ✅ **新增** |
-| `plan/api/README.md` | 340 | ✅ **新增** |
+| `plan/ci.md` | 280 | ✅ **新增** |
+| `plan/api/README.md` | 361 | ✅ **新增** |
 | `plan/api/io.md` | 236 | ✅ **新增**(样板)|
 | `plan/api/<其余 15 个模块>` | — | ⬜ 各模块开工时写 |
 | `plan/modules/README.md` | 70 | ✅ |
@@ -145,9 +146,9 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 |---|---|---|
 | `process/status.md` | 本文件 | ✅ |
 | `process/tasks.md` | 137 | ✅ |
-| `process/conventions.md` | 280 | ✅ |
-| `process/decisions.md` | 247 | ✅ |
-| `process/open-questions.md` | 197 | ✅ |
+| `process/conventions.md` | 314 | ✅ |
+| `process/decisions.md` | 250 | ✅ |
+| `process/open-questions.md` | 224 | ✅ |
 
 ### 5.4 `research/`
 
@@ -159,6 +160,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `research/dataloader.md` | 380 | ✅ |
 | `research/reuse.md` | 307 | ✅ |
 | `research/to-static.md` | 239 | ✅ |
+| `research/ecosystem.md` | 213 | ✅ **新增**(生态构想与顺序;构想记录,非承诺)|
 
 **论证阶段文档已齐(约 8800 行)。G0 未通过之前不新增论证文档,只修正已有的。**
 
@@ -224,3 +226,4 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 2026-08-03 | **`decorator_utils.py` 整层不移植(R34/D35)** —— 人的原话:「这东西就是 Paddle 为了 PyTorch 用户用得惯才搞的,lua 里面不用考虑这些,**我们 Paddle 框架就应该用自己的语法和规范**」。范围从「逐个判断哪些糖要移植」升成「整层跳过」:1451 行 / 30+ 装饰器 / 68 个模块 import 它,全文 **51 处** `PyTorch`/`torch.`(docstring 直写 `PyTorch: torch.block_diag(x,y,z)` / `Paddle: paddle.block_diag([x,y,z])`,`:923-940`),甚至有专门劝返 torch 关键字的 `forbid_keywords`(`:517-542`)。**关键证据:35 处 `wrapper.__signature__ = inspect.signature(func)`** —— 上游自己把规范签名保留在内层,**所以我们的生成器读到的本来就是规范签名,忽略这层是默认行为而不是额外工作量**。⚠️ 唯一要逐个确认的:少数装饰器可能不只改参数(`legacy_reduction_decorator` / `view_decorator`),判据「壳只动参数、内层签名不变」,发现改了行为的记 OPEN_QUESTION |
 | 2026-08-03 | **新增硬约束 C12:用户可见的 API 一律用 Paddle 自己的规范,不引入 PyTorch 的命名与惯例(R35/D35)** —— 人:「所以我们的 paddle-lua 也不要那些 PyTorch 的东西」。**光跳过 `decorator_utils.py` 挡不住** —— 一批 torch 风格参数**已经进了上游的规范签名本身**:`zeros(shape, dtype, name, *, out, device, requires_grad, pin_memory)`(`creation.py:1807`),而 Paddle 自己的名字在 `to_tensor` 里原样留着(`place` / `stop_gradient`,`:1124-1129`)。取 Paddle 那套:`stop_gradient` / `place` / `axis` / `x` / `shape` / `place=CUDAPinnedPlace()`。**`requires_grad` 必须挡住的真正理由:它与 `stop_gradient` 取反、默认值也反**(`False` vs `True`)—— 两个名字并存时搞混一次就是**静默地训不动**,没有报错只有 loss 不降。⚠️ 例外:`Tensor.size`(元素总数)是 Paddle 原生属性,不在禁用之列。**边界写死:约束用户看得见的表面,实现层不受限**(GC 抄 Torch7 九层 D5、schema 抄 argcheck D30 照做,因为用户不会写到它们)。CI 判据 `grep -rnE 'name *= *"(requires_grad|device|dim|input|tensors|pin_memory)"' lua/`。新增 Q-19(`out=` 是能力不是命名,倾向 v1 不做)、Q-20(`decorator_utils.py` 里是否有"壳改了语义"的例外,P3 前查完)|
 | 2026-08-03 | **「尾随选项表」这个写法不存在,一张表就是全部参数(R36)** —— 人指着 README 首屏说:「DataLoader 不应有额外的 `{}` 进行包装」「**你还不如直接 `{ds, batch_size=...}`**」。查下来**不是风格问题,那一行按我们自己的规则直接报错**:`DataLoader(ds, {batch_size=64})` 是两个实参的**位置调用**,规则 #2 `batch_size:number` 收到了一张 table。修法不是逐处订正,是把**混合表**写进 `argrule` 解析顺序的第 ① 步 —— 一张表里数组部分按位置填前 k 条规则、具名键按名字填、同一参数给两次即 `error`,语义与 Python「位置在前、关键字在后」一致。于是每个 API 只有三种合法写法(位置 / 全具名 / 混合表),**没有第四种**。⚠️ **教训:`f(x, {…})` 与 `f{x, …}` 只差一个字符,而前者是绝大多数 Lua 库的习惯** —— 我自己写的 README 错了,还反复读过多次都没发现,人一眼看出来。这类「读着完全正常、却跑不通」的错误只能靠机器:CI 红线 ①b 新增 `args_no_opts_table.lua`,**且必须扫 `docs/`**(文档是用户抄走的第一份代码)。连带订正 3 份 README + `overview.md`(4)+ `03-codegen.md` + `11-io.md`(2)+ `roadmap.md` + `07-serialization.md` + `research/reuse.md`;新增 `api/README.md` §2.1.5 |
+| 2026-08-03 | **一次自由讨论的落盘:新增 `research/ecosystem.md`(生态构想与顺序)** —— 内容不是承诺,是"为什么这么排序"。① 反复验证出一条判据:**「语言无关」= C ABI + 一份内存描述协议**,在 PIL(重活本来就在 libjpeg/FreeType,迁移=写绑定)、numpy(护城河是 buffer protocol/DLPack 不是 API)、设想中的 InsightPlot(资产是中间那层 display list)上都成立 —— 与 `argrule` 的「容器是协议不是类名单」(R31)是同一条教训。② **R38:索引基准与内存序属于绑定层**,Insight7 已是 `src/` + `bindings/{python,julia,lua}` 架构,Python 0-based / Lua 1-based / Julia 1-based+column-major,**同一个核心** —— Julia 那列是决定性证据(连内存序都得在绑定层处理)。这让 R24 从"针对 Lua 的修补"升为通则,我们依赖的 1-based 不会被回退。③ 实测 `python/paddle` 全部 `.py` 只用到 **132 个 `np.*` 符号**(numpy 公开 API 约 600),前 34 名一半是 dtype 与常量,**真正的函数只有十五个** —— 所以"先做 numpy 功能"的判据应改为"paddle-lua 用得到的子集",且三步不该串行。④ 新增 **Q-22**(phi 层的 DLPack 通道,决定 Insight7 协议)、**Q-23**(Array API Standard 是否如我记忆所述 —— **整段凭记忆,未核实**)、待拍板 **P11**(上游若把 `axis` 改名 `dim` 跟不跟,建议不跟)。⑤ `ci.md` 新增 §7.1:**数值对拍测不出「视图 vs 拷贝」** —— 两边输出值完全一样,差别只在改了返回值后原张量变没变,必须专门设计别名测试;它与 `requires_grad`/`stop_gradient` 同性质:**不报错,只是结果错**。⑥ 记下两条方法论:**没有 KPI 的红利是"能推翻自己"而不是"能做更全"**(numpy 的包袱正是来自它推翻不了自己);**Agent 最擅长帮人做的事恰恰是扩大范围**,而 60% 的框架等于 0 |

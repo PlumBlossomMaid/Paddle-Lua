@@ -121,6 +121,16 @@ G2 ──▶ M1 验收:纯 Lua 5.1,无 Python,MNIST 训练收敛
 > **任何 Paddle C++ 符号,你必须先在 Paddle 源码里亲眼读到,才能写进代码。**
 > **"我记得 Paddle 有个 XXX" 一律不成立。**
 
+**★ 范围不限于 Paddle:任何外部 API / 库 / 规范都适用同一条铁律。**
+numpy、Pillow、DLPack、Array API Standard、Penlight、Lanes……
+凡是"据我所知它是这样"的断言,**在给出 `file:line` 或可核实出处之前都不算成立**,
+写进文档时必须标 **[待核实]** 并同时开一条 `open-questions.md`(范例:Q-23)。
+
+理由是同一条:**编造的行为描述会编过、跑通、结果错。**
+而外部库比 Paddle 更危险 —— Paddle 的源码就在 `$PADDLE_ROOT` 随时能查,
+外部库往往要联网,于是"先凭印象写下来,回头再查"的诱惑更大,
+而那个"回头"通常不会发生。
+
 ### 4.2 强制流程
 
 引用任何 Paddle 符号前:

@@ -165,6 +165,24 @@
 | 倾向 | 跳过。但**发现任何一个改了行为的,单独记一条,不默认放行**(`CLAUDE.md` §4) |
 | 影响 | 不阻塞 G0;必须在 P3(算子代码生成)之前查完 |
 
+### Q-22 · phi 层有没有**不依赖 pybind** 的 DLPack 通道
+
+| | |
+|---|---|
+| 现象 | 「语言无关 = C ABI + 一份内存描述协议」(`research/ecosystem.md` §2)。DLPack 正是深度学习圈已经标准化的那份描述(torch/tf/jax/cupy 互传张量用它),**且它本身就是 C ABI,与 Python 无关**。Paddle 有 `python/paddle/utils/dlpack.py:81 to_dlpack` / `:144 from_dlpack`,但 C++ 侧的转换逻辑我只在 `paddle/fluid/pybind/tensor.cc` 一带搜到,`paddle/phi/api/lib/` 下没搜到 —— 也就是**包在 pybind 里,capsule 本身是 Python 对象** |
+| 需要什么才能关 | 读 `paddle/fluid/pybind/tensor.cc` 里 DLPack 的实现,确认它到底调了 phi 的哪些公开 API;再确认 phi 有没有对外暴露等价能力。结论只有两种:**(a) 有** -> Insight7 ↔ `paddle.Tensor` 的边界直接定为 DLPack;**(b) 只在 pybind 层** -> 我们照着它对 phi 公开 API 重写一遍(不改上游,C10) |
+| 为什么重要 | 它决定 **Insight7 内存协议怎么定**,而那个协议在 Tensor↔Array 零拷贝、DataLoader、Lanes 跨线程、将来 InsightPlot 上全是关键路径。**顺带解决一个挂着的旧问题**:`DType`/`Place` 现在还要在 Insight7 与 Paddle 的边界上转换一次(R28 备注),两边都认 DLPack 的话这个转换就不存在了 |
+| 影响 | **不阻塞 G0,但应在 Insight7 协议动刀之前查完** —— 现在改最便宜,晚半年是三个仓库一起动 |
+
+### Q-23 · Array API Standard 是不是真如我记忆所述
+
+| | |
+|---|---|
+| 现象 | 我在讨论里说:`data-apis.org/array-api` 正在做"把 numpy 语义**语言无关地**标准化",已剔掉 `np.matrix` / masked array,用严格类型提升取代 value-based casting,numpy/cupy/torch/jax 都在往上靠,且带官方测试套件 `array-api-tests`。**这一整段是凭记忆写的,离线核实不了 —— 按 `CLAUDE.md` §4,核实前不算成立** |
+| 需要什么才能关 | 走代理(`http://127.0.0.1:7890`)读一遍规范本体,回答三问:① 它是否真的语言中立(还是仍以 Python 类型系统为前提)?② 类型提升规则是否已严格化?③ `array-api-tests` 能不能被非 Python 实现复用,还是绑死 pytest |
+| 若属实的价值 | 等于免费拿到**一份包袱已剔的语义规格 + 一批别人已经吵完的设计决策 + 一套可直接跑的验收测试** —— 那 Insight7 的语义基线就照它定,能省掉大量自己拍的决定(而自己拍的每一条,将来都要自己维护) |
+| 影响 | 不阻塞 paddle-lua 任何节点;影响的是 Insight7「慢慢对齐 numpy」那条线的起点选择 |
+
 ### Q-21 · 上游有没有「显式 `None` 与缺省含义不同」的参数
 
 | | |
