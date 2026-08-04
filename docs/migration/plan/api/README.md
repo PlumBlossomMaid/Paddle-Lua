@@ -119,18 +119,46 @@ Python 不允许,而支持它要付 3^N 的生成代码代价,argcheck 就是死
 元素还可以是 0-D 整数 Tensor(`creation.py:1831`)。
 容器协议、O(1)/O(n) 选路见 `plan/argrule.md` §2.3。
 
-⚠️ **但 `paddle.zeros(2, 3)` / `zeros(5)` 是合法的** —— 上游有
-`@size_args_decorator`(`python/paddle/utils/decorator_utils.py:406-437`),
-**在签名外面**把变长 int 归一化成 `shape`(全 Paddle 只用在 5 个函数上:
-`ones` / `zeros` / `empty` / `randn` / `rand`)。我们照抄这个分层:
-**paddle-lua 侧一个 ~10 行装饰器,不进签名层**(`plan/argrule.md` §2.4)。
-连带:**第一个位置实参是整数时,全部位置实参都归 `shape`,`dtype` 只能具名** —— 上游同此。
+⚠️ **`paddle.zeros(2, 3)` / `zeros(5)` 在上游是合法的,我们仍然不支持** —— 见下面 §2.1.3。
 
 **元素是不是整数,在转换层查(table -> `vector<int64_t>` 那步反正要遍历),
 不在类型层查** —— 但必须 `error`、必须带下标、必须指向调用点,不许静默取整。
-**归一化必须在类型系统外面** —— 把 `number` 塞进 `shape` 的 `type` 里,
-`{"number", "IntList"}` 就会让「表内位置」解释重新成立,凭空造出调用歧义。
-上游没这么干,我们也不干。
+
+**永远不要把 `number` 塞进 `shape` 的 `type` 里** —— `{"number", "IntList"}`
+会让「表内位置」解释重新成立,凭空造出调用歧义。上游也没这么干
+(`ShapeLike` 里没有 `int`,它用的是签名外面的装饰器)。
+
+### 2.1.3 ★ 上游的**兼容糖**一律不移植
+
+Paddle 为了接住 torch 用户,加了一大层兼容装饰器
+(`python/paddle/utils/decorator_utils.py`,30+ 个):
+
+| 兼容糖 | 上游用量 | 我们 |
+|---|---|---|
+| **参数别名**:`concat(tensors=…, dim=…)` = `concat(x=…, axis=…)` | **291 处** `@param_one_alias` / `@param_two_alias` | ❌ 只认 `x` / `axis` |
+| **变长 size**:`zeros(2, 3)` / `zeros(size=[2,3])` | 5 处 `@size_args_decorator` | ❌ 写 `zeros{2, 3}` |
+| `reshape(2,3)` / `transpose(0,1)` / `expand(...)` 等变长形式 | 各 1 处专用装饰器 | ❌ 传容器 |
+
+**理由不是"懒得做",是这些糖的收益在 Lua 侧不存在:**
+
+1. **Lua 的表调用本来就省掉了括号** —— `zeros{2,3}` 与 `zeros(2,3)` 一样长,
+   而 Python 的 `zeros([2,3])` 确实噪声大。**上游加糖的原因不成立**
+2. **我们没有存量代码要接** —— 兼容糖服务的是"torch 用户的肌肉记忆 + 已有脚本",
+   Lua 侧两者都是空的
+3. **别名与具名表调用相冲**:`concat{x=a, tensors=b}` 要怎么办?
+   上游是抛 `ValueError`(`decorator_utils.py:181-184`)—— 我们得为 291 处各复制一遍这个检查
+4. **`dim`/`axis` 两个名字 = index 语义标注表两条记录**,而漏标一条就是静默 off-by-one(§2.2)
+
+⚠️ **例外要逐个论证,且理由不能是"上游有"。** 判据:
+**这个写法在 Lua 里比规范写法更短或更清楚吗?** 不是就不做。
+
+**代替方案:一次性的教学式报错**,而不是一个永久的二义入口:
+
+```
+paddle.zeros(2, 3)
+-> shape must be a container of integers, got number
+     did you mean:  paddle.zeros{2, 3}
+```
 
 ### 2.2 索引:全 1-based,且必须在文档里逐个标出来
 

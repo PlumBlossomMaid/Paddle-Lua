@@ -291,7 +291,7 @@ argrule.register("TensorList", argrule.list_of("Tensor"))   -- concat / stack �
 |---|---|
 | 整数的裸 table:`{2, 3}` | 有小数:`{2.5}` —— **在转换层报错,不在类型层** |
 | 整数的 `pl.List`:`List{2, 3}` | 二维 / 非整数 dtype 的 Array 或 Tensor |
-| 整数 dtype 的**一维** `insight.Array` / **`paddle.Tensor`** | 裸数字 —— 但**它另有出路**,见 §2.4 |
+| 整数 dtype 的**一维** `insight.Array` / **`paddle.Tensor`** | 裸数字 —— **没有出路,报错并建议 `{n}` 写法**,§2.4 |
 | 元素是 0-D 整数 Tensor 的 table(上游明说) | |
 | **任何满足容器协议且装整数的第三方类型** | 空容器?—— 见 §6 未决 |
 
@@ -301,63 +301,47 @@ argrule.register("TensorList", argrule.list_of("Tensor"))   -- concat / stack �
 
 ---
 
-### 2.4 `zeros(2, 3)` 怎么办:**宿主侧的 10 行装饰器,不进签名层**
+### 2.4 `zeros(2, 3)`:❌ **不支持,连装饰器也不做**
 
-> ⚠️ **这一节是我上一轮临时提出来的,之前没讨论过。** 人问「`sizeargs` 之前有讨论过吗」——
-> 没有。它是我读到 `decorator_utils.py` 之后当场加的表级选项,**现已否掉**,理由见下。
+> 这一节记录一个提出又砍掉的东西,留着是为了不被第二次提出来(§7.1 保留翻案痕迹)。
+>
+> - 我上一轮临时提了个表级选项 `sizeargs = "shape"`(**之前从没讨论过**)
+> - 人问「之前有讨论过吗」-> 我降级成宿主侧 ~10 行装饰器
+> - 人再问「**用得少的东西,为了 API 简洁是不是就该去掉**」-> ✅ **对,整个去掉**
 
-⚠️ **先纠正一个我写错的断言:「`paddle.zeros(5)` 本来就是错的」在当前 develop 上不成立。**
+⚠️ 先纠正我更早的一个错误断言:「`paddle.zeros(5)` 本来就是错的」在当前 develop 上**不成立**,
+上游确实支持 `ones(1,2,3)` / `ones(5)` / `ones(size=[1,2,3])`
+(`python/paddle/utils/decorator_utils.py:406-437`,用在 5 个函数上)。
+**它合法。我们仍然不做。**
 
-```python
-# python/paddle/utils/decorator_utils.py:423-431
-if 'size' in kwargs:            kwargs['shape'] = kwargs.pop('size')
-elif len(args) >= 1 and isinstance(args[0], int):
-                                kwargs['shape'] = list(args); args = ()
-if 'shape' in kwargs and isinstance(kwargs['shape'], int):
-                                kwargs['shape'] = [kwargs['shape']]
-```
+**决定性的理由:上游加这个糖的原因,在 Lua 侧不存在。**
 
-**但注意上游是怎么做的:它没有把 `int` 加进 `ShapeLike`**(`_typing/shape.py:22-33` 里确实没有),
-而是用一个**装饰器套在签名外面**。类型系统保持干净,兼容性糖在外层。
+| | Python | Lua |
+|---|---|---|
+| 规范写法 | `paddle.zeros([2, 3])` | `paddle.zeros{2, 3}` |
+| 糖 | `paddle.zeros(2, 3)` | —— **不需要,上面那行已经一样短** |
 
-**用量小到不值得进签名层 —— 全 Paddle 只有 5 个函数:**
+Python 需要这个糖,是因为 `([...])` 又是括号又是方括号,而且 torch 用户手上有存量代码。
+Lua 的表调用**本来就省掉了括号**,`zeros{2,3}` 与 `zeros(2,3)` 一样长 ——
+**糖的全部收益是 0,成本却照付**:
 
-| 函数 | 出处 |
-|---|---|
-| `ones` / `zeros` / `empty` | `python/paddle/tensor/creation.py:1644, 1807, 3081` |
-| `randn` / `rand` | `python/paddle/tensor/random.py:961, 2343` |
-| (另有 8 处 `size_args_decorator_patch` / `VariableArgsDecorator`,给 Tensor 方法与 `dims`/`repeats`) | `decorator_utils.py:440-485` |
+1. 同一件事**两种写法**,文档要写两遍,示例要选一种(C11 的精神:基座只有一套)
+2. 制造一个反直觉的坑:`zeros(2, "int64")` **不是**「shape=2, dtype=int64」而是错的
+   (上游行为:第一个位置实参是 int 就把**全部**位置实参当 shape)
+3. 多一条解析分支要测,而它只服务 5 个函数
 
-所以**照抄上游的分层,不发明表级选项**:
+**代替方案:把它变成一次性的教学,而不是一个入口。**
 
-```lua
--- lua/paddle/_sizeargs.lua ——  paddle-lua 自己的 ~10 行,不进 argrule
-paddle.zeros = sizeargs("shape", rule{
-  {name = "shape", type = "IntList"},
-  {name = "dtype", type = "DType", default = paddle.float32},
-}(_C_ops.full))
-```
-
-**为什么不做成 `rule{ ..., sizeargs = "shape" }`:**
-
-1. **5 个函数**换签名层一个永久概念,不划算 —— 而签名层的卖点之一就是小(~400 行)
-2. 上游自己就是**装饰器**,不是签名的一部分。照抄分层比照抄行为更重要
-3. 它是 torch 兼容糖,**将来可能被上游改**;放在宿主侧,改动止于一个文件
-4. 如果哪天证明它是通用需求(不止 paddle),再从宿主提升进库 —— **反向很难**
-
-`sizeargs` 的语义与上游逐字对应:
+`IntList` 参数收到裸数字时,报错里带上写法建议(只在错误路径上,零运行时成本):
 
 ```
-第一个位置实参是整数  -> 所有位置实参合起来当 shape,dtype 只能具名
-shape 拿到的是单个整数 -> 包成 {n}
+paddle.zeros(2, 3)
+-> shape must be a container of integers, got number
+     did you mean:  paddle.zeros{2, 3}
+     at train.lua:42
 ```
 
-⚠️ **`zeros(2, "int64")` 因此不是「shape=2, dtype=int64」,而是错的** ——
-上游同样如此(`args[0]` 是 int 就把**全部**位置实参当 shape)。要给 dtype 就写
-`zeros({2}, "int64")`。这是上游行为,不是我们的限制。
-
-**消歧不受影响:** `zeros{2, 3}` 是表调用,装饰器不碰它(上游的装饰器也只看位置实参);
-②「表内位置」里 `shape = 2` 不是容器、`dtype = 3` 过不了枚举检查 -> 落到 ③ 整表当 shape。
+**教一次,好过永久养一个二义入口。**
 
 ## 2.5 用户端长什么样(按候选名 `argrule` 写,定名后全局替换)
 
@@ -525,7 +509,7 @@ n == 1 且实参是无元表的 table 时:
 
 **`paddle.zeros{2, 3}` 因此是确定的:** ② 里 `shape = 2` 过不了 `IntList`(数字不是容器,
 §2.3),`dtype = 3` 也过不了枚举检查 -> 落到 ③ -> `shape = {2, 3}`。**不需要写任何标注。**
-`sizeargs`(§2.4)那条路给出同一答案。
+(而 `zeros(2, 3)` 这种写法我们**根本不支持**,§2.4 —— 少一条分支就少一处歧义。)
 
 > 这一步能成立,靠的是 `api/README.md` §2.1.1 那条:
 > **枚举参数不接受裸数字**。如果 `dtype` 能收 `3`,②就通过了,歧义就真的存在。
