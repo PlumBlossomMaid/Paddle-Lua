@@ -112,6 +112,9 @@
  |    +-- [⬜] 1.4 Lanes 三项验证            -> process/tasks.md T-M0-04..06
  |    +-- [⬜] 1.5 GC / OOM 验证             -> process/tasks.md T-M0-07..10
  |    +-- [⬜] 1.6 序列化与执行器验证        -> process/tasks.md T-M0-11..19
+ |    +-- [⬜] 1.7 参数解析器(独立项目)     -> plan/foundations.md §5.4
+ |         ⚠️ 与 1.1-1.6 **无依赖关系**(纯 Lua,不依赖 G0),可并行
+ |         ⚠️ 但**必须在 2.5(P5)之前可用** —— 它决定所有公开 API 的签名形状
  |
  +-- [⬜] 2. M1 MVP:MNIST 能训练            前置:1
  |    +-- [⬜] 2.1 C ABI 中间层              -> plan/modules/01-c-abi.md

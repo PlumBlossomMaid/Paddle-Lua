@@ -76,6 +76,7 @@
 | D27 | **`nn.LayerList` 继承 `Layer`**(Layer 优先)。`is_a(nn.Layer)` 必须为真;因此 `ipairs(ml)` 在 5.1 上跑空,**一律用 `ml:iter()` / `ml:len()`** | `plan/foundations.md` §2.4 |
 | D28 | **「不引入新的强制 C 依赖」已取消。** 判据改为**边际成本**:先看我们自己的 `.so` 能不能顺手做,做不了就引入 | 本文件 §9.1 |
 | D29 | **Insight7 的 `axis` 按 bug 修成 1-based**(成员索引与维度索引都要 1-based)。顺手做,P12 之前完成 | `plan/foundations.md` §3.4 |
+| D31 | **参数解析器是独立项目**,paddle-lua 与 Insight7 共用。零依赖、纯 Lua、schema 与 argcheck 兼容。**它必须先于 P5 可用,但不依赖 G0**(纯 Lua,可与 M0 并行) | `plan/foundations.md` §5.4 |
 | D30 | **参数检查:取 argcheck 的形,不取它的实。** 规则表 schema + `usage.lua` 照搬,求解器自写 `_args.lua`(~150 行,O(N))。**不 vendor argcheck 本体** —— 它 3^N 枚举,编不出 `Conv2D`(11 可选)/`DataLoader`(16 可选) | `plan/foundations.md` §4.5 |
 
 ---
@@ -398,7 +399,8 @@ csrc/sol/gen_*.cpp      ← 生成,禁止手改
 | ~~用 `pl.path` / `pl.dir` / `pl.file` / `pl.app`~~ | ❌ **禁令随上条一并取消。** 需要就用,`lfs` 直接进依赖 |
 | 用 `class.cast` | 它绕过 `_create`,造出没有 `FIELDS` 的破 Layer 实例(`plan/foundations.md` §1.5) |
 | 自己再写一套 class / list / 参数检查 | C11。**基座三块已到顶** —— 想加第四块先回答「换掉它要改几处」 |
-| 让 `_args.lua` 引用 paddle 内部符号 | 它要能独立成 rock 给 Insight7 共用(待拍板 P8,`plan/foundations.md` §5.4)。自定义类型识别走注册接口注入 |
+| 在本仓库内实现参数解析器 | D31。它是**独立项目**(R27),本仓库只声明依赖。自定义类型走 `register_type` 注入 |
+| 保留 `_wrap.lua` 作为兜底 | 那是第二套参数处理,违反 C11。降级路径归解析器自己管 |
 | 直接依赖 `argcheck` 这个 rock | D30。它编不出 `Conv2D` / `DataLoader` 的签名(`plan/foundations.md` §4.5) |
 | 在参数检查里枚举「哪些参数被省略」的组合 | 那是 3^N。9 个可选参数 = 1.37 MB 生成代码,10 个直接编不出来 |
 | 支持「位置参数中间省略、靠类型猜」 | Python 不允许这么写,而支持它要付上一行的代价。跳过参数就用具名表 |

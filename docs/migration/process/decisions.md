@@ -37,6 +37,7 @@
 | R21 | 集合类返回裸 Lua 表 | **`parameters()` 一类返回 `pl.List`** | `pl.List` 是 1-based,与 R6 天然一致;`filter`/`map`/`reduce`/`__tostring` 免费。**但边界明确**:热路径与框架内部小数据(`x:shape()`、`_wrap` 参数解析、生成代码)一律裸表 | `plan/foundations.md` §2 |
 | ~~R25~~ | ~~分层:冷路径 vendored `argcheck`,热路径 `_wrap`~~ | **本条已被 R26 推翻,当天** | 当时只测了性能(2597 ns/call),**没测「能不能表达」**。见 R26 | — |
 | R26 | (R25 的结论)冷路径 vendored `argcheck` | **不 vendor argcheck。取它的规则表 schema + `usage.lua`,自写 ~150 行 O(N) 生成器 `_args.lua`** | argcheck 对每条规则枚举「给了/没给/显式 nil」三态,共 **3^N** 条路径。实测 9 个可选参数即 1.37 MB 生成代码 / 840 ms,**10 个就 `control structure too long` 编不出来**。而 `Conv2D` 11 个可选、`Adam` 12 个、`DataLoader` 16 个(3^16 = 4300 万,**直接挂死**)—— **R25 说的「冷路径」就是这张表,那条建议在它自己举的每个例子上都不成立**。更讽刺的是这个指数是为「位置参数中间省略、靠类型猜」付的,**而 Python 根本不允许这么写**。去掉枚举后同样的机制:代码量 O(N),3 参数 403 ns(快 6 倍),17 参数 3.6 KB / < 1 ms | `plan/foundations.md` §4.5 §4.6 |
+| R27 | 参数解析器是 paddle-lua 的内部文件 `lua/paddle/_args.lua` | **独立项目 / 独立 rock,paddle-lua 与 Insight7 共用** | (人的决定)基座的作用域**本来就该是跨仓库的** —— 否则用户在同一脚本里面对两套规则表方言和两种报错格式,而 Insight7 的 dtype 常量与 Place 构造器已经是 Paddle 命名,接口层对齐是这个生态的既定做法。连带:**`_wrap.lua` 从 P5 清单删除**(留着就是第二套参数处理,违反 C11);降级路径归解析器自己管 | `plan/foundations.md` §5.4 |
 
 ---
 
@@ -230,6 +231,6 @@ argcheck 的思路是:把「遍历规则表、逐个查类型」这件解释式�
 | # | 事项 | 现状 |
 |---|---|---|
 | ~~P5~~ | ~~`state_dict` 容器下标破例为 0-based(R15)是否认可?~~ | ✅ **已认可(2026-08-03)。** 认可理由(人):"确实是被迫的 0-based,不过一般人也不会去看权重里面的东西"。已写进 `plan/modules/09-nn.md` §3.5 |
-| **P8** | **`_args` 是否做成独立 rock,让 paddle-lua 与 Insight7 共用?** 它动的是 Insight7 仓库(那边已有一个 `_wrap`) | 建议做 —— 否则用户在同一脚本里面对两套规则表方言、两种报错格式,这正是 C11 要防的,只不过作用域要跨仓库(`plan/foundations.md` §5.4)。**在拍板前 `_args.lua` 按「将来能独立出去」写,零成本;事后拆分不是** |
+| ~~P8~~ | ~~`_args` 是否做成独立 rock~~ | ✅ **已拍板(2026-08-03):做。** 人的原话:「Insight 的那个解析器还是太简陋了,我打算弄一个单独的解析器项目,然后给 paddle 和 Insight 用」。记为 R27,落地细节见 `plan/foundations.md` §5.4 |
 | P6 | P18 script 模式若工期紧张,是否同意直接砍掉? | 建议同意 —— trace 模式已覆盖绝大多数场景,做半个比不做更糟 |
 | P7 | vendored Penlight 的版本锁定策略:锁 tag 还是锁 commit? | 建议锁 commit + CI 校验 sha256。`pl.class` 若改了 `_create` 语义,我们的 `nn.Layer` 会**静默**坏掉,不是编译错误 |

@@ -52,9 +52,8 @@ paddle-lua/
 │   ├── init.lua                    require "paddle" 入口,只做装配
 │   ├── _vendor/pl/             【P4】vendored Penlight 受限子集,11 文件,**不许改**
 │   ├── _ops/                   【P3】**生成**的 Lua wrapper —— 不许手改
-│   ├── _args.lua               【P5】参数检查:规则表 -> 生成源码 -> loadstring。
-│   │                                 schema 抄 argcheck,求解器自写 O(N)(foundations §4)
-│   ├── _wrap.lua               【P5】三模式调用(移植自 Insight7),`_args` 的无 debug 库兜底
+│   │                            ⚠️ 参数解析器**不在这里** —— 独立 rock,外部依赖(R27)
+│   │                               `_args.lua` / `_wrap.lua` 都已删除,见 foundations §5.4.4
 │   ├── slice.lua               【P5】字符串索引的 Lua 侧
 │   ├── tensor.lua              【P5】
 │   ├── dtype.lua  device.lua   【P5】
@@ -102,7 +101,7 @@ paddle-lua/
 | `csrc/utils/fs.cc` | P4 | ~200 | 手写 | C++17 |
 | `lua/paddle/_vendor/pl/` | P4 | 5374 | **vendored** | 无 |
 | `lua/paddle/{tensor,slice,_wrap,dtype,device}.lua` | **P5** | ~1.5k | 手写 | 基座 |
-| `lua/paddle/_args.lua` | **P5** | ~150 | 手写(usage 渲染移植自 argcheck,BSD-3) | `debug`(可降级) |
+| *(参数解析器)* | — | — | **外部 rock**(R27),rockspec 声明依赖 | 零依赖,纯 Lua |
 | `lua/paddle/{autograd,scope}.lua` | P6 | ~600 | 手写 | P5 |
 | `lua/paddle/serialize/` | P7 | ~1.2k | 手写 | P5 |
 | `lua/paddle/jit/load.lua` | P8 | ~300 | 手写 | P5 |
