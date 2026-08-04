@@ -128,29 +128,52 @@ Python 不允许,而支持它要付 3^N 的生成代码代价,argcheck 就是死
 会让「表内位置」解释重新成立,凭空造出调用歧义。上游也没这么干
 (`ShapeLike` 里没有 `int`,它用的是签名外面的装饰器)。
 
-### 2.1.3 ★ 上游的**兼容糖**一律不移植
+### 2.1.3 ★ `decorator_utils.py` 整层不移植 —— 我们用 Paddle 自己的规范
 
-Paddle 为了接住 torch 用户,加了一大层兼容装饰器
-(`python/paddle/utils/decorator_utils.py`,30+ 个):
+> 人的话:「变长 size `zeros(2,3)` 这种纯粹是照搬 PyTorch,我们在 Lua 里面不打算引入
+> PyTorch 的东西。`decorator_utils.py` 这玩意我觉得可以忽略了 —— 这东西就是 Paddle
+> 为了 PyTorch 用户用得惯才搞的。**我们 Paddle 框架就应该用自己的语法和规范**。」
 
-| 兼容糖 | 上游用量 | 我们 |
+**结论:`python/paddle/utils/decorator_utils.py`(1451 行,30+ 个装饰器,68 个模块 import 它)
+整层跳过。** 绑定的是**被装饰的那个函数**,不是外面那层壳。
+
+**✅ 证据(不是印象,是读出来的):**
+
+| 事实 | 出处 |
+|---|---|
+| 全文 **51 处**出现 `PyTorch` / `torch.`,多处 docstring 直接写 `PyTorch: torch.block_diag(x,y,z)` / `Paddle: paddle.block_diag([x,y,z])` | `decorator_utils.py:923-940` |
+| **每个 wrapper 都写 `wrapper.__signature__ = inspect.signature(func)`(35 处)** —— 上游自己把**规范签名**保留在内层 | `:189, 435, 466, 540, 566` … |
+| 291 处参数别名(`@param_one_alias` / `@param_two_alias`) | `:171-223` |
+| 5 处变长 size(`@size_args_decorator`) | `:406-437` |
+| 甚至有专门"劝返"的装饰器:收到 torch 才有的关键字就报错并指向 compat API | `:517-542` `forbid_keywords` |
+
+**最后一行证据最关键:上游自己认为规范签名是内层那个。**
+所以我们的生成器读到的**本来就是**规范签名 —— **忽略这层是默认行为,不是额外工作量**。
+
+| 兼容糖 | 上游 | 我们写什么 |
 |---|---|---|
-| **参数别名**:`concat(tensors=…, dim=…)` = `concat(x=…, axis=…)` | **291 处** `@param_one_alias` / `@param_two_alias` | ❌ 只认 `x` / `axis` |
-| **变长 size**:`zeros(2, 3)` / `zeros(size=[2,3])` | 5 处 `@size_args_decorator` | ❌ 写 `zeros{2, 3}` |
-| `reshape(2,3)` / `transpose(0,1)` / `expand(...)` 等变长形式 | 各 1 处专用装饰器 | ❌ 传容器 |
+| 参数别名 `concat(tensors=…, dim=…)` | 291 处 | `concat{x = …, axis = …}` |
+| 变长 size `zeros(2, 3)` | 5 处 | `zeros{2, 3}` |
+| 变长 tensor `block_diag(x, y, z)` | `variadic_tensor_decorator` | `block_diag{x, y, z}` |
+| `reshape(2,3)` / `transpose(0,1)` / `expand(...)` | 各 1 处 | 传容器 |
 
-**理由不是"懒得做",是这些糖的收益在 Lua 侧不存在:**
+**为什么这不是"少做了功能":**
 
-1. **Lua 的表调用本来就省掉了括号** —— `zeros{2,3}` 与 `zeros(2,3)` 一样长,
-   而 Python 的 `zeros([2,3])` 确实噪声大。**上游加糖的原因不成立**
-2. **我们没有存量代码要接** —— 兼容糖服务的是"torch 用户的肌肉记忆 + 已有脚本",
+1. **糖的收益在 Lua 侧本来就是 0** —— Python 要写 `zeros([2,3])`,又括号又方括号;
+   Lua 的表调用本来就省掉括号,**`zeros{2,3}` 和 `zeros(2,3)` 一样长**
+2. **我们没有存量代码要接** —— 兼容层服务的是"torch 用户的肌肉记忆 + 已有脚本",
    Lua 侧两者都是空的
-3. **别名与具名表调用相冲**:`concat{x=a, tensors=b}` 要怎么办?
-   上游是抛 `ValueError`(`decorator_utils.py:181-184`)—— 我们得为 291 处各复制一遍这个检查
-4. **`dim`/`axis` 两个名字 = index 语义标注表两条记录**,而漏标一条就是静默 off-by-one(§2.2)
+3. **别名与具名表调用相冲**:`concat{x = a, tensors = b}` 怎么办?
+   上游抛 `ValueError`(`:181-184`)—— 我们得把这个检查复制 291 遍
+4. **`dim` / `axis` 两个名字 = index 语义标注表两条记录**,漏标一条就是静默 off-by-one(§2.2)
 
-⚠️ **例外要逐个论证,且理由不能是"上游有"。** 判据:
-**这个写法在 Lua 里比规范写法更短或更清楚吗?** 不是就不做。
+⚠️ **一条例外通道,判据写死:**
+**「这个写法在 Lua 里比规范写法更短或更清楚吗?」不是就不做。理由不能是"上游有"。**
+
+⚠️ **一条必须查的**:`decorator_utils.py` 里少数装饰器不只是改参数
+(如 `legacy_reduction_decorator` / `view_decorator`)。跳过它们之前,
+**逐个确认被装饰函数的语义不依赖那层壳** —— 判据是 §2.1.3 的证据第二行:
+壳只动参数、内层签名不变,才可以跳过。发现有壳改了行为的,记 OPEN_QUESTION,不要默认放行。
 
 **代替方案:一次性的教学式报错**,而不是一个永久的二义入口:
 
@@ -160,7 +183,7 @@ paddle.zeros(2, 3)
      did you mean:  paddle.zeros{2, 3}
 ```
 
-### 2.2 索引:全 1-based,且必须在文档里逐个标出来
+## 2.2 索引:全 1-based,且必须在文档里逐个标出来
 
 每份 api 文档**必须有一节列出该模块所有吃 index 语义的参数**,
 这是 `overview.md` §6.1.1 那张标注表在模块层面的落点,也是 `ci.md` §6 第 ④ 条的检查对象。

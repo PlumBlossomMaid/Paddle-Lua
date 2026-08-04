@@ -99,7 +99,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 文档 | 行数 | 状态 |
 |---|---|---|
 | **`WORKPLAN.md`(总工程树)** | 248 | ✅ **新增** |
-| `/CLAUDE.md` | 488 | ✅ |
+| `/CLAUDE.md` | 489 | ✅ |
 | `/README.md`(英文,默认) | 192 | ✅ |
 | `/README.zh-CN.md` | 186 | ✅ |
 | `/README.zh-TW.md` | 186 | ✅ |
@@ -115,7 +115,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `plan/argrule.md` | 650 | ✅ **新增**(孵化说明书,建仓后迁走;原 `argsig.md`)|
 | `plan/layout.md` | 261 | ✅ **新增** |
 | `plan/ci.md` | 246 | ✅ **新增** |
-| `plan/api/README.md` | 230 | ✅ **新增** |
+| `plan/api/README.md` | 253 | ✅ **新增** |
 | `plan/api/io.md` | 236 | ✅ **新增**(样板)|
 | `plan/api/<其余 15 个模块>` | — | ⬜ 各模块开工时写 |
 | `plan/modules/README.md` | 70 | ✅ |
@@ -146,7 +146,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `process/status.md` | 本文件 | ✅ |
 | `process/tasks.md` | 137 | ✅ |
 | `process/conventions.md` | 280 | ✅ |
-| `process/decisions.md` | 244 | ✅ |
+| `process/decisions.md` | 245 | ✅ |
 | `process/open-questions.md` | 160 | ✅ |
 
 ### 5.4 `research/`
@@ -221,3 +221,4 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 2026-08-03 | **P10 拍板:签名层定名 `argrule`** —— `plan/argsig.md` -> `plan/argrule.md`,全仓库引用、rockspec 依赖项、WORKPLAN 节点 1.7.0 同步改名;`foundations.md` §5.4.7 与 `decisions.md` P10 记下"我建议的是 `argsig`,人选了 `argrule`"。**剩下的动作:去 luarocks 占位** |
 | 2026-08-03 | **`sizeargs` 降级出签名层,`IntList` 的元素检查下放转换层(R32)** —— 人的两问:「`sizeargs` 之前有讨论过吗」**没有,是我上一轮临时加的**;「我想的是在函数里面有个 if 判断如果有小数直接 error」**对,而且比放类型层更好**。① `sizeargs` 全 Paddle 只用在 5 个函数(`ones`/`zeros`/`empty`/`randn`/`rand`,`creation.py:1644,1807,3081`、`random.py:961,2343`),而上游自己就是**装饰器在签名外面** —— 照抄分层比照抄行为更重要,做成 paddle-lua 侧 ~10 行,签名层零改动。② 元素检查下放的判据是机械的:**去掉它之后调用仍唯一解释 -> 可下放**。`IntList` 满足 -> 转换层 `if` + `error`(那步反正要遍历 n 次,类型层再扫一遍是查两遍;0-D Tensor 元素也只有那层处理得了;报错还能带下标 `shape[3] must be an integer, got 2.5`);`TensorList` 不满足(`concat{{a,b},2}` 靠元素类型出局)-> 留类型层。**红线:必须 error 不许静默取整、必须指向调用点、C++ 异常不得穿过 Lua(C7)** |
 | 2026-08-03 | **`sizeargs` 整个砍掉,并升成一条通则:上游的兼容糖一律不移植(R33)** —— 人:「用得少的东西,为了 API 简洁似乎就该去掉」。决定性的不是"用得少",是**上游加糖的原因在 Lua 侧不存在**:Python 的 `zeros([2,3])` 又是括号又是方括号才需要 `zeros(2,3)`;Lua 的表调用本来就省括号,**`zeros{2,3}` 一样短** —— 收益 0,成本照付。同一条理由挡住整层兼容装饰器:**291 处参数别名**(`concat(tensors=,dim=)`)、5 处变长 size、`reshape(2,3)` 等。别名还额外带两个坑:`concat{x=a, tensors=b}` 要复制 291 次「不能同时给」的检查(上游 `decorator_utils.py:181-184` 抛 ValueError);`dim`/`axis` 两个名字 = index 语义标注表两条记录,漏标一条就是静默 off-by-one。**代替方案:教学式报错 `did you mean: paddle.zeros{2, 3}`**,只在错误路径上,零运行时成本。新增 `api/README.md` §2.1.3,例外判据「这个写法在 Lua 里比规范写法更短或更清楚吗」,**理由不能是"上游有"** |
+| 2026-08-03 | **`decorator_utils.py` 整层不移植(R34/D35)** —— 人的原话:「这东西就是 Paddle 为了 PyTorch 用户用得惯才搞的,lua 里面不用考虑这些,**我们 Paddle 框架就应该用自己的语法和规范**」。范围从「逐个判断哪些糖要移植」升成「整层跳过」:1451 行 / 30+ 装饰器 / 68 个模块 import 它,全文 **51 处** `PyTorch`/`torch.`(docstring 直写 `PyTorch: torch.block_diag(x,y,z)` / `Paddle: paddle.block_diag([x,y,z])`,`:923-940`),甚至有专门劝返 torch 关键字的 `forbid_keywords`(`:517-542`)。**关键证据:35 处 `wrapper.__signature__ = inspect.signature(func)`** —— 上游自己把规范签名保留在内层,**所以我们的生成器读到的本来就是规范签名,忽略这层是默认行为而不是额外工作量**。⚠️ 唯一要逐个确认的:少数装饰器可能不只改参数(`legacy_reduction_decorator` / `view_decorator`),判据「壳只动参数、内层签名不变」,发现改了行为的记 OPEN_QUESTION |

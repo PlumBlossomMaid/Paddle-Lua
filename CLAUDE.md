@@ -79,6 +79,7 @@
 | D31 | **参数解析器是独立项目**,paddle-lua 与 Insight7 共用。纯 Lua、零框架硬编码、基于 Penlight、schema 与 argcheck 兼容。**必须先于 P5 可用,但不依赖 G0**(可与 M0 并行)。✅ **名字已定:`argrule`**(P10);Penlight 走 rock 依赖(P9/R30) | `plan/foundations.md` §5.4 |
 | D32 | **类型判定层不自己写。** `type` 槽是**可调用契约**(字符串查注册表 / 数组=联合 / 任意谓词 / `tableshape` 类型对象直接可用)。我们只拥有「调用约定层」(位置↔具名 + 默认值 + usage,~200 行,**普查确认没人写过**) | `plan/foundations.md` §5.4.5 |
 | D33 | **生成器的 upvalue 数必须与参数个数无关**(单表 upvalue)。Lua 5.1 只有 60 个 upvalue,而 Paddle 最大签名 43 参数 —— argcheck 那套「一规则一 upvalue」即使没有 3^N 也编不出来 | `plan/foundations.md` §5.4.6 |
+| D35 | **`decorator_utils.py` 整层不移植。** 我们用 **Paddle 自己的语法和规范**,不引入 PyTorch 那套。绑定的是**被装饰的函数**,不是外面的壳 —— 上游每个 wrapper 都写 `wrapper.__signature__ = inspect.signature(func)`(35 处),**规范签名本来就在内层**,所以忽略这层是默认行为不是额外工作 | `plan/api/README.md` §2.1.3 |
 | D29 | **Insight7 的 `axis` 按 bug 修成 1-based**(成员索引与维度索引都要 1-based)。顺手做,P12 之前完成 | `plan/foundations.md` §3.4 |
 | D30 | **参数检查:取 argcheck 的形,不取它的实。** 规则表 schema + `usage.lua` 照搬,求解器自写 `_args.lua`(~150 行,O(N))。**不 vendor argcheck 本体** —— 它 3^N 枚举,编不出 `Conv2D`(11 可选)/`DataLoader`(16 可选) | `plan/foundations.md` §4.5 |
 
@@ -412,7 +413,7 @@ csrc/sol/gen_*.cpp      ← 生成,禁止手改
 | 生成一条规则一个 upvalue | D33。Lua 5.1 上限 60 个,Paddle 最大签名 43 参数,撞墙 |
 | 自己写一套类型判定 / 结构校验 | D32。`tableshape` 已经很好,而且它的类型对象本身可调用,塞进 `type` 槽就能用 |
 | 把「容器」写成类名单(`{"table","pl.List","insight.Array"}`) | 判据是**结构**:是个容器 + 装的是整数。写成名单就把框架名硬编码进类型系统,用户自己的容器类被无理由挡住(`plan/argrule.md` §2.3) |
-| 移植上游的**兼容糖**(`concat(tensors=,dim=)` 别名 291 处、`zeros(2,3)` 变长 size、`reshape(2,3)`) | 它们服务的是「torch 用户的肌肉记忆 + 存量脚本」,Lua 侧两者都是空的;而 Lua 的表调用本来就省掉括号,`zeros{2,3}` 已经和 `zeros(2,3)` 一样短。**上游加糖的原因不成立,成本照付**(`plan/api/README.md` §2.1.3) |
+| 移植 `python/paddle/utils/decorator_utils.py` 那一层(别名 291 处、变长 size、`reshape(2,3)`…) | D35。**它整层是 Paddle 给 PyTorch 用户的兼容壳**(全文 51 处提 `PyTorch`/`torch.`),而糖的收益在 Lua 侧是 0 —— 表调用本来就省括号,`zeros{2,3}` 已经和 `zeros(2,3)` 一样短(`plan/api/README.md` §2.1.3) |
 | 让 `shape` / `axes` 接受裸数字 | Python 侧 `paddle.zeros(5)` 本来就是错的。放行它还会把 §2.6 的调用消歧一起破坏(`plan/api/README.md` §2.1.2) |
 | 支持「位置参数中间省略、靠类型猜」 | Python 不允许这么写,而支持它要付上一行的代价。跳过参数就用具名表 |
 | 手写算子绑定"就这一个特例" | C8。特例会繁殖 |
