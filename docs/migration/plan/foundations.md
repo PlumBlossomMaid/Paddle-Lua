@@ -460,6 +460,15 @@ DataLoader 的 worker 线程里会用 Insight7 做预处理 -> `insight::Array` 
 
 这条要写进 `research/gc.md` 的风险登记。
 
+### 3.6.1 `DType` / `Place` 是两边共有的类型
+
+Insight7 的 API 本来就是照着 Paddle 设计的(§3.2:dtype 常量与 Place 构造器已是 Paddle 命名),
+所以 `DType` / `Place` **不是撞名,是同一个概念**。参数签名层里用 `extend` 把两边的谓词取或,
+不逼着共有概念起两个名字(`plan/argsig.md` §2.2)。
+
+⬜ 更远的方向:它们最好在 C 层就是**同一个值类型** —— 零拷贝互操作(§3.3)本来就要求
+内存布局对齐,dtype 却还要在边界上转换一次,是不必要的。属于 Insight7 侧的长期演进。
+
 ### 3.7 依赖形态
 
 | | |

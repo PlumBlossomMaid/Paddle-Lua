@@ -134,7 +134,28 @@ argrule.alias("Tensor", "paddle.Tensor")                                       -
 
 ⚠️ **短名会撞** —— 一个进程里 paddle 和 Insight7 同时在。规则:
 **全名是规范,短名是 alias,重复注册同一个短名直接报错**(不是后者覆盖前者)。
-生态内已分好:**`Tensor` / `Place` / `DType` 归 paddle,`Array` 归 Insight7**。
+
+**但有些类型是两边共有的,不是撞名,是同一个概念:**
+
+| 短名 | 谁提供 | 怎么办 |
+|---|---|---|
+| `Tensor` | 只有 paddle | `register` |
+| `Array` | 只有 Insight7 | `register` |
+| **`DType` / `Place`** | **两边都有** —— Insight7 的 API 本来就是照着 Paddle 设计的(§3.2:dtype 常量与 Place 构造器已是 Paddle 命名) | **`extend`,谓词取或** |
+
+```lua
+-- 谁先加载谁 register,后来者 extend,不报错
+argrule.register("DType", paddle.is_dtype)
+argrule.extend  ("DType", insight.is_dtype)      -- 现在两边的 dtype 都过
+```
+
+`register` 撞名报错,`extend` 是显式的"我知道这个类型已存在,我要往里加一支"。
+两者区分开,既挡住了意外覆盖,又不逼着共有概念去起两个名字。
+
+> ⬜ **更远的方向(记一笔,不在本项目范围内):**
+> `DType` / `Place` 最好在 C 层就是**同一个值类型**,而不是两个 `.so` 各造一份 ——
+> paddle-lua 与 Insight7 的零拷贝互操作(§3.3)本来就要求内存布局对齐,
+> dtype 却还要在边界上做一次转换,是不必要的。这属于 Insight7 侧的长期演进。
 
 **短名不是随便起的,它必须等于用户能直接 local 化的那个导出名:**
 
@@ -150,6 +171,85 @@ Lua 的等价写法就是上面这一行。既然用户会这么写,
 这条同时写进 `api/README.md` §2.1 的命名映射表。
 
 ---
+
+### 2.3 容器类型:判据是「是个容器 + 装的是整数」
+
+Paddle 的 `shape` **不接受数字** —— Python 侧就是 `tuple | list | np.ndarray`,
+写 `paddle.zeros(5)` 是错的,要写 `paddle.zeros([5])`。Lua 侧对等。
+
+⛔ **但不要把它写成三个类的联合。**
+
+```lua
+-- ❌ 错:把判据写成「是这三个之一」
+type = {"table", "pl.List", "insight.Array"}
+
+-- ✅ 对:判据是结构性的
+type = "IntList"     -- 是个容器,且装的是整数
+```
+
+> 人的原话:「**反正需要是个容器**」「**而且装的是整数**」。
+> 这两句就是完整定义 —— 那三个类只是它今天已知的三个**实例**,不是它的定义。
+> 写成联合类型,等于把「容器」这个概念硬编码成一张框架名单:
+> 用户自己的 `Vector` 类、别人的 `array` rock、明天多出来的第四种容器,全被挡在外面,
+> 而它们本来完全合法。这也正是 §4「零框架硬编码」要挡的东西。
+
+**容器协议**(库只认协议,不认类名):
+
+| 能力 | 探测顺序(查一次,缓存到类型对象上) |
+|---|---|
+| 长度 | `#o` 可用 -> 用它;否则 `o:len()`;否则 `o:size()` |
+| 取元素 | `o[i]`,**1-based** |
+| 元素类型(可选快路) | `o.dtype` / `o:dtype()` —— 容器自报就信它 |
+
+⚠️ **`#o` 在 Lua 5.1 上对 table 的 `__len` 无效**(5.1 只对 userdata 认 `__len`)。
+所以裸 table 与 `pl.List` 走 `#`,`insight.Array`(userdata)也走 `#` 或 `:size()` ——
+**探测顺序必须固定且有 fallback**,不能假设某一种可用。这条要进 M0 #24 一起实测。
+
+**元素怎么查:自报 dtype 走 O(1),否则逐个查 O(n)。**
+
+- 容器自报整数 dtype(`insight.Array`)-> **直接过**,不跨 C 边界取 n 次元素
+- 不自报(裸 table / `pl.List`)-> **逐个查**:`type(v) == "number" and v == math.floor(v)`
+  (5.1 没有 `math.type`,只能这么写 —— 见 `CLAUDE.md` §8.1)
+
+⚠️ **不许抽查前几个。** shape 的长度是个位数,O(n) 的 n 小到无所谓;
+而漏掉的那个 `{2, 3.5}` 会一路穿到 C 层才炸,那时栈里已经没有用户代码了。
+
+**`IntList` 只是一个别名 —— 一般形式是「容器 + 元素类型」:**
+
+```lua
+-- 库提供的组合子(库自己不认识 int,也不认识 Tensor)
+argrule.list_of(elem)          -- 返回一个类型对象:满足容器协议,且每个元素满足 elem
+
+-- 宿主注册两个好读的别名
+argrule.register("IntList",    argrule.list_of("integer"))
+argrule.register("TensorList", argrule.list_of("Tensor"))    -- concat / stack 的第一个参数
+```
+
+`list_of` 里没有一个字是框架相关的:它只做「探容器 + 逐元素套 `elem`」,
+`elem` 本身又是一个可调用契约(§2.1),所以 `list_of(list_of("integer"))`
+这种嵌套是免费的(`nested_shape`、`meshgrid` 的分组参数用得上)。
+
+**为什么值得单起一个名字,而不是每处都展开写判据:**
+
+1. 2000+ 个生成算子里 `shape` / `axes` / `perm` / `strides` 反复出现,
+   一份定义改一处 vs 改两千处
+2. **报错信息**:`IntList expected, got number` 比一串联合类型可读
+3. 容器协议的探测顺序、元素校验策略只写一遍,不会有的地方查有的地方不查
+
+| ✅ 接受 | ❌ 不接受 |
+|---|---|
+| 整数的裸 table:`{2, 3}` | **数字** `5` |
+| 整数的 `pl.List`:`List{2, 3}` | 有小数:`{2.5}` |
+| 整数 dtype 的一维 `insight.Array` | 二维 / 非整数 dtype 的 Array |
+| **任何满足容器协议且装整数的第三方类型** | 空容器?—— 见 §6 未决 |
+
+⬜ **未定:Paddle 还接受一维 int Tensor 当 shape**(`paddle.zeros(t)`)。
+Tensor 满足容器协议吗(`#t` = 第 0 维?元素是 0-D Tensor 还是数字?)——
+**要读源码确认再决定收不收进 `IntList`**,不要凭印象放行(`CLAUDE.md` §4)。
+
+> **顺带一个好性质:`pl.List` 和 `insight.Array` 都带元表**,
+> 而 §2.6 的表形式判定要求 `getmetatable(t) == nil`。
+> 所以 `paddle.zeros(List{2,3})` 永远不会被误认成"具名表调用" —— **带元表的实参天然免疫歧义**。
 
 ## 2.5 用户端长什么样(按候选名 `argrule` 写,定名后全局替换)
 
@@ -197,9 +297,9 @@ paddle.nn.functional.conv2d = rule{
   {name = "x",        type = "paddle.Tensor"},
   {name = "weight",   type = "paddle.Tensor"},
   {name = "bias",     type = "paddle.Tensor", opt = true},        -- 可空,且没有默认值
-  {name = "stride",   type = {"number", "table"}, default  = 1},  -- 常量
-  {name = "padding",  type = {"number", "table", "string"}, default = 0},
-  {name = "dilation", type = {"number", "table"}, defaulta = "stride"},   -- 直译 `if d is None: d = stride`
+  {name = "stride",   type = {"number", "IntList"}, default = 1},  -- 常量
+  {name = "padding",  type = {"number", "IntList", "string"}, default = 0},
+  {name = "dilation", type = {"number", "IntList"}, defaulta = "stride"}, -- 直译 `if d is None: d = stride`
   {name = "groups",   type = "number", default = 1},
   {name = "place",    type = "paddle.Place",
                       defaultf = function() return paddle.get_device() end},  -- 每次调用才求值
@@ -218,10 +318,10 @@ local Conv2D = paddle.nn.Layer:subclass "Conv2D"
 Conv2D.__init = method{
   {name = "in_channels",  type = "number"},
   {name = "out_channels", type = "number"},
-  {name = "kernel_size",  type = {"number", "table"}},
-  {name = "stride",       type = {"number", "table"}, default = 1},
-  {name = "padding",      type = {"number", "table", "string"}, default = 0},
-  {name = "dilation",     type = {"number", "table"}, default = 1},
+  {name = "kernel_size",  type = {"number", "IntList"}},
+  {name = "stride",       type = {"number", "IntList"}, default = 1},
+  {name = "padding",      type = {"number", "IntList", "string"}, default = 0},
+  {name = "dilation",     type = {"number", "IntList"}, default = 1},
   {name = "groups",       type = "number", default = 1},
   {name = "padding_mode", type = "string", default = "zeros"},
   {name = "weight_attr",  type = "table", opt = true},
@@ -305,11 +405,15 @@ paddle.zeros{2, 3}      -- shape = {2,3}?还是「表内位置」调用 shape=2,
 ```
 n == 1 且实参是无元表的 table 时:
   ① 表里有任何一个键等于某条规则的 name    -> 具名模式
-  ② 否则,试「表内位置」:t[1], t[2], … 逐条过类型检查
-       全部通过                             -> 表内位置模式
-  ③ 否则,且规则 #1 的 type 接受 table      -> 整个表就是第一个实参
+  ② 否则,试「表内位置」:t[1], t[2], …
+       全部类型通过 **且必填参数都有值**    -> 表内位置模式
+  ③ 否则,且规则 #1 的 type 接受 table
+       **且其余必填参数都有默认值**         -> 整个表就是第一个实参
   ④ 否则                                    -> 按表内位置报错(错得最像用户的本意)
 ```
+
+⚠️ **一个解释「成立」= 类型全过 + 必填参数全有值。** 只查类型是不够的 ——
+少了后半句会凭空造出一堆假歧义。
 
 **`paddle.zeros{2, 3}` 因此是确定的:** ② 里 `shape = 2` 过不了 `table` 检查 ->
 落到 ③ -> `shape = {2, 3}`。**不需要写任何标注。**
@@ -318,22 +422,58 @@ n == 1 且实参是无元表的 table 时:
 > **枚举参数不接受裸数字**。如果 `dtype` 能收 `3`,②就通过了,歧义就真的存在。
 > **一条 API 约定消掉了一整类调用歧义** —— 这两条要一起改,不能只动一边。
 
-**②③ 同时成立的签名才是真歧义**,那时必须显式声明意图:
+**先看一个「看着像歧义、其实不是」的例子** —— `paddle.full(shape, fill_value)`:
 
 ```lua
-paddle.full = rule{
-  {name = "shape",      type = "table"},
-  {name = "fill_value", type = "number"},
-  nonamed = true,          -- 或 noordered = true,二选一,必须写
-}(_C_ops.full)
--- full{ {2,3}, 1.0 }:② 通过(shape={2,3}, fill=1.0),③ 也通过(整表当 shape)
+paddle.full{ {2, 3}, 1.0 }
+-- ② shape={2,3} ✓  fill_value=1.0 ✓                     -> 成立
+-- ③ shape={{2,3},1.0} ✓ 是 table,但 **fill_value 没人给了**
+--    它是必填、无默认                                     -> 不成立
+-- 结论:②,确定的,不用标注
 ```
+
+**必填参数是天然的消歧器。** `full` 的第二个参数没有默认值,
+所以「整个表当 shape」这条路本身就走不通。
+
+**②③ 真的同时成立,才是真歧义** —— 加上 §2.3 的**元素逐个查**之后,
+这个条件苛刻到近乎不存在了。先看两个「以为是歧义、其实不是」的:
+
+```lua
+paddle.concat = rule{
+  {name = "x",    type = "TensorList"},        -- = list_of("Tensor"),§2.3
+  {name = "axis", type = "number", default = 1},
+}(_C_ops.concat)
+
+paddle.concat{a, b}
+-- ② x = a          -> a 是 Tensor,不是 TensorList         ✗
+-- ③ x = {a, b}     -> 每个元素都是 Tensor                  ✓   -> 整表当 x
+
+paddle.concat{ {a, b}, 2 }
+-- ② x = {a,b} ✓, axis = 2 ✓                                ✓   -> 表内位置
+-- ③ x = {{a,b}, 2} -> 元素 2 是数字,不是 Tensor           ✗
+```
+
+**两种写法都是确定的,`concat` 不需要 `nonamed`。**
+`stack` / `meshgrid` / `broadcast_tensors` 同理。
+
+> ⚠️ **我上一版在这里写错了**,说这批「第一个参数是列表」的函数**必须**写 `nonamed = true`。
+> 那是把 `type = "table"` 当判据算出来的 —— 只查容器不查元素,②③ 才会同时成立。
+> 换成 `list_of(elem)` 之后,**元素类型自己就是消歧器**。
+> 教训与「必填参数是天然消歧器」是同一条:**判据越弱,假歧义越多。**
+
+**那什么时候才是真歧义?** 要让 ②③ 同时成立,需要
+`t[1]` 既满足规则 #1(是个 `list_of(E)`),又满足 `E`(因为整表也要过)——
+也就是 **`E` 自己得接受容器**,例如 `list_of("table")`。
+再叠上「其余参数全可选」。Paddle 与 Insight7 的现有 API 里**一个都没有**;
+留着 `nonamed` 是给用户和将来用的逃生舱。
 
 **CI 判据(静态可查,在生成期就知道):**
 
 ```
-规则 #1 的 type 接受 table,且「表内位置」解释在类型上可能成立
-  -> 必须显式写 nonamed 或 noordered,否则失败
+规则 #1 的 type 是 list_of(E)
+  且 E 接受容器(list_of / "table" / 未约束)
+  且其余参数全部可选
+    -> 必须显式写 nonamed 或 noordered,否则失败
 ```
 
 不留启发式的理由:猜错的那次是**静默的错误结果**,不是报错 ——
@@ -383,6 +523,7 @@ end
 1. Lua 基本类型(`type()`)
 2. `pl.class` 的 `is_a`(生态里的类**本来就是** `pl.class`)
 3. `register_type` 注册进来的
+4. **容器协议**(`#` / `:len()` / `:size()` + `o[i]`)—— 结构,不是类名(§2.3)
 
 ```bash
 grep -rniE "paddle|insight|torch"  lua/   -> 非空即失败
@@ -412,3 +553,5 @@ grep -rniE "paddle|insight|torch"  lua/   -> 非空即失败
 | **P10** | 叫什么名字 | 建议 `argsig`;备选 `callsig` / `sigcheck` / `arglet` / `argrule` / `signet` / `clerk`(均实测未被占用)。**定名当天在 luarocks 占位** |
 | — | `defaulta` 的求值顺序 | argcheck 是声明顺序;若 A 的默认值取自 B 而 B 在 A 之后,要报错还是拓扑排序?**倾向报错**,简单可预测 |
 | — | 返回值要不要也校验 | `typecheck` 有(`=> int`)。**倾向不做** —— 我们的返回值几乎都是 Tensor,校验收益低于噪声 |
+| — | 空容器算不算合法 `IntList` | `paddle.zeros({})` = 0-D?**倾向放行,由 C 层报错** —— 「非空」是语义约束不是类型约束 |
+| — | 一维 int Tensor 能不能当 `shape` | Paddle 收。要先读源码确认 Tensor 满不满足容器协议(§2.3),**不凭印象放行** |

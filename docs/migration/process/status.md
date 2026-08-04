@@ -99,7 +99,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 文档 | 行数 | 状态 |
 |---|---|---|
 | **`WORKPLAN.md`(总工程树)** | 248 | ✅ **新增** |
-| `/CLAUDE.md` | 481 | ✅ |
+| `/CLAUDE.md` | 487 | ✅ |
 | `/README.md`(英文,默认) | 192 | ✅ |
 | `/README.zh-CN.md` | 186 | ✅ |
 | `/README.zh-TW.md` | 186 | ✅ |
@@ -111,11 +111,11 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 |---|---|---|
 | `plan/overview.md` | 915 | ✅ |
 | `plan/roadmap.md` | 344 | ✅ |
-| `plan/foundations.md` | 1082 | ✅ **+参数检查(§4)+ 基座边界与解析器项目(§5)** |
-| `plan/argsig.md` | 414 | ✅ **新增**(孵化说明书,建仓后迁走)|
+| `plan/foundations.md` | 1105 | ✅ **+参数检查(§4)+ 基座边界与解析器项目(§5)** |
+| `plan/argsig.md` | 557 | ✅ **新增**(孵化说明书,建仓后迁走)|
 | `plan/layout.md` | 261 | ✅ **新增** |
-| `plan/ci.md` | 239 | ✅ **新增** |
-| `plan/api/README.md` | 171 | ✅ **新增** |
+| `plan/ci.md` | 246 | ✅ **新增** |
+| `plan/api/README.md` | 190 | ✅ **新增** |
 | `plan/api/io.md` | 236 | ✅ **新增**(样板)|
 | `plan/api/<其余 15 个模块>` | — | ⬜ 各模块开工时写 |
 | `plan/modules/README.md` | 70 | ✅ |
@@ -146,7 +146,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `process/status.md` | 本文件 | ✅ |
 | `process/tasks.md` | 137 | ✅ |
 | `process/conventions.md` | 280 | ✅ |
-| `process/decisions.md` | 240 | ✅ |
+| `process/decisions.md` | 242 | ✅ |
 | `process/open-questions.md` | 160 | ✅ |
 
 ### 5.4 `research/`
@@ -215,3 +215,5 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 2026-08-03 | **人拍板 P9:Penlight 不再 vendor,改为全生态地基级 rock 依赖(R30/D34)** —— 原话「pl 为默认依赖项,pl 在咱们所有的项目里面为地基级别的东西」。vendor 的四条理由里第 1 条(避 `lfs`)在 R23 已作废、第 3/4 条是便利性,只剩版本锁定,而它靠 rockspec 锁 minor + CI 语义测试就能达成。决定性的是 vendor 自带的代价:**两份 `pl.class` 的实例互不 `is_a`** —— 生态里有 paddle-lua / Insight7 / `argsig` / metrics / ocean 五个消费者,这个坑会在每两个库之间各出现一次。连带:`_vendor/pl/`(5374 行)从 `layout.md` / `04-packaging.md` / `overview.md` 删除;`luafilesystem` 进入传递依赖(但我们自己不 `require "lfs"`);待拍板 P7 改写为「rock 版本区间怎么定」;CI 新增红线 `grep -rn "_vendor/pl" -> 失败`。同时新增 `plan/argsig.md`(176 行)——「新时代 argcheck」的孵化说明书,对着 argcheck 列出继承/丢弃/新增三列账,每行带上游 `file:line` |
 | 2026-08-03 | **签名层的用户端表面定型(`plan/argsig.md` §2 §2.5,384 行)** —— 人给的形状:`local rule = require "argrule.rule"`;规则里 `name`/`type` 可位置写(`{"x","Tensor"}`),**规则表自己也遵守它自己的调用约定**;`help` 砍掉只留 `doc`(argcheck 两个都有还要 assert 二选一,`init.lua:80`);装饰器直接吃 `_C_ops.softmax`,不包 lambda。落地时补了四条:① **位置槽只到 2**(第三个位置是 `default` 还是 `doc` 说不清);② 类型短名 `"Tensor"` 走 `alias`,**全名是规范,短名重复注册直接报错**(一个进程里 paddle 和 Insight7 同时在);③ 公开 API 一律全具名(要拿来生成文档,且会被当范例抄)—— 写进 conventions,不进 CI;④ ★ **`paddle.zeros{2,3}` 的真歧义**:第一个参数就是 table 时,表形式调用无法与「一个 table 实参」区分,**必须显式 `nonamed = true`**(逃生舱从 argcheck 继承,`init.lua:53-57`),判据机械可查已进 CI 红线 ①b —— 不用启发式,因为猜错的那次是静默的错误结果 |
 | 2026-08-03 | **新增跨模块硬规则「枚举参数一律不接受裸数字」(`api/README.md` §2.1.1)** —— 人的原话:「dtype 必须是 paddle.dtype 类型或者是 string,数字不应该代表类型」。三条理由里第二条是意外收获:**它把 `paddle.zeros{2,3}` 的调用歧义消掉了** —— `{2,3}` 当「表内位置」解释时 `dtype = 3` 过不了类型检查,于是确定性地落到「整个表是第一个实参」,**不需要写 `nonamed`**。因此 `argsig.md` §2.6 从「必须写 `nonamed`」改成**四步定死的解析顺序**,只有「表内位置」与「整表实参」两种解释**同时**成立时(如 `full{{2,3},1.0}`)才要求显式声明。两条规则相互依赖,**要改一起改**。同时定下短名原则:**类型短名 = 用户能 `local Tensor = paddle.Tensor` 拿到的那个导出名**(对应 Python 的 `from paddle import Tensor`),`Tensor`/`Place`/`DType` 归 paddle、`Array` 归 Insight7,短名重复注册直接报错。CI 红线 ①b 增至 6 条 |
+| 2026-08-03 | **消歧判据补上「必填参数」这一半,并新增 `extend` 处理共有类型** —— ① 人指出 `full{{2,3},1.0}` 其实不歧义:`fill_value` 必填无默认,所以「整表当 shape」这条路本身走不通。判据因此从「类型全过」改成**「类型全过 **且** 必填参数都有值」** —— 少了后半句会凭空造出一堆假歧义。真歧义的条件变得很苛刻:规则 #1 接受 table **且其余参数全可选**,典型是 `concat` / `stack` / `meshgrid` 这批**第一个参数是列表**的函数,它们一律写 `nonamed = true`(写了之后 `concat{a,b}` 反而天经地义)。② 人指出 **Insight7 也有 `Place` / `DType`** —— 因为 Insight7 的 API 本来就照着 Paddle 设计。所以这不是撞名是同一概念:新增 `argrule.extend(name, pred)`(谓词取或),`register` 撞名仍报错,两者区分开。顺带记一笔长期方向:`DType`/`Place` 最好在 C 层就是同一个值类型,零拷贝互操作已要求布局对齐,dtype 却还要在边界转换一次 |
+| 2026-08-03 | **`shape` 一类参数改用 `IntList`,且判据是「是个容器 + 装的是整数」而不是类名单(R31)** —— 人的原话:「paddle 里面 shape 必须是 tuple or list or np.ndarray 不能是数字」「**反正需要是个容器**」「**而且装的是整数**」。我先写成 `{"table","pl.List","insight.Array"}`,**当天即被自己推翻**:那是把「容器」硬编码成框架名单,用户自己的容器类会被无理由挡住,正是 §4 零框架硬编码要挡的。改为组合子 `argrule.list_of(elem)`(探容器协议 + 逐元素套 `elem`),`IntList` / `TensorList` 只是宿主注册的别名。容器协议:长度 `#o` -> `:len()` -> `:size()`(⚠️ **5.1 的 `__len` 对 table 无效**,进 M0 #24 实测)、取元素 `o[i]` 1-based、自报 dtype 走 O(1) 快路否则逐元素 O(n)。**意外收获:元素逐个查把 `concat` 的歧义也消掉了** —— `concat{a,b}` 的②里 `x=a` 是 Tensor 不是 TensorList、`concat{{a,b},2}` 的③里元素 `2` 不是 Tensor,各自出局。**所以上一版「第一个参数是列表的函数必须写 `nonamed`」作废**,真歧义要求 `list_of(E)` 且 `E` 自己接受容器,现有 API 里一个都没有。教训与「必填参数是天然消歧器」同源:**判据越弱,假歧义越多** |
