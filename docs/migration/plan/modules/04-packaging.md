@@ -38,14 +38,14 @@ paddle-lua/
 │   ├── init.lua
 │   ├── nn/  optimizer/  io/  vision/ ...
 │   ├── _ops/              生成的 Lua wrapper
-│   └── _vendor/pl/        vendored Penlight 受限子集(11 文件,纯 Lua)
+│   (Penlight 不在包内 —— 声明为 rock 依赖,R30)
 └── (可选) lanes           多 worker 依赖
 ```
 
-**`_vendor/pl/` 里恰好 11 个文件**(`class` `List` `compat` `pretty` `tablex`
-`utils` `stringx` `lexer` `operator` `text` `types`),5374 行,157 KB。
-这是我们要用的模块的**传递闭包**,已实测封闭且**不含任何 `lfs` 引用**。
-`paddle.pl` 暴露这一份给用户。清单与理由见 `plan/foundations.md` §1.2 §1.3。
+**Penlight 是 rock 依赖,不进包**(R30 —— 人的原话:「pl 在咱们所有的项目里面为地基级别的东西」)。
+我们实际用到的是它的 11 个模块(`class` `List` `compat` `pretty` `tablex`
+`utils` `stringx` `lexer` `operator` `text` `types`),清单见 `plan/foundations.md` §1.2。
+`paddle.pl` 转发 `require "pl"`,**不再是副本** —— 全生态只有一份 `pl.class`,`is_a` 处处成立。
 
 ### 3.2 找 `libpaddle` 的顺序
 
@@ -63,7 +63,8 @@ paddle-lua/
 dependencies = {
   "lua >= 5.1",
   "lanes >= 3.16",
-  -- 注意:**不写 "penlight"**。见下。
+  "penlight >= 1.13, < 2.0",   -- 地基级依赖(R30)。传递拖入 luafilesystem
+  "argsig >= 0.1, < 0.2",      -- 参数签名层(R27),暂定名,待拍板 P10
   -- Insight7 不写死版本,由用户自行安装(软强制)
 }
 ```
@@ -71,16 +72,13 @@ dependencies = {
 **Lanes 是强制依赖**(D-R5),不做成 optional。
 理由在 `research/dataloader.md` §9.5(a):单一 Tensor 表示、单一代码路径、少一个验证项。
 
-**Penlight 不写进 `dependencies`,而是 vendor。** 三条理由(`plan/foundations.md` §1.3):
-
-1. **版本锁定(主要理由)** —— `pl.class` 若某天改了 `_create` 语义,我们的 `nn.Layer`
-   会**静默**坏掉(不是编译错误,是自动注册悄悄失效),
-   必须锁 commit + CI 校验 sha256(待拍板 P7)
-2. Penlight 的 rockspec 声明 `dependencies = {"lua >= 5.1", "luafilesystem"}` ——
-   写依赖会把 C 库 `lfs` 拖进来,多 5 Lua × 3 OS = 15 个构建组合。
-   ~~违反 `CLAUDE.md` §9~~ —— **该禁令已取消(R23)**,现在这只是**不划算**:
-   我们一个 `pl.path`/`pl.dir`/`pl.file` 都不用,却要为它们承担构建面
-3. 与 `research/to-static.md` §5 vendor luacheck parser 的做法一致,不新增机制
+~~**Penlight 不写进 `dependencies`,而是 vendor。**~~
+🔄 **已于 2026-08-03 由人推翻(R30):Penlight 是地基级依赖,写进 `dependencies`。**
+理由与连带影响见 `plan/foundations.md` §1.3。要点:
+版本锁定不需要靠 vendor(rockspec 锁 minor + CI 语义测试即可),
+而 vendor 会让"系统 Penlight 与我们那份互不 `is_a`"这个坑在**每两个生态库之间**各出现一次。
+`luafilesystem` 因此进入传递依赖 —— 可接受,但**我们自己不 `require "lfs"`**,
+文件系统仍走 `paddle.utils.fs`(见下)。
 
 **Insight7 是软强制**:核心不 `require "insight"`,
 只有 `paddle.np` / `paddle.from_insight` / `paddle.vision.transforms` 惰性加载,

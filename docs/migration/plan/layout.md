@@ -50,7 +50,6 @@ paddle-lua/
 │
 ├── lua/paddle/                 ── Lua 侧 ────────────────────────────
 │   ├── init.lua                    require "paddle" 入口,只做装配
-│   ├── _vendor/pl/             【P4】vendored Penlight 受限子集,11 文件,**不许改**
 │   ├── _ops/                   【P3】**生成**的 Lua wrapper —— 不许手改
 │   │                            ⚠️ 参数解析器**不在这里** —— 独立 rock,外部依赖(R27)
 │   │                               `_args.lua` / `_wrap.lua` 都已删除,见 foundations §5.4.4
@@ -99,9 +98,9 @@ paddle-lua/
 | `csrc/capi_gen/` | P3 | ~40k | **生成** | ops.yaml |
 | `lua/paddle/_ops/` | P3 | ~20k | **生成** | ops.yaml |
 | `csrc/utils/fs.cc` | P4 | ~200 | 手写 | C++17 |
-| `lua/paddle/_vendor/pl/` | P4 | 5374 | **vendored** | 无 |
-| `lua/paddle/{tensor,slice,_wrap,dtype,device}.lua` | **P5** | ~1.5k | 手写 | 基座 |
-| *(参数解析器)* | — | — | **外部 rock**(R27),rockspec 声明依赖 | 零依赖,纯 Lua |
+| `lua/paddle/{tensor,slice,dtype,device}.lua` | **P5** | ~1.4k | 手写 | 基座 |
+| *(Penlight)* | — | — | **rock 依赖**(R30),不 vendor | `lfs`(传递) |
+| *(`argsig` 参数签名层)* | — | — | **rock 依赖**(R27),暂定名待 P10 | Penlight |
 | `lua/paddle/{autograd,scope}.lua` | P6 | ~600 | 手写 | P5 |
 | `lua/paddle/serialize/` | P7 | ~1.2k | 手写 | P5 |
 | `lua/paddle/jit/load.lua` | P8 | ~300 | 手写 | P5 |

@@ -84,26 +84,40 @@ pl.utils  pl.stringx  pl.lexer  pl.operator  pl.text  pl.types
 **同样的结论,但现在是因为划算,不是因为被禁。**
 碰到 `pl.path` 的路径处理确实更顺手的地方,直接用,不必绕。
 
-### 1.3 分发方式:vendor,不走 luarocks 依赖
+### 1.3 ✅ 已决:声明 rock 依赖,**不 vendor**(R30,推翻本节原方案)
+
+> **2026-08-03 人拍板(原待拍板 P9):**
+> 「**pl 为默认依赖项,pl 在咱们所有的项目里面为地基级别的东西。**」
+
+~~原方案:vendor 那 11 个文件到 `lua/paddle/_vendor/pl/`。~~ **已推翻。**
 
 | 方案 | 判决 |
 |---|---|
-| rockspec 里写 `dependencies = {"penlight"}` | ❌ 会把 lfs 拖进来(见 §1.2) |
-| **vendor 那 11 个文件到 `lua/paddle/_vendor/pl/`** | ✅ **选这个** |
+| **rockspec 里写 `dependencies = {"penlight"}`** | ✅ **选这个**,生态内所有仓库统一 |
+| ~~vendor 11 个文件~~ | ❌ 见下 |
 
-理由:
-1. ~~避开 lfs~~ —— **此理由已作废**(禁令取消)
-2. **版本锁定** —— Penlight 的 `pl.class` 若某天改了 `_create` / `_class_init` 语义,
-   我们的 `nn.Layer` 会**静默**坏掉(不是编译错误,是参数注册悄悄失效)。
-   **这条现在是 vendor 的主要理由,而且它本来就比第 1 条强。**
-3. 开箱即用 —— `require "paddle"` 不应该因为用户没装 penlight 而失败
-4. 与 `research/to-static.md` §5 vendor luacheck parser 的做法一致,不新增机制
+**为什么改:** vendor 的四条理由里,**第 1 条本来就作废了**(R23 取消禁 C 依赖),
+**第 3、4 条是便利性**,而**第 2 条(版本锁定)不需要靠 vendor 达成** ——
+rockspec 锁 minor + CI 跑一组 `pl.class` 语义测试,同样挡得住 `_create` 语义漂移,
+而且升级路径是显式的(改一行版本号),不是"改 5374 行 vendored 代码"。
 
-**但要暴露出去:** `paddle.pl` 指向 vendored 副本,用户可以直接
-`local List = require("paddle").pl.List`。同时若用户环境里已有系统 Penlight,
-`require "pl.List"` 拿到的是系统的那份 —— 两份 `List` 的实例互不 `is_a`。
-⚠️ 这是**已知代价**,必须写进用户文档:
-**跨库传 `List` 时传裸表,不传 `List` 实例。**
+**真正决定性的是原方案自己写在下面的那条代价:**
+vendor 之后用户环境里若已有系统 Penlight,`paddle.pl.List` 与 `require "pl.List"`
+**是两个类,实例互不 `is_a`**。原文的处理是"写进用户文档:跨库传裸表"。
+但一旦 Penlight 成为**整个生态的地基**(paddle-lua / Insight7 / `argsig` / metrics / ocean 都用),
+这个坑就从"一条文档注意事项"变成"每两个库之间都有一次"。
+**声明依赖让它彻底消失** —— 全生态只有一份 `pl.class`,`is_a` 处处成立。
+
+**连带:**
+
+| | |
+|---|---|
+| `lua/paddle/_vendor/pl/` | **删除**(`layout.md` / `04-packaging.md` / `overview.md` 同步) |
+| `luafilesystem` | 进入依赖闭包(Penlight 的 rockspec 声明了它)。可接受:R23/D28 已取消禁令,且 `lfs` 是 luarocks 上可移植性最好的 rock 之一 |
+| **我们自己不 `require "lfs"`** | 文件系统仍走 `paddle.utils.fs`(C++17 `std::filesystem`)。`lfs` 只是被 Penlight 拖进来的传递依赖,**不是我们的 API 面** |
+| 版本锁定 | 从"锁 commit + 校验 sha256"改为**rockspec 锁 minor + CI 语义测试**(待拍板 P7 相应改写) |
+| `paddle.pl` | 仍然暴露,但它现在就是 `require "pl"` 的那一份,**不再是副本** |
+| CI | 新增红线:`grep -rn "_vendor/pl" -> 失败`(全生态只许有一份 Penlight) |
 
 ### 1.4 `pl.class` 与 `nn.Layer` 自动注册的兼容性(核心问题)
 

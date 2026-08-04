@@ -71,7 +71,8 @@
 | D22 | 源码契约 = 君子之约 + `string.dump` 往返验证 | `research/to-static.md` §4 |
 | D23 | **`nn.Layer` 自动注册**(实例 raw 表保持空 + 私有 `FIELDS` 键) | `plan/modules/09-nn.md` §3.2 |
 | D24 | **Tensor 跨 lane 用 sol2 usertype + `__lanesclone`**,不用 deep userdata | `plan/modules/13-lanes.md` §4.1 |
-| D25 | **类系统用 `pl.class`**(vendored 受限 Penlight,11 文件纯 Lua);集合返回 `pl.List` | `plan/foundations.md` §1 §2 |
+| D25 | **类系统用 `pl.class`**;集合返回 `pl.List`。**Penlight 是 rock 依赖,不 vendor**(R30 改) | `plan/foundations.md` §1 §2 |
+| D34 | **Penlight 是全生态的地基级默认依赖**(paddle-lua / Insight7 / `argsig` / metrics / ocean 共用同一份)。**不许任何仓库 vendor 它** —— 两份 `pl.class` 的实例互不 `is_a` | `plan/foundations.md` §1.3 |
 | D26 | **Insight7 顶替 numpy 的位置**,一等公民、软强制依赖 | `plan/foundations.md` §3 |
 | D27 | **`nn.LayerList` 继承 `Layer`**(Layer 优先)。`is_a(nn.Layer)` 必须为真;因此 `ipairs(ml)` 在 5.1 上跑空,**一律用 `ml:iter()` / `ml:len()`** | `plan/foundations.md` §2.4 |
 | D28 | **「不引入新的强制 C 依赖」已取消。** 判据改为**边际成本**:先看我们自己的 `.so` 能不能顺手做,做不了就引入 | 本文件 §9.1 |
@@ -403,6 +404,7 @@ csrc/sol/gen_*.cpp      ← 生成,禁止手改
 | ~~用 `pl.path` / `pl.dir` / `pl.file` / `pl.app`~~ | ❌ **禁令随上条一并取消。** 需要就用,`lfs` 直接进依赖 |
 | 用 `class.cast` | 它绕过 `_create`,造出没有 `FIELDS` 的破 Layer 实例(`plan/foundations.md` §1.5) |
 | 自己再写一套 class / list / 参数检查 | C11。**基座三块已到顶** —— 想加第四块先回答「换掉它要改几处」 |
+| vendor Penlight(或任何基座) | D34。两份 `pl.class` = 实例互不 `is_a`,而生态里有五个消费者 |
 | 在本仓库内实现参数解析器 | D31。它是**独立项目**(R27),本仓库只声明依赖。自定义类型走 `register_type` 注入 |
 | 保留 `_wrap.lua` 作为兜底 | 那是第二套参数处理,违反 C11。降级路径归解析器自己管 |
 | 直接依赖 `argcheck` 这个 rock | D30。它编不出 `Conv2D` / `DataLoader` 的签名(`plan/foundations.md` §4.5) |

@@ -19,6 +19,7 @@
 | 消费者 | paddle-lua、Insight7,以及任何想要 kwargs 风格 API 的 Lua 库 |
 | 许可 | 新代码 MIT;`usage` 渲染部分移植自 Torch argcheck,保留其 **BSD-3** 头 |
 | 目标版本 | Lua 5.1 / 5.2 / 5.3 / 5.4 / LuaJIT,纯 Lua |
+| 依赖 | **Penlight**(`pl.compat` / `pl.pretty` / `pl.utils` / `pl.class`)—— 全生态地基级默认依赖,**不 vendor**(R30/D34)。除此之外零依赖 |
 | 体量估计 | 生成器 ~200 行 + usage ~120 行 + 降级路径 ~80 行 ≈ **400 行** |
 
 **为什么必须自己写**:普查了 luarocks 上全部候选,没有一个提供
@@ -62,7 +63,7 @@
 | **N > 100 切「表形态」** | 绕开 122 的寄存器墙;实测 1000 参数仍可编译 |
 | **无 `debug` / 无 `loadstring` 时的解释式降级** | LuaJIT 沙箱、`-DLUA_NODEBUG` 之类的环境 |
 | **报错指向调用点**,不是库内部 | `checks` 做得对的地方:`debug.getinfo(2)` 拿调用者的 `file:line` |
-| **`pl.compat` / `pl.pretty` 复用** | 跨版本 `load`/`unpack`/`setfenv` 与默认值渲染,不自己写(待拍板 P9) |
+| **`pl.compat` / `pl.pretty` 复用** | 跨版本 `load`/`unpack`/`setfenv` 与默认值渲染,不自己写(R30:Penlight 是地基级依赖) |
 
 ---
 
@@ -171,6 +172,5 @@ grep -rniE "paddle|insight|torch"  lua/   -> 非空即失败
 | # | 问题 | 状态 |
 |---|---|---|
 | **P10** | 叫什么名字 | 建议 `argsig`;备选 `callsig` / `sigcheck` / `arglet` / `argrule` / `signet` / `clerk`(均实测未被占用)。**定名当天在 luarocks 占位** |
-| **P9** | 依赖 Penlight 还是自带兜底 | 建议两边都改成声明 rock 依赖,不再 vendor(`foundations.md` §5.4.2) |
 | — | `defaulta` 的求值顺序 | argcheck 是声明顺序;若 A 的默认值取自 B 而 B 在 A 之后,要报错还是拓扑排序?**倾向报错**,简单可预测 |
 | — | 返回值要不要也校验 | `typecheck` 有(`=> int`)。**倾向不做** —— 我们的返回值几乎都是 Tensor,校验收益低于噪声 |

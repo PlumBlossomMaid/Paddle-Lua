@@ -125,6 +125,7 @@ OS:   Linux  macOS  Windows
 grep -rn "class%.cast"                lua/                      -> 失败
 grep -rn "rawset(self"                lua/paddle/nn/            -> 失败(仅 FIELDS 一处豁免)
 grep -rn "require *['\"]middleclass"  lua/                      -> 失败(第二套 class)
+grep -rn "_vendor/pl"                 .                         -> 失败(D34,全生态只许一份 Penlight)
 
 # ①b 参数检查的四条(foundations.md §4 §5.4.6)
 grep -rn "argsig"                     lua/paddle/_ops/          -> 失败(生成算子构建期展开,§4.7)
