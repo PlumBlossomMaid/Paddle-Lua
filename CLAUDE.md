@@ -36,7 +36,7 @@
 | **C8** | **不手写算子绑定**。算子从 Paddle 的 yaml 生成 | `csrc/capi_gen/` 与 `lua/paddle/_ops.lua` 只能由生成器写 |
 | **C9** | **生成器是开发期工具**,可以用 Python;但产物不得依赖 Python | 生成器在 `tools/gen/`,不进发布包 |
 | **C10** | **不发明 Paddle C++ API**。任何 Paddle 符号必须先在源码里读到才能用 | 见 §4 |
-| **C11** | **生态基座只有一套**:类系统 = `pl.class`,集合 = `pl.List`,跨版本兼容 = `pl.compat`,数组(numpy 的位置)= Insight7,**参数检查 = `_args`**。**不得引入第二套** | 见 `process/conventions.md` §2 + `plan/foundations.md` |
+| **C11** | **生态基座只有一套**:类系统 = `pl.class`,集合 = `pl.List`,跨版本兼容 = `pl.compat`,数组(numpy 的位置)= Insight7,**参数检查 = `_args`**。**不得引入第二套**。判据:**换掉它要改几处?一处 = 外围,可随时替换;全仓库 = 基座,P5 前定死**(`plan/foundations.md` §5.2) | 见 `process/conventions.md` §2 |
 
 ---
 
@@ -397,7 +397,8 @@ csrc/sol/gen_*.cpp      ← 生成,禁止手改
 | ~~引入新的强制 C 依赖(除 sol2/Lanes)~~ | ❌ **本条已于 2026-08-03 由人取消。** 需要 C 库就引入。**但成本没有消失**,见 §9.1 的取舍程序 |
 | ~~用 `pl.path` / `pl.dir` / `pl.file` / `pl.app`~~ | ❌ **禁令随上条一并取消。** 需要就用,`lfs` 直接进依赖 |
 | 用 `class.cast` | 它绕过 `_create`,造出没有 `FIELDS` 的破 Layer 实例(`plan/foundations.md` §1.5) |
-| 自己再写一套 class / list / 参数检查 | C11 |
+| 自己再写一套 class / list / 参数检查 | C11。**基座三块已到顶** —— 想加第四块先回答「换掉它要改几处」 |
+| 让 `_args.lua` 引用 paddle 内部符号 | 它要能独立成 rock 给 Insight7 共用(待拍板 P8,`plan/foundations.md` §5.4)。自定义类型识别走注册接口注入 |
 | 直接依赖 `argcheck` 这个 rock | D30。它编不出 `Conv2D` / `DataLoader` 的签名(`plan/foundations.md` §4.5) |
 | 在参数检查里枚举「哪些参数被省略」的组合 | 那是 3^N。9 个可选参数 = 1.37 MB 生成代码,10 个直接编不出来 |
 | 支持「位置参数中间省略、靠类型猜」 | Python 不允许这么写,而支持它要付上一行的代价。跳过参数就用具名表 |
