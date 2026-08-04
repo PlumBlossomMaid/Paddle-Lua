@@ -212,6 +212,7 @@ docs/
     │   ├── layout.md          ★ 代码目录与模块清单 + 文件级落地顺序
     │   ├── ci.md              ★ CI 计划:四层、阶段解锁表、红线
     │   ├── foundations.md     ★ 生态基座:Penlight 与 Insight7(跨阶段,P0 前就该读)
+│   ├── argsig.md          ★ 新时代 argcheck 的孵化说明书(独立项目,建仓后迁走)
     │   ├── api/               ★ 按 Lua 模块的接口设计(先接口后实现)
     │   │   ├── README.md          模块总清单 + 跨模块硬规则 + 骨架
     │   │   └── io.md              paddle.io —— 样板文档
@@ -257,6 +258,7 @@ docs/
 | **`plan/layout.md`** | 目录树、模块清单、文件级落地顺序 | **建目录 / 决定先写哪个文件时** |
 | **`plan/ci.md`** | 四层 CI、阶段解锁表、红线 | **每个阶段完工前**(没 CI 不算完工) |
 | **`plan/foundations.md`** | 生态基座:Penlight / Insight7 的选型、闭包、坑 | **写任何 Lua 代码前必读一次** |
+| **`plan/argsig.md`** | 参数签名层:对着 argcheck 的继承/丢弃/新增三列账、API 面、生成策略、验收 | **动手写那个库时**;写 paddle API 签名前扫一眼 |
 | **`plan/modules/<阶段>.md`** | 当前阶段的详细设计 | **开工前读当前这一份,不要读全部** |
 | `plan/overview.md` | 范围表、工作量、风险登记 | 需要全局视野时 |
 | `research/feasibility.md` | 可行性主报告 | 想知道"为什么可行" |

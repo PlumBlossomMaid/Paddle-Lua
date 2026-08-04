@@ -19,6 +19,7 @@ docs/migration/
 │   ├── layout.md          ★ 代码目录与模块清单 + 文件级落地顺序
 │   ├── ci.md              ★ CI 计划:四层、阶段解锁表、红线
 │   ├── foundations.md     ★ 生态基座:Penlight 与 Insight7(跨阶段)
+│   ├── argsig.md          ★ 新时代 argcheck 的孵化说明书(独立项目)
 │   ├── api/               ★ 按 Lua 模块的接口设计(paddle.io.* / paddle.nn.* …)
 │   └── modules/           ★ 19 份实现设计,每个阶段一份
 ├── process/           作业流程:状态、任务板、约定、决策、未解问题
@@ -100,6 +101,7 @@ docs/migration/
 | **`plan/api/`** | **按 Lua 模块的接口设计。** 导出清单、签名、参数名、返回类型、index 语义参数、与 Python 的差异、未实现项。**`plan/modules/` 是「怎么造」,这里是「造出来长什么样」** |
 | **`plan/layout.md`** | **代码目录与模块清单。** 权威目录树、每个模块的阶段/体量/性质、**文件级落地顺序**(每个阶段第一个敲哪个文件)、生成代码进不进版本库 |
 | **`plan/ci.md`** | **CI 计划。** 四层 CI(为什么不能每次 push 都编 Paddle)、阶段解锁表、必须机器挡住的五条红线、golden 数据 |
+| **`plan/argsig.md`** | **新时代 argcheck(暂名 `argsig`)的孵化说明书。** 对着 argcheck 的三列账(继承什么 / 丢弃什么 / 新增什么)、API 面、三条生成规则、零框架硬编码的 CI 判据、八条验收。**独立项目,建仓后本文件迁走** |
 | **`plan/foundations.md`** | **生态基座。** 为什么类系统用 `pl.class`、集合用 `pl.List`、numpy 的位置给 Insight7;Penlight 的 11 文件闭包与四个坑;`LayerList` 为什么继承 `Layer`(以及 `ipairs` 在 5.1 上的坑);Insight7 互操作与 `axis` 改 1-based 的落地方式 |
 | **`plan/modules/`** | **19 份模块详细设计。** 每份回答:做什么 / 上游有什么可用(带 `file:line`)/ 怎么做 / 坑在哪 / 怎么验收 |
 
