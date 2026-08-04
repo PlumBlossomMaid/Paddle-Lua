@@ -11,16 +11,28 @@
 
 ```
 docs/migration/
+├── WORKPLAN.md        ★★ 总工程树 —— 智能体按它深度优先遍历,遍历完 = 工程完成
 ├── README.md          ← 你在这里(总索引)
 ├── plan/              做什么、什么顺序、怎么做
 │   ├── overview.md        范围、分层、工作量、风险
-│   ├── roadmap.md         ★ 总计划:先干什么再干什么(P0–P18)
+│   ├── roadmap.md         ★ 阶段顺序:先干什么再干什么(P0–P18)
+│   ├── layout.md          ★ 代码目录与模块清单 + 文件级落地顺序
+│   ├── ci.md              ★ CI 计划:四层、阶段解锁表、红线
 │   ├── foundations.md     ★ 生态基座:Penlight 与 Insight7(跨阶段)
 │   └── modules/           ★ 19 份模块详细设计,每个阶段一份
 ├── process/           作业流程:状态、任务板、约定、决策、未解问题
 └── research/          技术论证:可行性、架构、GC、DataLoader、复用、动转静
     └── _ref/          第三方参考源码片段
 ```
+
+**四份「顺序」文档的分工**(容易混,列清楚):
+
+| 文档 | 粒度 | 回答 |
+|---|---|---|
+| `WORKPLAN.md` | 节点 | **执行**:现在做哪个,做完做哪个 |
+| `plan/roadmap.md` | 阶段 | 依赖:P5 为什么必须在 P2 之后 |
+| `plan/layout.md` | 文件 | 落地:P1 开工敲的第一个文件是哪个 |
+| `process/tasks.md` | 原子任务 | M0/M1 叶节点的具体内容 |
 
 三个子目录的分工:
 
@@ -53,9 +65,12 @@ docs/migration/
 ### 如果你是**智能体**
 
 ```
-/CLAUDE.md  →  process/status.md  →  plan/roadmap.md  →  plan/modules/<当前阶段>.md
-(约束/决策)      (做到哪了)          (下一步是哪个阶段)     (这个阶段怎么做)
+/CLAUDE.md  →  WORKPLAN.md  →  process/status.md  →  <当前叶节点的文档>
+(约束/决策)     (找到那个 🔵)    (上次卡在哪)          (这个节点怎么做)
 ```
+
+**`WORKPLAN.md` 是入口。** 它是一棵树,深度优先遍历,遍历完就是工程完成。
+全树同一时刻只有一个 🔵,那就是你的位置。
 
 **不要一上来通读全部** —— 总量约 8000 行,会吃掉大量上下文。
 `plan/modules/` 只读当前阶段那一份。
@@ -81,6 +96,8 @@ docs/migration/
 |---|---|
 | `plan/overview.md` | 范围与总账:仓库划分、A/B 四象限分类、排除清单、分层架构、工作量、API 设计、M0 验证清单、风险登记 |
 | **`plan/roadmap.md`** | **总计划。** P0–P18 的依赖图、每阶段的开工条件与完工判据、三条排期原则、允许打乱顺序的边界 |
+| **`plan/layout.md`** | **代码目录与模块清单。** 权威目录树、每个模块的阶段/体量/性质、**文件级落地顺序**(每个阶段第一个敲哪个文件)、生成代码进不进版本库 |
+| **`plan/ci.md`** | **CI 计划。** 四层 CI(为什么不能每次 push 都编 Paddle)、阶段解锁表、必须机器挡住的五条红线、golden 数据 |
 | **`plan/foundations.md`** | **生态基座。** 为什么类系统用 `pl.class`、集合用 `pl.List`、numpy 的位置给 Insight7;Penlight 的 11 文件闭包与四个坑;`LayerList` 为什么继承 `Layer`(以及 `ipairs` 在 5.1 上的坑);Insight7 互操作与 `axis` 改 1-based 的落地方式 |
 | **`plan/modules/`** | **19 份模块详细设计。** 每份回答:做什么 / 上游有什么可用(带 `file:line`)/ 怎么做 / 坑在哪 / 怎么验收 |
 

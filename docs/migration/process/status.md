@@ -20,10 +20,14 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 
 ## 2. 当前任务
 
+> **位置以 `docs/migration/WORKPLAN.md` 里唯一的 🔵 为准。** 本节只记现场笔记。
+
 | | |
 |---|---|
 | 阶段 | **论证 / 文档** |
-| 下一个动作 | **P0** —— 见 `plan/modules/00-build.md`,任务拆解在 `process/tasks.md` `T-M0-01` |
+| 工程树位置 | `WORKPLAN.md` 节点 **0.12**(总工程树本身)-> 下一个 **0.13 L0 CI 落地** |
+| 下一个动作 | **0.13** L0 CI(不需要 libpaddle,现在就能建,见 `plan/ci.md` §2),之后才是 **1.1 无 Python 构建** |
+| 全部 ⛔ 阻塞节点 | `WORKPLAN.md` 4.3 distributed —— 无多卡环境(待拍板 P2) |
 | 待人拍板 | ~~P1(Insight7 `axis`)~~ ✅ **2026-08-03 已拍板:改**(R24)。剩余待拍板:P3 / P4 / P6 / P7 —— 见 `process/decisions.md` §3 §4 |
 | 上次卡在哪 | — |
 
@@ -87,6 +91,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 
 | 文档 | 行数 | 状态 |
 |---|---|---|
+| **`WORKPLAN.md`(总工程树)** | 200 | ✅ **新增** |
 | `/CLAUDE.md` | 432 | ✅ |
 | `/README.md`(英文,默认) | 192 | ✅ |
 | `/README.zh-CN.md` | 186 | ✅ |
@@ -99,11 +104,13 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 |---|---|---|
 | `plan/overview.md` | 915 | ✅ |
 | `plan/roadmap.md` | 344 | ✅ |
-| `plan/foundations.md` | 521 | ✅ **新增** |
+| `plan/foundations.md` | 521 | ✅ |
+| `plan/layout.md` | 261 | ✅ **新增** |
+| `plan/ci.md` | 197 | ✅ **新增** |
 | `plan/modules/README.md` | 70 | ✅ |
 | `plan/modules/00-build.md` | 115 | ✅ |
 | `plan/modules/01-c-abi.md` | 150 | ✅ |
-| `plan/modules/02-binding.md` | 151 | ✅ |
+| `plan/modules/02-binding.md` | 173 | ✅ |
 | `plan/modules/03-codegen.md` | 164 | ✅ |
 | `plan/modules/04-packaging.md` | 96 | ✅ |
 | `plan/modules/05-tensor.md` | 156 | ✅ |
@@ -188,5 +195,6 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 2026-08-03 | `plan/roadmap.md`:新增总计划,P0–P18 依赖图 + 每阶段开工条件与完工判据 |
 | 2026-08-03 | `plan/modules/`:新增 19 份模块详细设计(约 2700 行);`plan.md` 更名 `overview.md` |
 | 2026-08-03 | `09-nn.md`:恢复**自动注册**(R17);`13-lanes.md`:Tensor 跨 lane 改用 `__lanesclone`,放弃 deep userdata(R18);Q-11 关闭 |
+| 2026-08-03 | **新增 `WORKPLAN.md`(总工程树)** —— 智能体按它 DFS 遍历,遍历完 = 工程完成;新增 `plan/layout.md`(权威目录树 + 文件级落地顺序 + 生成代码进版本库的决策)与 `plan/ci.md`(四层 CI、阶段解锁表、五条机器红线)。关键设计:**兄弟节点排成拓扑序**,使朴素 DFS 自动满足 DAG 依赖,`前置` 字段退化为断言 |
 | 2026-08-03 | 人的三条决定落盘:**① `nn.LayerList` 改为继承 `Layer`**(R22,Layer 优先;连带发现 5.1 的 `ipairs` 用 `lua_rawgeti`,`ipairs(ml)` 会静默跑空 -> 改用 `ml:iter()`,新增 Q-16);**② 「不引入新的强制 C 依赖」禁令取消**(R23,判据改为边际成本,`CLAUDE.md` §9.1;解禁 HTTP 下载与图像解码,Q-08 风险下降);**③ Insight7 的 `axis` 按 bug 修成 1-based**(R24,成员索引与维度索引都要 1-based,顺手做、P12 前完成;待拍板 P1 关闭、Q-12 转已决)。新增 D27–D29 |
 | 2026-08-03 | **新增 `plan/foundations.md`(生态基座)**:Penlight 定为一等公民(R19/R21),Insight7 顶替 numpy 的位置(R20)。新增硬约束 C11、决策 D23–D26、未解问题 Q-12–Q-15;`conventions.md` 章节重编号(§2 生态基座、§3 与 Python 的已知差异) |

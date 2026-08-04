@@ -200,10 +200,13 @@ README.zh-CN.md      简体中文
 README.zh-TW.md      繁體中文
 docs/
 └── migration/       ← 目前 docs/ 下唯一的子目录:完整的 Paddle-Lua 构建计划
+    ├── WORKPLAN.md        ★★ 总工程树:DFS 遍历它,遍历完 = 工程完成。**执行入口**
     ├── README.md          计划总索引
     ├── plan/              做什么、什么顺序、怎么做
     │   ├── overview.md        范围与总账
-    │   ├── roadmap.md         ★ 总计划 P0–P18:依赖图、每阶段开工条件与完工判据
+    │   ├── roadmap.md         ★ 阶段顺序 P0–P18:依赖图、开工条件与完工判据
+    │   ├── layout.md          ★ 代码目录与模块清单 + 文件级落地顺序
+    │   ├── ci.md              ★ CI 计划:四层、阶段解锁表、红线
     │   ├── foundations.md     ★ 生态基座:Penlight 与 Insight7(跨阶段,P0 前就该读)
     │   └── modules/           ★ 19 份模块详细设计,每阶段一份
     │       ├── README.md          模块索引 + 固定写作骨架
@@ -237,10 +240,13 @@ docs/
 | 文件 | 内容 | 什么时候读 |
 |---|---|---|
 | **`/CLAUDE.md`** | 本文件:约束、决策、流程 | **每次开工必读** |
+| **`docs/migration/WORKPLAN.md`** | **总工程树。全树唯一的 🔵 就是你的位置** | **每次开工必读,第二个读** |
 | **`process/status.md`** | 当前闸门/任务/环境路径 | **每次开工必读** |
 | **`process/tasks.md`** | 任务板,原子任务 + 验收标准 | 每次开工必读 |
 | `process/conventions.md` | Lua 5.1 子集规则、命名、API 映射规则 | 写代码前 |
 | **`plan/roadmap.md`** | P0–P18 的顺序与门槛 | **每次开工必读** |
+| **`plan/layout.md`** | 目录树、模块清单、文件级落地顺序 | **建目录 / 决定先写哪个文件时** |
+| **`plan/ci.md`** | 四层 CI、阶段解锁表、红线 | **每个阶段完工前**(没 CI 不算完工) |
 | **`plan/foundations.md`** | 生态基座:Penlight / Insight7 的选型、闭包、坑 | **写任何 Lua 代码前必读一次** |
 | **`plan/modules/<阶段>.md`** | 当前阶段的详细设计 | **开工前读当前这一份,不要读全部** |
 | `plan/overview.md` | 范围表、工作量、风险登记 | 需要全局视野时 |

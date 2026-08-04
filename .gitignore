@@ -22,6 +22,9 @@ lua_modules/
 .DS_Store
 Thumbs.db
 
-# 生成的算子绑定(P3 产出,不进版本库)
-csrc/generated/
-lua/paddle/_generated/
+# 生成的算子绑定(P3 产出)
+# 注意:**这两个目录是进版本库的**,理由见 plan/layout.md §5
+#       (用户端没有 Python,rock 里必须自带生成产物)
+#       这里只忽略生成过程的中间物
+tools/gen/__pycache__/
+tools/gen/.cache/
