@@ -103,6 +103,146 @@ f{1, "float32"}                    -- 表内位置(Insight7 `_wrap` 的第三种
 
 ---
 
+## 2.5 用户端长什么样(按候选名 `argrule` 写,定名后全局替换)
+
+> 模块**本身可调用**,`argrule{...}` 吃一张规则表、返回一个装饰器。
+> 这个形状是从 argcheck 继承的(它那张表在源码里就叫 `rules`),名字正好把 schema 写在了外面。
+
+### ① 最简:一份规则表,三种调用方式
+
+```lua
+local argrule = require "argrule"
+
+paddle.nn.functional.softmax = argrule{
+  {name = "x",    type = "paddle.Tensor", help = "input"},
+  {name = "axis", type = "number", default = -1, help = "1-based; -1 = last dim"},
+  help = "Softmax along an axis.",
+}(function(x, axis)
+  return paddle._ops.softmax(x, axis)
+end)
+
+softmax(t)                    -- 位置
+softmax(t, 2)
+softmax{x = t, axis = 2}      -- 具名表
+softmax{t, 2}                 -- 表内位置
+```
+
+传错时报错指向**调用点**,并把整份 usage 打出来(argcheck 的做法):
+
+```
+train.lua:42: softmax: bad argument #2 'axis' (number expected, got string)
+
+usage: softmax(
+   x    = paddle.Tensor   -- input
+  [axis = number]         -- 1-based; -1 = last dim  [default=-1]
+)
+  Softmax along an axis.
+```
+
+### ② 默认值三态:常量 / 取另一个参数 / 惰性求值
+
+```lua
+paddle.nn.functional.conv2d = argrule{
+  {name = "x",        type = "paddle.Tensor"},
+  {name = "weight",   type = "paddle.Tensor"},
+  {name = "bias",     type = "paddle.Tensor", opt = true},        -- 可空,且没有默认值
+  {name = "stride",   type = {"number", "table"}, default  = 1},  -- 常量
+  {name = "padding",  type = {"number", "table", "string"}, default = 0},
+  {name = "dilation", type = {"number", "table"}, defaulta = "stride"},   -- 直译 `if d is None: d = stride`
+  {name = "groups",   type = "number", default = 1},
+  {name = "place",    type = "paddle.Place",
+                      defaultf = function() return paddle.get_device() end},  -- 每次调用才求值
+}(function(x, weight, bias, stride, padding, dilation, groups, place)
+  ...
+end)
+```
+
+`opt` 与 `default` 的区别是**有没有值**,不是"能不能省" —— 两者都能省。
+
+### ③ 类构造函数:`argrule.method` 自动吃掉 `self`
+
+```lua
+local Conv2D = paddle.nn.Layer:subclass "Conv2D"
+
+Conv2D.__init = argrule.method{
+  {name = "in_channels",  type = "number"},
+  {name = "out_channels", type = "number"},
+  {name = "kernel_size",  type = {"number", "table"}},
+  {name = "stride",       type = {"number", "table"}, default = 1},
+  {name = "padding",      type = {"number", "table", "string"}, default = 0},
+  {name = "dilation",     type = {"number", "table"}, default = 1},
+  {name = "groups",       type = "number", default = 1},
+  {name = "padding_mode", type = "string", default = "zeros"},
+  {name = "weight_attr",  type = "table", opt = true},
+  {name = "bias_attr",    type = {"table", "boolean"}, opt = true},
+  {name = "data_format",  type = "string", default = "NCHW"},
+  help = "2D convolution layer.",
+}(function(self, in_channels, out_channels, kernel_size, stride, padding, ...)
+  self.weight = self:create_parameter{...}
+end)
+
+local m = Conv2D{ in_channels = 3, out_channels = 64, kernel_size = 3, padding = "same" }
+```
+
+**11 个参数、9 个可选 —— 这正是 argcheck 编不出来的那张表**(3^11 = 177147 条路径,
+`foundations.md` §4.5)。这里是 11 行 `if`,生成的源码约 1.6 KB。
+
+### ④ 类型分派在函数体里,用 `if`,和 Python 一样
+
+```lua
+paddle.to_tensor = argrule{
+  {name = "data", type = {"number", "boolean", "table",
+                          "paddle.Tensor", "insight.Array"}},   -- 联合类型
+  {name = "dtype", type = "string", opt = true},
+  {name = "stop_gradient", type = "boolean", default = true},
+}(function(data, dtype, stop_gradient)
+  if paddle.is_tensor(data)       then return data:astype(dtype)
+  elseif insight.is_array(data)   then return paddle.from_insight(data, dtype)
+  elseif type(data) == "number"   then return paddle._scalar(data, dtype)
+  else                                 return paddle._from_table(data, dtype) end
+end)
+```
+
+签名层只回答"**允许什么进来**",不回答"**进来之后走哪条路**"。
+后者是函数体的事 —— 直译上游的 `isinstance` 链(D30 / `foundations.md` §4.8)。
+
+### ⑤ 宿主注册自定义类型(库里零框架硬编码)
+
+```lua
+-- lua/paddle/init.lua,全进程一次
+argrule.register("paddle.Tensor", function(o) return paddle.is_tensor(o) end)
+argrule.register("paddle.Place",  function(o) return paddle.is_place(o)  end)
+
+-- Insight7 那边同理
+argrule.register("insight.Array", function(o) return insight.is_array(o) end)
+```
+
+`pl.class` 的类**不用注册** —— 库直接认 `is_a`(生态里的类本来就是 `pl.class`,D25)。
+
+### ⑥ 想要结构校验?把 `tableshape` 的类型对象塞进 `type`
+
+```lua
+local ts = require("tableshape").types
+
+paddle.optimizer.Adam = argrule.method{
+  {name = "learning_rate", type = {"number", "paddle.lr.LRScheduler"}, default = 0.001},
+  {name = "betas", type = ts.array_of(ts.number):length(2), default = {0.9, 0.999}},
+}(function(self, lr, betas) ... end)
+```
+
+`tableshape` 的类型对象本身就是 callable,**我们一行代码都不为它写**(D32)。
+它是可选增强,不是依赖。
+
+### ⑦ 内省
+
+```lua
+print(argrule.usage(softmax))    -- 那份 usage 文本
+print(argrule.source(softmax))   -- 生成的 Lua 源码,排错用(对应 argcheck 的 rules.debug)
+argrule.strict(false)            -- 全局关校验(只对此后定义的函数生效)
+```
+
+---
+
 ## 3. 生成策略(三条硬规则)
 
 来自 Lua 自身的三道墙(5.1 实测:**60 upvalue / 200 局部变量 / N=122 寄存器**,
