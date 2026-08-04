@@ -112,8 +112,8 @@
  |    +-- [⬜] 1.4 Lanes 三项验证            -> process/tasks.md T-M0-04..06
  |    +-- [⬜] 1.5 GC / OOM 验证             -> process/tasks.md T-M0-07..10
  |    +-- [⬜] 1.6 序列化与执行器验证        -> process/tasks.md T-M0-11..19
- |    +-- [⬜] 1.7 参数签名层(独立项目)     -> plan/argsig.md(孵化说明书)
- |         1.7.0 定名 + luarocks 占位(待拍板 P10,建议 argsig)
+ |    +-- [⬜] 1.7 参数签名层(独立项目)     -> plan/argrule.md(孵化说明书)
+ |         1.7.0 ✅ 定名 argrule(P10 已拍板)-> ⬜ 去 luarocks 占位
  |         1.7.1 Penlight 分发方式拍板(待拍板 P9)
  |         1.7.2 三道墙实测(5 个 Lua × upvalue/局部/寄存器,= M0 #24)
  |         1.7.3 调用约定层(位置 <-> 具名 + 默认值 + usage,~200 行)

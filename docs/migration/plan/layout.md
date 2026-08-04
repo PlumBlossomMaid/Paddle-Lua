@@ -100,7 +100,7 @@ paddle-lua/
 | `csrc/utils/fs.cc` | P4 | ~200 | 手写 | C++17 |
 | `lua/paddle/{tensor,slice,dtype,device}.lua` | **P5** | ~1.4k | 手写 | 基座 |
 | *(Penlight)* | — | — | **rock 依赖**(R30),不 vendor | `lfs`(传递) |
-| *(`argsig` 参数签名层)* | — | — | **rock 依赖**(R27),暂定名待 P10 | Penlight |
+| *(`argrule` 参数签名层)* | — | — | **rock 依赖**(R27),已定名(P10)| Penlight |
 | `lua/paddle/{autograd,scope}.lua` | P6 | ~600 | 手写 | P5 |
 | `lua/paddle/serialize/` | P7 | ~1.2k | 手写 | P5 |
 | `lua/paddle/jit/load.lua` | P8 | ~300 | 手写 | P5 |

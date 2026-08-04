@@ -104,7 +104,7 @@ rockspec 锁 minor + CI 跑一组 `pl.class` 语义测试,同样挡得住 `_crea
 **真正决定性的是原方案自己写在下面的那条代价:**
 vendor 之后用户环境里若已有系统 Penlight,`paddle.pl.List` 与 `require "pl.List"`
 **是两个类,实例互不 `is_a`**。原文的处理是"写进用户文档:跨库传裸表"。
-但一旦 Penlight 成为**整个生态的地基**(paddle-lua / Insight7 / `argsig` / metrics / ocean 都用),
+但一旦 Penlight 成为**整个生态的地基**(paddle-lua / Insight7 / `argrule` / metrics / ocean 都用),
 这个坑就从"一条文档注意事项"变成"每两个库之间都有一次"。
 **声明依赖让它彻底消失** —— 全生态只有一份 `pl.class`,`is_a` 处处成立。
 
@@ -464,7 +464,7 @@ DataLoader 的 worker 线程里会用 Insight7 做预处理 -> `insight::Array` 
 
 Insight7 的 API 本来就是照着 Paddle 设计的(§3.2:dtype 常量与 Place 构造器已是 Paddle 命名),
 所以 `DType` / `Place` **不是撞名,是同一个概念**。参数签名层里用 `extend` 把两边的谓词取或,
-不逼着共有概念起两个名字(`plan/argsig.md` §2.2)。
+不逼着共有概念起两个名字(`plan/argrule.md` §2.2)。
 
 ⬜ 更远的方向:它们最好在 C 层就是**同一个值类型** —— 零拷贝互操作(§3.3)本来就要求
 内存布局对齐,dtype 却还要在边界上转换一次,是不必要的。属于 Insight7 侧的长期演进。
@@ -1016,17 +1016,18 @@ Penlight 正是为了避开 `lfs`。若解析器声明 `penlight` 依赖而 padd
 |---|---|
 | `argcheck` | ❌ **已被占用**(`geoffleyland/argcheck`;Torch 的那个另算) |
 | `signature` / `atrium` / `portico` / `usher` | ❌ 有同名或近名 rock |
-| **`argsig`** | ✅ **空的** |
-| `callsig` / `sigcheck` / `arglet` / `argrule` | ✅ 空的 |
+| `argsig` / `callsig` / `sigcheck` / `arglet` | ✅ 空的 |
+| **`argrule`** | ✅ **空的** -> **✅ 2026-08-03 人拍板选它** |
 | `signet` / `concierge` / `warden` / `clerk` / `lintel` / `sieve` | ✅ 空的 |
 
-**建议 `argsig`**(argument signature):
-- 说清了它是什么 —— **签名**层,不是"校验器"也不是"解析器"(§5.4.1 提过后者有歧义)
+✅ **已定:`argrule`**(2026-08-03,人拍板;`argsig` 是我当时的建议,未采纳):
+- 说清了它是什么 —— 用户写的就是一张**规则表**,`local rule = require "argrule.rule"`
+  之后 `rule{...}(f)` 读起来是完整的一句话
 - 与 argcheck 的知识可迁移关系一眼可见,又不冒名
-- 短,`local args = require "argsig"` 读起来正常
 - 不含任何框架名(C11 / 零硬编码)
+- luarocks 实测未被占用
 
-⬜ **最终定名由人拍板;定名当天在 luarocks 上占位,避免被抢。**
+⬜ **剩下的动作:去 luarocks 占位,避免被抢。**
 
 ---
 

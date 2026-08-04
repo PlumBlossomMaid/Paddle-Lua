@@ -72,11 +72,11 @@
 | D23 | **`nn.Layer` 自动注册**(实例 raw 表保持空 + 私有 `FIELDS` 键) | `plan/modules/09-nn.md` §3.2 |
 | D24 | **Tensor 跨 lane 用 sol2 usertype + `__lanesclone`**,不用 deep userdata | `plan/modules/13-lanes.md` §4.1 |
 | D25 | **类系统用 `pl.class`**;集合返回 `pl.List`。**Penlight 是 rock 依赖,不 vendor**(R30 改) | `plan/foundations.md` §1 §2 |
-| D34 | **Penlight 是全生态的地基级默认依赖**(paddle-lua / Insight7 / `argsig` / metrics / ocean 共用同一份)。**不许任何仓库 vendor 它** —— 两份 `pl.class` 的实例互不 `is_a` | `plan/foundations.md` §1.3 |
+| D34 | **Penlight 是全生态的地基级默认依赖**(paddle-lua / Insight7 / `argrule` / metrics / ocean 共用同一份)。**不许任何仓库 vendor 它** —— 两份 `pl.class` 的实例互不 `is_a` | `plan/foundations.md` §1.3 |
 | D26 | **Insight7 顶替 numpy 的位置**,一等公民、软强制依赖 | `plan/foundations.md` §3 |
 | D27 | **`nn.LayerList` 继承 `Layer`**(Layer 优先)。`is_a(nn.Layer)` 必须为真;因此 `ipairs(ml)` 在 5.1 上跑空,**一律用 `ml:iter()` / `ml:len()`** | `plan/foundations.md` §2.4 |
 | D28 | **「不引入新的强制 C 依赖」已取消。** 判据改为**边际成本**:先看我们自己的 `.so` 能不能顺手做,做不了就引入 | 本文件 §9.1 |
-| D31 | **参数解析器是独立项目**,paddle-lua 与 Insight7 共用。纯 Lua、零框架硬编码、基于 Penlight、schema 与 argcheck 兼容。**必须先于 P5 可用,但不依赖 G0**(可与 M0 并行)。名字与 Penlight 分发方式待拍板(P9/P10) | `plan/foundations.md` §5.4 |
+| D31 | **参数解析器是独立项目**,paddle-lua 与 Insight7 共用。纯 Lua、零框架硬编码、基于 Penlight、schema 与 argcheck 兼容。**必须先于 P5 可用,但不依赖 G0**(可与 M0 并行)。✅ **名字已定:`argrule`**(P10);Penlight 走 rock 依赖(P9/R30) | `plan/foundations.md` §5.4 |
 | D32 | **类型判定层不自己写。** `type` 槽是**可调用契约**(字符串查注册表 / 数组=联合 / 任意谓词 / `tableshape` 类型对象直接可用)。我们只拥有「调用约定层」(位置↔具名 + 默认值 + usage,~200 行,**普查确认没人写过**) | `plan/foundations.md` §5.4.5 |
 | D33 | **生成器的 upvalue 数必须与参数个数无关**(单表 upvalue)。Lua 5.1 只有 60 个 upvalue,而 Paddle 最大签名 43 参数 —— argcheck 那套「一规则一 upvalue」即使没有 3^N 也编不出来 | `plan/foundations.md` §5.4.6 |
 | D29 | **Insight7 的 `axis` 按 bug 修成 1-based**(成员索引与维度索引都要 1-based)。顺手做,P12 之前完成 | `plan/foundations.md` §3.4 |
@@ -213,7 +213,7 @@ docs/
     │   ├── layout.md          ★ 代码目录与模块清单 + 文件级落地顺序
     │   ├── ci.md              ★ CI 计划:四层、阶段解锁表、红线
     │   ├── foundations.md     ★ 生态基座:Penlight 与 Insight7(跨阶段,P0 前就该读)
-│   ├── argsig.md          ★ 新时代 argcheck 的孵化说明书(独立项目,建仓后迁走)
+    │   ├── argrule.md         ★ 新时代 argcheck 的孵化说明书(独立项目,建仓后迁走)
     │   ├── api/               ★ 按 Lua 模块的接口设计(先接口后实现)
     │   │   ├── README.md          模块总清单 + 跨模块硬规则 + 骨架
     │   │   └── io.md              paddle.io —— 样板文档
@@ -259,7 +259,7 @@ docs/
 | **`plan/layout.md`** | 目录树、模块清单、文件级落地顺序 | **建目录 / 决定先写哪个文件时** |
 | **`plan/ci.md`** | 四层 CI、阶段解锁表、红线 | **每个阶段完工前**(没 CI 不算完工) |
 | **`plan/foundations.md`** | 生态基座:Penlight / Insight7 的选型、闭包、坑 | **写任何 Lua 代码前必读一次** |
-| **`plan/argsig.md`** | 参数签名层:对着 argcheck 的继承/丢弃/新增三列账、API 面、生成策略、验收 | **动手写那个库时**;写 paddle API 签名前扫一眼 |
+| **`plan/argrule.md`** | 参数签名层:对着 argcheck 的继承/丢弃/新增三列账、API 面、生成策略、验收 | **动手写那个库时**;写 paddle API 签名前扫一眼 |
 | **`plan/modules/<阶段>.md`** | 当前阶段的详细设计 | **开工前读当前这一份,不要读全部** |
 | `plan/overview.md` | 范围表、工作量、风险登记 | 需要全局视野时 |
 | `research/feasibility.md` | 可行性主报告 | 想知道"为什么可行" |
@@ -411,7 +411,7 @@ csrc/sol/gen_*.cpp      ← 生成,禁止手改
 | 在参数检查里枚举「哪些参数被省略」的组合 | 那是 3^N。9 个可选参数 = 1.37 MB 生成代码,10 个直接编不出来 |
 | 生成一条规则一个 upvalue | D33。Lua 5.1 上限 60 个,Paddle 最大签名 43 参数,撞墙 |
 | 自己写一套类型判定 / 结构校验 | D32。`tableshape` 已经很好,而且它的类型对象本身可调用,塞进 `type` 槽就能用 |
-| 把「容器」写成类名单(`{"table","pl.List","insight.Array"}`) | 判据是**结构**:是个容器 + 装的是整数。写成名单就把框架名硬编码进类型系统,用户自己的容器类被无理由挡住(`plan/argsig.md` §2.3) |
+| 把「容器」写成类名单(`{"table","pl.List","insight.Array"}`) | 判据是**结构**:是个容器 + 装的是整数。写成名单就把框架名硬编码进类型系统,用户自己的容器类被无理由挡住(`plan/argrule.md` §2.3) |
 | 让 `shape` / `axes` 接受裸数字 | Python 侧 `paddle.zeros(5)` 本来就是错的。放行它还会把 §2.6 的调用消歧一起破坏(`plan/api/README.md` §2.1.2) |
 | 支持「位置参数中间省略、靠类型猜」 | Python 不允许这么写,而支持它要付上一行的代价。跳过参数就用具名表 |
 | 手写算子绑定"就这一个特例" | C8。特例会繁殖 |

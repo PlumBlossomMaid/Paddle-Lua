@@ -64,9 +64,9 @@
 | `__getitem__` | `:get(i)` 或 `t["1:3"]` | 数据访问用 `get`,张量切片用字符串索引(D14) |
 | `__call__` | `__call` 元方法 | `layer(x)` 能用 |
 | `super().__init__()` | `self:super()` | Penlight 约定 |
-| 关键字参数 | **`argrule` 规则表**(R26/R27) | schema 抄 argcheck:`{name=,type=,default=,defaulta=,defaultf=,opt=,check=,doc=}`(**只留 `doc`,没有 `help`**);求解器是我们自己的 O(N) 生成器。独立 rock,见 `plan/argsig.md` |
+| 关键字参数 | **`argrule` 规则表**(R26/R27) | schema 抄 argcheck:`{name=,type=,default=,defaulta=,defaultf=,opt=,check=,doc=}`(**只留 `doc`,没有 `help`**);求解器是我们自己的 O(N) 生成器。独立 rock,见 `plan/argrule.md` |
 | `from paddle import Tensor` | `local Tensor = paddle.Tensor` | **短名要能直接 local 化** —— Python 侧就是这么用的。因此 `argrule` 里的类型短名 `"Tensor"` 与这个导出名**必须是同一个标识符** |
-| 第一个参数是一个列表 | 写 `type = "TensorList"`(= `list_of("Tensor")`),**不要写 `"table"`** | `concat` / `stack` / `meshgrid` / `broadcast_tensors`。元素类型一查,`concat{a,b}` 与 `concat{{a,b},2}` 都变确定,**不需要 `nonamed`**(`plan/argsig.md` ⑧)|
+| 第一个参数是一个列表 | 写 `type = "TensorList"`(= `list_of("Tensor")`),**不要写 `"table"`** | `concat` / `stack` / `meshgrid` / `broadcast_tensors`。元素类型一查,`concat{a,b}` 与 `concat{{a,b},2}` 都变确定,**不需要 `nonamed`**(`plan/argrule.md` ⑧)|
 | 位置参数中间省略 | **不支持** | `f(1, nil, 3)` 要跳过就用具名表 `f{a=1,c=3}`。**与 Python 一致**,且支持它要付 3^N 的代价(`foundations.md` §4.5)|
 
 **不做"Lua 风格化"改名。** 用户是冲着 Paddle API 来的,
@@ -94,7 +94,7 @@ Python 不允许,而支持它要付 3^N 的生成代码代价,argcheck 就是死
 
 1. **数字不表示类型。** `zeros({2,3}, 5)` 应该报错,而不是"dtype 取第 5 个"。
    enum 序号是 C++ 的实现细节,一旦上游插入一个新 dtype,所有写死数字的代码**静默错**
-2. **它消掉调用歧义。** 见 `plan/argsig.md` §2.6:`paddle.zeros{2, 3}` 之所以能被
+2. **它消掉调用歧义。** 见 `plan/argrule.md` §2.6:`paddle.zeros{2, 3}` 之所以能被
    确定性地解析成「一个 table 实参」,正是因为 `{2, 3}` 当作「表内位置」时
    `dtype = 3` 过不了类型检查。**枚举一旦收数字,这个判定就塌了**
 3. 与 1-based 同源:我们不让用户去数序号
@@ -104,21 +104,29 @@ Python 不允许,而支持它要付 3^N 的生成代码代价,argcheck 就是死
 
 ### 2.1.2 ★ `shape` 一类的参数是 `IntList`,不接受数字
 
-Python 侧 `shape` 是 `tuple | list | np.ndarray`,`paddle.zeros(5)` 本来就是错的,
-要写 `paddle.zeros([5])`。Lua 侧对等,并**统一用一个注册类型 `IntList`**:
+`shape` 的**类型**是容器,不是数字 —— 上游的 `ShapeLike` 里确实没有 `int`
+(`python/paddle/_typing/shape.py:22-33`)。Lua 侧对等,**统一用一个注册类型 `IntList`**:
 
 | ✅ | ❌ |
 |---|---|
-| `{2, 3}` / `List{2, 3}` / 整数一维 `insight.Array` | 数字 `5`、带小数的 table、二维 Array |
+| `{2, 3}` / `List{2, 3}` / 整数一维 `insight.Array` / **一维 int `Tensor`** | 带小数的 table、二维 Array 或 Tensor、非整数 dtype |
 
 适用于 `shape` / `axes` / `perm` / `strides` 等一切"整数列表"参数。
 
 ⛔ **`IntList` 的判据是「是个容器 + 装的是整数」,不是「是这三个类之一」。**
 写成 `{"table", "pl.List", "insight.Array"}` 就把「容器」硬编码成了一张框架名单,
-用户自己的容器类会被无理由挡住。容器协议(长度探测顺序、元素校验策略、
-`insight.Array` 自报 dtype 的 O(1) 快路)见 `plan/argsig.md` §2.3。
-**不为了"方便"允许 `zeros(5)`** —— 它会同时破坏与 Python 的一致性
-和 §2.6 的调用消歧(`5` 若合法,`zeros{5, "int64"}` 就真歧义了)。
+用户自己的容器类会被无理由挡住。**一维 int `Tensor` 也算**(上游收:`creation.py:1832`);
+元素还可以是 0-D 整数 Tensor(`creation.py:1831`)。
+容器协议、O(1)/O(n) 选路见 `plan/argrule.md` §2.3。
+
+⚠️ **但 `paddle.zeros(2, 3)` / `zeros(5)` 是合法的** —— 上游有
+`@size_args_decorator`(`python/paddle/utils/decorator_utils.py:406-437`),
+**在签名外面**把变长 int 归一化成 `shape`。我们照抄这个分层:
+签名里写 `sizeargs = "shape"`,`type` 仍然是 `IntList`(`plan/argrule.md` §2.4)。
+连带:**第一个位置实参是整数时,全部位置实参都归 `shape`,`dtype` 只能具名** —— 上游同此。
+**归一化必须在类型系统外面** —— 把 `number` 塞进 `shape` 的 `type` 里,
+`{"number", "IntList"}` 就会让「表内位置」解释重新成立,凭空造出调用歧义。
+上游没这么干,我们也不干。
 
 ### 2.2 索引:全 1-based,且必须在文档里逐个标出来
 

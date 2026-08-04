@@ -1,9 +1,9 @@
-# `argsig` —— 新时代的 argcheck(孵化说明书)
+# `argrule` —— 新时代的 argcheck(孵化说明书)
 
 > **一句话:对着 argcheck 重写一个,继承它的**规则表**与**usage**,
 > 丢掉它的**组合枚举**与**重载引擎**,把**类型判定**开放成可插拔契约。**
 >
-> **文件名 `argsig` 是暂定名**(待拍板 P10)。
+> ✅ **名字已拍板(2026-08-03):`argrule`**(P10 关闭)。luarocks 上实测未被占用,**定名当天占位**。
 > **本文件是孵化说明书** —— 独立仓库建起来之后整体迁走,这里只留一行指针。
 > 选型过程与实测数据不在这里,在 `plan/foundations.md` §4(为什么不 vendor argcheck)
 > 与 §5.4(为什么独立成项目、轮子普查、三道墙、命名)。
@@ -63,6 +63,8 @@
 | **N > 100 切「表形态」** | 绕开 122 的寄存器墙;实测 1000 参数仍可编译 |
 | **无 `debug` / 无 `loadstring` 时的解释式降级** | LuaJIT 沙箱、`-DLUA_NODEBUG` 之类的环境 |
 | **报错指向调用点**,不是库内部 | `checks` 做得对的地方:`debug.getinfo(2)` 拿调用者的 `file:line` |
+| **`sizeargs` 表级选项** | 上游用 `@size_args_decorator` 在签名外面把 `zeros(1,2,3)` 归一化成 `shape=[1,2,3]`(`decorator_utils.py:406-437`)。**类型系统保持干净,兼容糖在外层** —— 我们照抄这个分层(§2.4) |
+| **容器协议分 plain / opaque** | 逐元素访问贵不贵是**语义相关**的:对 GPU 上的 Tensor 逐元素查类型 = n 次设备同步。选路机械,且算出来的行为与上游一字不差(§2.3) |
 | **`pl.compat` / `pl.pretty` 复用** | 跨版本 `load`/`unpack`/`setfenv` 与默认值渲染,不自己写(R30:Penlight 是地基级依赖) |
 
 ---
@@ -174,10 +176,7 @@ Lua 的等价写法就是上面这一行。既然用户会这么写,
 
 ### 2.3 容器类型:判据是「是个容器 + 装的是整数」
 
-Paddle 的 `shape` **不接受数字** —— Python 侧就是 `tuple | list | np.ndarray`,
-写 `paddle.zeros(5)` 是错的,要写 `paddle.zeros([5])`。Lua 侧对等。
-
-⛔ **但不要把它写成三个类的联合。**
+⛔ **不要把它写成三个类的联合。**
 
 ```lua
 -- ❌ 错:把判据写成「是这三个之一」
@@ -187,69 +186,143 @@ type = {"table", "pl.List", "insight.Array"}
 type = "IntList"     -- 是个容器,且装的是整数
 ```
 
-> 人的原话:「**反正需要是个容器**」「**而且装的是整数**」。
-> 这两句就是完整定义 —— 那三个类只是它今天已知的三个**实例**,不是它的定义。
-> 写成联合类型,等于把「容器」这个概念硬编码成一张框架名单:
+> 人的原话:「**反正需要是个容器**」「**而且装的是整数**」「**Tensor 也应该满足容器协议,
+> 毕竟只要是个 int 容器按说都应该行**」。这三句就是完整定义 ——
+> 那几个类只是它今天已知的实例,不是它的定义。
+> 写成联合类型,等于把「容器」硬编码成一张框架名单:
 > 用户自己的 `Vector` 类、别人的 `array` rock、明天多出来的第四种容器,全被挡在外面,
 > 而它们本来完全合法。这也正是 §4「零框架硬编码」要挡的东西。
 
-**容器协议**(库只认协议,不认类名):
+**✅ 上游核实过,`Tensor` 确实算**(`CLAUDE.md` §4 的出处要求):
 
-| 能力 | 探测顺序(查一次,缓存到类型对象上) |
+| 事实 | 出处 |
 |---|---|
-| 长度 | `#o` 可用 -> 用它;否则 `o:len()`;否则 `o:size()` |
-| 取元素 | `o[i]`,**1-based** |
-| 元素类型(可选快路) | `o.dtype` / `o:dtype()` —— 容器自报就信它 |
+| `ShapeLike = Sequence[int \| Tensor \| None] \| Tensor` —— **里面没有 `int`** | `python/paddle/_typing/shape.py:22-33` |
+| "If `shape` is a Tensor, it should be a **1-D Tensor** which represents a list." | `python/paddle/tensor/creation.py:1832` |
+| "If `shape` is a list or tuple, each element should be **integer or 0-D Tensor**" | 同上 `:1831` |
+| `concat` 的 `x` 是 `Sequence[Tensor]`,文档写 "``x`` is a Tensor **list or tuple**" —— **不收单个 Tensor** | `python/paddle/tensor/manipulation.py:1482, 1507` |
 
-⚠️ **`#o` 在 Lua 5.1 上对 table 的 `__len` 无效**(5.1 只对 userdata 认 `__len`)。
-所以裸 table 与 `pl.List` 走 `#`,`insight.Array`(userdata)也走 `#` 或 `:size()` ——
-**探测顺序必须固定且有 fallback**,不能假设某一种可用。这条要进 M0 #24 一起实测。
+#### 容器协议(库只认协议,不认类名)
 
-**元素怎么查:自报 dtype 走 O(1),否则逐个查 O(n)。**
+容器分两级,**区别不是"谁写的",是"逐元素访问贵不贵"**:
 
-- 容器自报整数 dtype(`insight.Array`)-> **直接过**,不跨 C 边界取 n 次元素
-- 不自报(裸 table / `pl.List`)-> **逐个查**:`type(v) == "number" and v == math.floor(v)`
-  (5.1 没有 `math.type`,只能这么写 —— 见 `CLAUDE.md` §8.1)
+| 级别 | 谁 | 长度 | 取元素 | 自报 dtype |
+|---|---|---|---|---|
+| **plain** | 裸 table、`pl.List`、任何纯 Lua 序列 | `#o` | `o[i]` 便宜 | 没有 |
+| **opaque** | `insight.Array`、**`paddle.Tensor`** | `#o` / `:len()` / `:size()` | `o[i]` **贵**(可能触发设备同步) | `o:dtype()` + `o:ndim()` |
 
-⚠️ **不许抽查前几个。** shape 的长度是个位数,O(n) 的 n 小到无所谓;
-而漏掉的那个 `{2, 3.5}` 会一路穿到 C 层才炸,那时栈里已经没有用户代码了。
+长度探测顺序固定:`#o` 可用 -> 用它;否则 `o:len()`;否则 `o:size()`。取元素一律 `o[i]`,**1-based**。
 
-**`IntList` 只是一个别名 —— 一般形式是「容器 + 元素类型」:**
+> ⚠️ `#o` 在 Lua 5.1 上对 **table** 的 `__len` 无效(5.1 只对 userdata 认 `__len`)。
+> 而 `Tensor` / `Array` 都是 userdata,**它们反而没这个问题** —— 有问题的是 `pl.List`
+> 这类带元表的 table(靠数组部分,`#` 照样对)。探测顺序必须有 fallback,进 M0 #24 实测。
+
+#### 元素怎么查:两条路,选哪条是**机械**的
+
+```
+list_of(E) 判 o:
+  o 是 plain 容器   -> 逐元素套 E                       O(n)
+  o 是 opaque 容器  -> E 是标量类型(integer/number/…)?
+                         是 -> 拿 o 自报的 dtype + ndim==1 证明,不碰元素   O(1)
+                         否 -> **没有 O(1) 证明,且不许逐元素** -> 判否
+```
+
+⛔ **绝不对 opaque 容器逐元素访问。** 这不是性能优化,是红线:
+`t[i]` 对一个 GPU 上的 Tensor 是一次 device->host 同步,n 个元素就是 n 次 ——
+**类型检查触发设备同步**,用户永远查不出自己的训练为什么慢。
+
+**这条判据自己推出了上游的行为,两边一字不差:**
+
+| | 我们的判据 | 上游 |
+|---|---|---|
+| 一维 int Tensor 当 `shape` | `E = Int` 是标量 -> 自报 dtype 证明 -> **收** | **收**(`creation.py:1832`)|
+| 二维 Tensor 当 `concat` 的 `x` | `E = Tensor` 非标量 -> 无 O(1) 证明 -> **不收** | **不收**(`manipulation.py:1507`)|
+
+> 这是个好信号:**没有为了对齐上游而写特例**,是同一条规则算出来的。
+> 反过来看也对 —— 把 2-D Tensor 当 n 个 Tensor,底层 `_C_ops.concat` 收的是
+> `std::vector<Tensor>`,我们得替它切 n 个 view,那是**发明语义**,不是绑定。
+
+#### 一般形式:`list_of(elem)`
 
 ```lua
 -- 库提供的组合子(库自己不认识 int,也不认识 Tensor)
-argrule.list_of(elem)          -- 返回一个类型对象:满足容器协议,且每个元素满足 elem
+argrule.list_of(elem)          -- 容器 + 每个元素满足 elem
 
--- 宿主注册两个好读的别名
-argrule.register("IntList",    argrule.list_of("integer"))
-argrule.register("TensorList", argrule.list_of("Tensor"))    -- concat / stack 的第一个参数
+-- 宿主注册别名
+argrule.register("Int",        -- ⚠️ 不是 Lua 的 integer:上游允许元素是 0-D 整数 Tensor
+                 function(o) return is_lua_int(o) or is_0d_int_tensor(o) end)
+argrule.register("IntList",    argrule.list_of("Int"))
+argrule.register("TensorList", argrule.list_of("Tensor"))   -- concat / stack 的第一个参数
 ```
 
-`list_of` 里没有一个字是框架相关的:它只做「探容器 + 逐元素套 `elem`」,
-`elem` 本身又是一个可调用契约(§2.1),所以 `list_of(list_of("integer"))`
-这种嵌套是免费的(`nested_shape`、`meshgrid` 的分组参数用得上)。
+`list_of` 里没有一个字是框架相关的:它只做「探容器协议 + 逐元素套 `elem`(或走 O(1) 证明)」,
+`elem` 本身又是一个可调用契约(§2.1),所以 `list_of(list_of("Int"))` 这种嵌套是免费的。
 
 **为什么值得单起一个名字,而不是每处都展开写判据:**
 
 1. 2000+ 个生成算子里 `shape` / `axes` / `perm` / `strides` 反复出现,
    一份定义改一处 vs 改两千处
 2. **报错信息**:`IntList expected, got number` 比一串联合类型可读
-3. 容器协议的探测顺序、元素校验策略只写一遍,不会有的地方查有的地方不查
+3. 容器协议的探测顺序、O(1)/O(n) 的选路只写一遍,不会有的地方查有的地方不查
 
 | ✅ 接受 | ❌ 不接受 |
 |---|---|
-| 整数的裸 table:`{2, 3}` | **数字** `5` |
-| 整数的 `pl.List`:`List{2, 3}` | 有小数:`{2.5}` |
-| 整数 dtype 的一维 `insight.Array` | 二维 / 非整数 dtype 的 Array |
+| 整数的裸 table:`{2, 3}` | 有小数:`{2.5}` |
+| 整数的 `pl.List`:`List{2, 3}` | 二维 / 非整数 dtype 的 Array 或 Tensor |
+| 整数 dtype 的**一维** `insight.Array` / **`paddle.Tensor`** | 裸数字 —— 但**它另有出路**,见 §2.4 |
+| 元素是 0-D 整数 Tensor 的 table(上游明说) | |
 | **任何满足容器协议且装整数的第三方类型** | 空容器?—— 见 §6 未决 |
 
-⬜ **未定:Paddle 还接受一维 int Tensor 当 shape**(`paddle.zeros(t)`)。
-Tensor 满足容器协议吗(`#t` = 第 0 维?元素是 0-D Tensor 还是数字?)——
-**要读源码确认再决定收不收进 `IntList`**,不要凭印象放行(`CLAUDE.md` §4)。
-
-> **顺带一个好性质:`pl.List` 和 `insight.Array` 都带元表**,
+> **顺带一个好性质:`pl.List` / `insight.Array` / `Tensor` 都带元表**,
 > 而 §2.6 的表形式判定要求 `getmetatable(t) == nil`。
 > 所以 `paddle.zeros(List{2,3})` 永远不会被误认成"具名表调用" —— **带元表的实参天然免疫歧义**。
+
+---
+
+### 2.4 `zeros(2, 3)` 怎么办:归一化在类型系统**外面**
+
+⚠️ **我昨天写的「`paddle.zeros(5)` 本来就是错的」在当前 develop 上不成立。**
+上游加了 torch 风格的变长 size:
+
+```python
+# python/paddle/utils/decorator_utils.py:423-431
+if 'size' in kwargs:            kwargs['shape'] = kwargs.pop('size')
+elif len(args) >= 1 and isinstance(args[0], int):
+                                kwargs['shape'] = list(args); args = ()
+if 'shape' in kwargs and isinstance(kwargs['shape'], int):
+                                kwargs['shape'] = [kwargs['shape']]
+```
+
+`paddle.ones(1, 2, 3, dtype=...)` / `ones(5)` / `ones(size=[1,2,3])` 全合法
+(`decorator_utils.py:406-437`,用在 `creation.py:1644, 1807, 3081` …)。
+
+**但注意上游是怎么做的:它没有把 `int` 加进 `ShapeLike`**(`_typing/shape.py:22-33` 里确实没有),
+而是用一个**装饰器在签名外面**归一化。**类型系统保持干净,兼容性糖在外层。**
+
+我们照抄这个分层 —— 表级选项,`type` 仍然是 `IntList`:
+
+```lua
+paddle.zeros = rule{
+  {name = "shape", type = "IntList"},
+  {name = "dtype", type = "DType",  default = paddle.float32},
+  sizeargs = "shape",        -- ← 归一化发生在解析之前
+}(_C_ops.full)
+```
+
+`sizeargs` 的语义与上游逐字对应:
+
+```
+第一个位置实参是整数  -> 所有位置实参合起来当 shape,dtype 只能具名
+shape 拿到的是单个整数 -> 包成 {n}
+```
+
+⚠️ **`zeros(2, "int64")` 因此不是「shape=2, dtype=int64」,而是错的** ——
+上游同样如此(`args[0]` 是 int 就把**全部**位置实参当 shape)。
+这是上游行为,不是我们的限制;要给 dtype 就写 `zeros({2}, "int64")` 或 `zeros(2, {dtype="int64"})`。
+
+**消歧不受影响,而且更稳:** `zeros{2, 3}` 现在有两条独立的路得到同一答案 ——
+②「表内位置」里 `dtype = 3` 过不了枚举检查(`api/README.md` §2.1.1),落到 ③ 整表当 shape;
+而 `sizeargs` 那条路直接说「全是整数 -> 就是 shape」。**两条路同一答案,不是巧合。**
 
 ## 2.5 用户端长什么样(按候选名 `argrule` 写,定名后全局替换)
 
@@ -415,8 +488,9 @@ n == 1 且实参是无元表的 table 时:
 ⚠️ **一个解释「成立」= 类型全过 + 必填参数全有值。** 只查类型是不够的 ——
 少了后半句会凭空造出一堆假歧义。
 
-**`paddle.zeros{2, 3}` 因此是确定的:** ② 里 `shape = 2` 过不了 `table` 检查 ->
-落到 ③ -> `shape = {2, 3}`。**不需要写任何标注。**
+**`paddle.zeros{2, 3}` 因此是确定的:** ② 里 `shape = 2` 过不了 `IntList`(数字不是容器,
+§2.3),`dtype = 3` 也过不了枚举检查 -> 落到 ③ -> `shape = {2, 3}`。**不需要写任何标注。**
+`sizeargs`(§2.4)那条路给出同一答案。
 
 > 这一步能成立,靠的是 `api/README.md` §2.1.1 那条:
 > **枚举参数不接受裸数字**。如果 `dtype` 能收 `3`,②就通过了,歧义就真的存在。
@@ -550,8 +624,8 @@ grep -rniE "paddle|insight|torch"  lua/   -> 非空即失败
 
 | # | 问题 | 状态 |
 |---|---|---|
-| **P10** | 叫什么名字 | 建议 `argsig`;备选 `callsig` / `sigcheck` / `arglet` / `argrule` / `signet` / `clerk`(均实测未被占用)。**定名当天在 luarocks 占位** |
+| ~~P10~~ | 叫什么名字 | ✅ **已定:`argrule`**。剩下的动作是**去 luarocks 占位**(`plan/foundations.md` §5.4.7)|
 | — | `defaulta` 的求值顺序 | argcheck 是声明顺序;若 A 的默认值取自 B 而 B 在 A 之后,要报错还是拓扑排序?**倾向报错**,简单可预测 |
 | — | 返回值要不要也校验 | `typecheck` 有(`=> int`)。**倾向不做** —— 我们的返回值几乎都是 Tensor,校验收益低于噪声 |
 | — | 空容器算不算合法 `IntList` | `paddle.zeros({})` = 0-D?**倾向放行,由 C 层报错** —— 「非空」是语义约束不是类型约束 |
-| — | 一维 int Tensor 能不能当 `shape` | Paddle 收。要先读源码确认 Tensor 满不满足容器协议(§2.3),**不凭印象放行** |
+| ~~一维 int Tensor 能不能当 `shape`~~ | ✅ **已定:收。** 人:「Tensor 也应该满足容器协议,只要是个 int 容器按说都应该行」。上游核实通过(`creation.py:1832`),且 2-D Tensor 不算 `TensorList` 是同一条判据算出来的(§2.3),没写特例 |

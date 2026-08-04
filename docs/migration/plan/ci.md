@@ -128,7 +128,7 @@ grep -rn "require *['\"]middleclass"  lua/                      -> 失败(第二
 grep -rn "_vendor/pl"                 .                         -> 失败(D34,全生态只许一份 Penlight)
 
 # ①b 参数检查的四条(foundations.md §4 §5.4.6)
-grep -rn "argsig"                     lua/paddle/_ops/          -> 失败(生成算子构建期展开,§4.7)
+grep -rn "argrule"                    lua/paddle/_ops/          -> 失败(生成算子构建期展开,§4.7)
 grep -rniE "paddle|insight"           <解析器仓库>/lua/          -> 失败(零框架硬编码,§5.4.2)
 lua tools/ci/args_codegen_size.lua                              -> 30 个可选参数的规则表
                                                                    生成 >10 KB 即失败(指数回归)
@@ -137,7 +137,7 @@ lua tools/ci/args_codegen_43.lua                                -> 用 Paddle �
                                                                    编不出来即失败(upvalue/寄存器墙)
 lua tools/ci/args_nonamed.lua                                   -> 规则 #1 是 list_of(E)、E 自己也接受容器、
                                                                    且其余参数全可选,却没声明
-                                                                   nonamed/noordered 即失败(argsig ⑧)
+                                                                   nonamed/noordered 即失败(argrule ⑧)
                                                                    —— 必填参数与元素类型本身就消歧,
                                                                    所以这条现在几乎永远不触发,留着挡将来
 lua tools/ci/args_no_enum_number.lua                            -> dtype/device/layout/reduction 这类
@@ -147,7 +147,7 @@ lua tools/ci/args_intlist.lua                                   -> ① shape/axe
                                                                    type 不是 "IntList" 即失败;
                                                                    ② 任何 type 里出现 "pl.List" /
                                                                    "insight.Array" 即失败 —— 容器是
-                                                                   **协议**不是类名单(argsig §2.3)
+                                                                   **协议**不是类名单(argrule §2.3)
 
 # ② 5.1 语法子集(C3)
 grep -rnE "goto |::[a-z]+::|[^/]//[^/]|<close>|<const>"  lua/   -> 失败

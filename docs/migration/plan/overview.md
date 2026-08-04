@@ -372,8 +372,8 @@ ops.yaml ──► gen_capi.py    ──► paddle_capi_ops.{h,c}   纯 C 声明
 | sol2 | 3.5.0 | ✅ | 绑定层(LuaJIT 也走 sol2,见 `research/architecture.md` §B) |
 | **Lua Lanes** | **v3.17.x** | ✅ **强制** | **不装 = 没有多 worker。**Tensor 是普通 sol2 usertype,跨 lane 走 `__lanesclone`(R18) |
 | Lua | 5.1/5.2/5.3/5.4 或 LuaJIT 2.1(GC64) | ✅ | 宿主 |
-| **Penlight** | `>= 1.13, < 2.0` | ✅ **强制,rock 依赖**(R30) | 类系统 / `List` / 兼容层 / 安全 table 读取(C11、D25)。**生态地基级** —— paddle-lua / Insight7 / `argsig` 共用同一份,`is_a` 处处成立 |
-| **`argsig`**(参数签名层) | `>= 0.1, < 0.2` | ✅ **强制,rock 依赖**(R27) | 所有公开 API 的签名(C11)。暂定名,待拍板 P10。见 `plan/argsig.md` |
+| **Penlight** | `>= 1.13, < 2.0` | ✅ **强制,rock 依赖**(R30) | 类系统 / `List` / 兼容层 / 安全 table 读取(C11、D25)。**生态地基级** —— paddle-lua / Insight7 / `argrule` 共用同一份,`is_a` 处处成立 |
+| **`argrule`**(参数签名层) | `>= 0.1, < 0.2` | ✅ **强制,rock 依赖**(R27) | 所有公开 API 的签名(C11)。**已定名**(P10)。见 `plan/argrule.md` |
 | LuaFileSystem(传递) | — | 🔶 **被 Penlight 拖入** | 我们自己不 `require "lfs"`;文件系统走 `paddle.utils.fs`。它只是 Penlight 的 rockspec 声明的 |
 | **Insight7** | — | 🔶 **软强制** | numpy 的位置(C11、D26)。核心路径不 `require` 它,`paddle.np` / `from_insight` / `vision.transforms` 惰性加载 |
 | ~~LuaFileSystem(直接依赖)~~ | — | ❌ **我们不直接用** | 原打算给 `paddle.io` 扫目录。改为 `paddle.utils.fs`(C++17 `std::filesystem`)。~~理由:少一个 C 依赖~~ -> **理由:我们的 `.so` 顺手就能做,边际成本 ≈ 0,比多 15 个构建组合划算**(R23 / `CLAUDE.md` §9.1) |
@@ -388,7 +388,7 @@ ops.yaml ──► gen_capi.py    ──► paddle_capi_ops.{h,c}   纯 C 声明
 人的原话:「pl 为默认依赖项,pl 在咱们所有的项目里面为地基级别的东西。」
 版本锁定改为 rockspec 锁 minor + CI 语义测试;`luafilesystem` 作为传递依赖接受。
 决定性理由:vendor 会让"系统 Penlight 与我们那份互不 `is_a`"在**每两个生态库之间**各出现一次,
-而生态里将有 paddle-lua / Insight7 / `argsig` / metrics / ocean 五个消费者。
+而生态里将有 paddle-lua / Insight7 / `argrule` / metrics / ocean 五个消费者。
 完整论证见 `plan/foundations.md` §1.3。
 
 **Python 不在此表中。** 生成器脚本是开发期工具,不是运行期依赖。
@@ -931,5 +931,5 @@ cmake -DWITH_PYTHON=OFF -DON_INFER=OFF -DWITH_GPU=OFF ...
 那时才可以把这三件独立可测的事铺开:
 
 1. 纯 Lua pickle 解析器(自身即是有价值的独立库)
-2. `argsig` 参数签名层 + `slice.lua`(生态共用地基;Penlight 直接 rock 依赖,不再 vendor)
+2. `argrule` 参数签名层 + `slice.lua`(生态共用地基;Penlight 直接 rock 依赖,不再 vendor)
 3. 从 yaml 生成算子绑定的生成器原型
