@@ -101,8 +101,9 @@
  |    +-- [✅] 0.10 代码目录与模块           -> plan/layout.md
  |    +-- [✅] 0.11 CI 计划                  -> plan/ci.md
  |    +-- [✅] 0.12 工程树(本文件)         -> WORKPLAN.md
- |    +-- [🔵] 0.13 API 设计规范 + 样板       -> plan/api/README.md + api/io.md
- |    +-- [⬜] 0.14 L0 CI 落地               -> plan/ci.md §2   前置:0.11
+ |    +-- [✅] 0.13 API 设计规范 + 样板       -> plan/api/README.md + api/io.md
+ |    +-- [🔵] 0.14 参数检查选型(argcheck)  -> plan/foundations.md §4   前置:0.9 0.13
+ |    +-- [⬜] 0.15 L0 CI 落地               -> plan/ci.md §2   前置:0.11 0.14
  |
  +-- [⬜] 1. M0 可行性闸门 (G0/G1)          -> plan/modules/00-build.md
  |    +-- [⬜] 1.1 无 Python 构建 ★生死判定  -> process/tasks.md T-M0-01
@@ -181,14 +182,30 @@
 
 ## 5. 现在在哪
 
-**🔵 0.13** —— API 设计规范已立(`plan/api/README.md`),样板已写(`plan/api/io.md`)。
+**✅ 0.13** —— API 设计规范已立(`plan/api/README.md`),样板已写(`plan/api/io.md`)。
 其余模块的 api 文档**不在这里一次写完**,而是挂在各自模块下的 `x.y.0` 节点上,
 在那个模块开工时写 —— 提前写会写成猜测。
 
-DFS 的下一个是 **0.14(L0 CI 落地)**,然后回溯到根,进入 **1. M0**,
+**🔵 0.14 参数检查选型** —— 论证已完成并落盘(`plan/foundations.md` §4,D-R25):
+分层采纳 argcheck(冷路径)/ `_wrap`(热路径)/ 构建期展开(生成算子)。
+
+| 完工判据 | 状态 |
+|---|---|
+| `foundations.md` §4 写明分层边界与 5 处 vendored 改动 | ✅ |
+| `decisions.md` 有 R25 与理由 | ✅ |
+| `api/README.md` §2.1 反映分层 | ✅ |
+| `layout.md` / `ci.md` / `CLAUDE.md` 同步 | ✅ |
+| **M0 #22(LuaJIT `debug.setupvalue`)有结论** | ⬜ **Q-17,纯 Lua,不阻塞于 G0** |
+| **M0 #23(打过补丁的 argcheck 5 Lua × 3 OS 跑通上游测试)** | ⬜ |
+
+⚠️ **这个节点不能只凭文档写完就打 ✅。** 判据里那两项是**可执行**的(`WORKPLAN.md` §3),
+而且 Q-17 挂掉的后果是整条决策翻案。**但它们不阻塞 DFS 继续往下走** ——
+它们不需要 libpaddle,可以和 0.15 并行跑,只是必须在进 **3.5(P5)之前**闭掉。
+
+DFS 的下一个是 **0.15(L0 CI 落地)**,然后回溯到根,进入 **1. M0**,
 第一个叶子是 **1.1 无 Python 构建**(生死判定)。
 
-⚠️ **注意 0.14 排在 M0 之前不是笔误。** L0 CI 不需要 libpaddle(`ci.md` §2),
+⚠️ **注意 0.15 排在 M0 之前不是笔误。** L0 CI 不需要 libpaddle(`ci.md` §2),
 现在就能建;而且它检查的 `doctree` 正好保护这棵树本身。
 先建它,后面每个节点都受保护。
 

@@ -462,7 +462,157 @@ Insight7 是**软强制**:`paddle` 核心不 `require "insight"`;
 
 ---
 
-## 4. 对硬约束的影响
+## 4. 参数检查:argcheck(vendored + 去 Torch 化,但**只用在冷路径**)
+
+> 基座的第四块。前三块是「类/集合」「numpy」,这一块是「函数签名」。
+> 结论先说:**采纳,但分层用 —— 冷路径用 argcheck,热路径继续用 `_wrap`,生成代码两者都不用。**
+
+### 4.1 结论表
+
+| 场景 | 调用频次 | 方案 |
+|---|---|---|
+| **构造期 API**:`nn.Linear{...}`、`DataLoader{...}`、optimizer、`transforms.*` | 一个模型几十~几百次 | **argcheck** |
+| **热路径**:`paddle.add`、`t:reshape`、`Dataset:get(i)` | 每 step 上千次 | **`_wrap` 三模式**(D-R8 保留) |
+| **P3 生成的 2000+ 算子** | 每 step 上万次 | **生成期静态展开**,见 §4.5 |
+
+### 4.2 「硬编码了 Torch7」这个前提不成立
+
+实测(commit `b3b32c0`,2016-06-29,842 行 / 7 文件),Torch 耦合只有**两处、共 32 行**:
+
+| 位置 | 内容 | 性质 |
+|---|---|---|
+| `env.lua:26-52` | `if pcall(require, 'torch') then` 覆写 `env.istype` / `env.type` | **它覆盖的那个默认实现本来就是通用的** —— 读 `getmetatable(o).__typename`,回退 `type(o)`。两个函数上方原注释写着 `-- user configurable function` |
+| `usage.lua:83` | 有 `sundown` + torch + tty 时把 markdown 渲染成 ANSI 颜色 | 纯装饰。没有 Torch 时错误信息里会**留下字面的 `**number**` 标记**,要替换掉 |
+
+也就是说:**扩展点是作者留好的,不是我们要凿开的。**
+我们只需要把 `env.istype` 指向「认识 `paddle.Tensor` / `Parameter` / `nn.Layer` / `insight.Array`」的版本。
+
+### 4.3 真正让它「不好用」的是一个 2 行的 Windows bug
+
+`graph.lua:13-21`:
+
+```lua
+local function table2id(tbl)
+   -- DEBUG: gros hack de misere        ← 作者自己写的:「悲惨的脏 hack」
+   return tostring(tbl):match('0x([^%s]+)')
+end
+```
+
+它拿对象地址当生成代码里的唯一标识。而 `tostring(t)` 的格式来自 C 的 `%p`:
+
+| 平台 | `tostring({})` | `match('0x…')` |
+|---|---|---|
+| glibc / macOS | `table: 0x7f9c...` | 命中 |
+| **MSVC(Windows 上的 Lua/LuaJIT 官方构建)** | `table: 00B62A68` | **nil** |
+
+后果:**任何一条规则带 `default` / `defaulta` / `defaultf` / `opt` 的 argcheck,在 Windows 上直接抛
+`graph.lua:281: bad argument #4 to 'format' (string expected, got nil)`。**
+不带默认值的最简用法反而正常 —— 所以它表现为「时好时坏」,而不是「装不上」。
+
+**这不是「过时」,是「Torch7 只跑 Linux/macOS,没人在 Windows 上用过」。**
+十年没人修,是因为十年没人在 Windows 上用它。
+
+实测(本机 `lua5.1`,MSVC 构建,**未安装 Torch**):
+
+```
+未打补丁    argcheck{{name="x",type="number"}}                  -> OK
+未打补丁    argcheck{{name="x",type="number",default=0}}        -> 崩
+改掉这 2 行 上游全套 test/test.lua                              -> 全部通过
+```
+
+> test/test.lua 里另有 1 处**测试自身**的 5.1 不兼容:`string.format('%s', nil)`
+> 在 5.3+ 合法(走 `luaL_tolstring`),在 5.1 是 `bad argument`。
+> 这是测试的问题,不是 argcheck 的问题。我们的 vendored 副本要连测试一起修。
+
+我们的替换:用**弱键计数器**发号,不碰地址。
+副作用是生成代码里的标识符变成确定性的(`arg1_1d` 而不是 `arg7f9c1a_1d`),
+**对 CI 的 regen-diff(`ci.md` §6)反而是好事** —— 地址每次运行都不同,没法比对。
+
+### 4.4 但性能是真问题,而且比想象中大一个量级
+
+「生成特化代码 = 零开销」这个说法**实测不成立**。本机 Lua 5.1,3 参数
+(`number` + `number` 带默认 + `string` 可选),30 万次:
+
+| | ns/call | 相对裸调用 |
+|---|---|---|
+| 裸 Lua 函数调用 | **43** | 1× |
+| Insight7 `_wrap` 那种定参包装 | **420** | 10× |
+| **argcheck(全位置参数)** | **2597** | **60×** |
+| **argcheck(具名表 `f{...}`)** | **2733** | 63× |
+| argcheck(只传 1 个,走默认值) | 660 | 15× |
+
+拆解(实测归因):
+
+| 来源 | 代价 |
+|---|---|
+| `env.istype` 被调 **6 次**(决策树要逐分支试) | 6 × 300 ns = **1800 ns** |
+| 生成的函数体里有 `local usage = require "argcheck.usage"` —— **每次调用都 `require` 一遍** | 193 ns |
+| `select(n, ...)` 链 | 107 ns × n |
+
+即使把这两条都修掉(`require` 提到 upvalue、基础类型直接内联成 `type(x)=="number"`
+而不走 `istype`),手写等价决策树实测仍要 **897 ns** ——
+因为 `...` + `select` 的架构本身就比定参函数贵。**这是结构性的,不是调优能拿掉的。**
+
+**为什么这条足以否掉「全面采用」:**
+选 sol2 的理由(D1/R1)是「绑定开销 50-200 ns vs kernel 1-10 µs,差 1-2 个数量级」。
+**2.6 µs 不满足这个论证** —— 它和一个小 kernel 同量级,在 elementwise 这种算子上是 **25%-50% 的净损耗**。
+**同一把尺子必须两头都用。**
+
+反过来,构造期 API 用它是**完全免费**的:一个 200 层的网络构造一次 = 200 × 2.6 µs ≈ **0.5 ms**,
+一次性,发生在训练开始之前。
+
+### 4.5 生成代码不用 argcheck —— 它和我们的 codegen 是重复建设
+
+argcheck 的核心机制是**运行时**生成 Lua 源码 + `loadstring` + `debug.setupvalue` 注入 upvalue。
+而 P3(`tools/gen/`)已经是一条**构建期**代码生成流水线,要为 2000+ 算子产出 `lua/paddle/_ops/`。
+
+对生成的算子:
+- 签名从 yaml 来,**构建期就完全已知** —— 没有理由推迟到运行时再生成检查
+- 构建期展开能做 argcheck 做不到的事:直接生成定参函数(不用 `...`/`select`)、
+  把类型检查内联、把 **1-based -> 0-based 的 axis 转换**和检查合并成一次
+- 运行时 `loadstring` 还有附带成本:2000 个算子 = 2000 次 `loadstring` + 编译,拖慢 `require`,
+  与 `plan/api/README.md` §2.5 的惰性加载目标冲突
+
+**但 argcheck 的 usage/help 渲染(`usage.lua`)要复用** —— 让生成的算子和手写 API
+报同一种形状的错误信息,比省那 151 行更有价值。
+
+### 4.6 落地形态
+
+```
+lua/paddle/_vendor/argcheck/    【P4】vendored,842 行纯 Lua,BSD-3
+  ├── init.lua  graph.lua  usage.lua  utils.lua  doc.lua  dump.lua
+  └── env.lua                 ← 删掉 26-52 行的 torch 分支
+lua/paddle/_argcheck_env.lua   【P5】我们的 istype:认 Tensor/Parameter/Layer/insight.Array
+```
+
+改动清单(**每一条都要在 vendored 目录里留 `-- PADDLE-LUA PATCH:` 注释**,
+否则下次同步上游时会被无声覆盖):
+
+| # | 文件 | 改什么 | 理由 |
+|---|---|---|---|
+| ① | `graph.lua:13-21` | `table2id`/`func2id` 改弱键计数器 | §4.3,**不改在 Windows 上不能用** |
+| ② | `env.lua:26-52` | 删掉 torch 分支 | §4.2 |
+| ③ | `usage.lua:83` | 去掉 sundown/torch,自己剥 markdown 标记 | 否则错误信息里有字面 `**` |
+| ④ | `graph.lua` 生成模板 | `require "argcheck.usage"` 提到 upvalue | §4.4,白捡 193 ns |
+| ⑤ | `test/test.lua` | `string.format('%s', nil)` -> `tostring(nil)` | 测试自身的 5.1 不兼容 |
+
+### 4.7 三个必须验的点
+
+**① `debug` 库是硬依赖。** `utils.lua` 全靠 `debug.getupvalue` / `debug.setupvalue` 注入 upvalue。
+沙箱化的宿主(游戏引擎、把 `debug` 摘掉的嵌入环境)里 argcheck **直接不可用**。
+我们的目标人群包含嵌入式宿主 -> **`_wrap` 那条路必须一直保留可用,不能全仓库改成 argcheck。**
+这条和 §4.1 的分层是同一个结论的两个理由。
+
+**② `loadstring` vs `load`。** `init.lua:9` 是 `local loadstring = loadstring or load`,5.1/5.2+ 都覆盖。
+但 **LuaJIT + `debug.setupvalue` 的组合要单独验**(M0 新增一项)。
+
+**③ 与 `pl.class` 的交互。** `nn.Layer` 的实例 raw 表是空的(§2 / 09-nn §3.2),
+`env.istype` 若用 `rawget(getmetatable(o), '__typename')`,拿到的是**类表**而不是实例表 —— 这恰好是对的,
+但**必须写测试钉死**,因为它看起来像是碰巧成立的。
+
+---
+
+## 5. 对硬约束的影响
 
 ~~`CLAUDE.md` §9 原文:「引入新的强制 C 依赖(除 sol2 / Lanes)」-> 禁止。~~
 🔄 **该禁令已于 2026-08-03 由人取消(R23)。判据改为「边际成本」,见 `CLAUDE.md` §9.1。**
@@ -479,7 +629,7 @@ Insight7 是**软强制**:`paddle` 核心不 `require "insight"`;
 
 ---
 
-## 5. 落到别处的改动清单
+## 6. 落到别处的改动清单
 
 | 文档 | 改什么 |
 |---|---|
@@ -496,10 +646,15 @@ Insight7 是**软强制**:`paddle` 核心不 `require "insight"`;
 | `process/decisions.md` | R18-R21 翻案与决策;~~待拍板 P1 升级为阻塞~~ -> **P1 已拍板:改 Insight7(R24)** |
 | `process/decisions.md` | R22(`LayerList` 继承 `Layer`)、R23(C 依赖禁令取消)、R24(Insight7 axis 按 bug 修)|
 | `process/open-questions.md` | Q-12 转「已决待实施」;Q-08 风险下降;新增 Q-16(Lua 5.2 的 `ipairs`)|
+| **`plan/api/README.md` §2.1** | 关键字参数那一行改成**分层**:冷路径 argcheck / 热路径 `_wrap`(R25) |
+| **`plan/layout.md`** | `_vendor/argcheck/` 进目录树与模块清单;`_argcheck_env.lua` 归 P5 |
+| **`plan/ci.md` §6** | 新增红线:vendored argcheck 的 5 处改动必须带 `-- PADDLE-LUA PATCH:`;`lua/paddle/_ops/` 里出现 `argcheck` 即失败 |
+| **`process/status.md` §4** | M0 新增一项:LuaJIT 上 `debug.setupvalue` 注入 upvalue 是否可用 |
+| **`process/decisions.md`** | R25(argcheck 分层采纳)+ §2.11 |
 
 ---
 
-## 6. 未解问题
+## 7. 未解问题
 
 | # | 问题 | 阻塞谁 |
 |---|---|---|
@@ -508,10 +663,12 @@ Insight7 是**软强制**:`paddle` 核心不 `require "insight"`;
 | Q-13 | 能否实现持有 `insight::Array` 的 `phi::TensorBase` 子类以做零拷贝 | 只影响吞吐,不阻塞拷贝版 |
 | Q-14 | `insight::Array` 拷贝构造是否共享缓冲 + 原子计数(能否 `__lanesclone`) | P13 的 Insight7 预处理路径 |
 | Q-15 | vendored Penlight 与用户系统 Penlight 并存时两份 `List` 不互认,是否需要提供桥 | 用户体验,不阻塞 |
+| **Q-17** | **LuaJIT 上 `debug.setupvalue` 能否注入 upvalue**(argcheck 的命脉,§4.7②) | **P5 起的所有冷路径 API;挂了就全线退回 `_wrap`** |
+| **Q-18** | 「冷/热路径」的边界要不要机器判定,还是靠人在 code review 里认 | 不阻塞,但不定会慢慢烂掉 |
 
 ---
 
-## 7. 验收
+## 8. 验收
 
 - [ ] 11 个 Penlight 文件 vendored 进 `lua/paddle/_vendor/pl/`,CI 校验其 sha256 与上游一致
 - [ ] CI 有 grep 规则:命中 `pl.path` / `pl.dir` / `pl.file` / `pl.app` / `class.cast` 即失败
@@ -519,3 +676,9 @@ Insight7 是**软强制**:`paddle` 核心不 `require "insight"`;
 - [ ] `print(layer)` 在 5.1 / 5.2 / 5.3 / 5.4 / LuaJIT 上都不崩(坑④)
 - [ ] `paddle.from_insight` / `to_insight` 往返 dtype 与数值一致(先拷贝版即可)
 - [ ] Q-12 有明确结论后才允许在教程里出现 `ins.sum(x, axis)` 一类写法
+- [ ] **vendored argcheck 在 5.1 / 5.2 / 5.3 / 5.4 / LuaJIT × Linux / macOS / Windows 上跑通上游全套 `test/test.lua`**
+      (Windows 那一格是 §4.3 的回归测试,**不能只测 Linux**)
+- [ ] **`argcheck{{name="x",type="number",default=0}}` 在 Windows 上不崩** —— 单独立一条,因为这就是上游坏掉的那个点
+- [ ] **`grep -rn "argcheck" lua/paddle/_ops/` 无输出**(生成代码不许用,§4.5)
+- [ ] **vendored argcheck 与上游的 diff 逐行可解释**,每处改动带 `-- PADDLE-LUA PATCH:` 注释
+- [ ] **`env.istype` 能正确识别 `nn.Layer` 实例**(raw 表为空,§4.7③)

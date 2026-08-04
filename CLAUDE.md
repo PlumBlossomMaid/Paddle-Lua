@@ -36,7 +36,7 @@
 | **C8** | **不手写算子绑定**。算子从 Paddle 的 yaml 生成 | `csrc/capi_gen/` 与 `lua/paddle/_ops.lua` 只能由生成器写 |
 | **C9** | **生成器是开发期工具**,可以用 Python;但产物不得依赖 Python | 生成器在 `tools/gen/`,不进发布包 |
 | **C10** | **不发明 Paddle C++ API**。任何 Paddle 符号必须先在源码里读到才能用 | 见 §4 |
-| **C11** | **生态基座只有一套**:类系统 = `pl.class`,集合 = `pl.List`,跨版本兼容 = `pl.compat`,数组(numpy 的位置)= Insight7。**不得引入第二套** | 见 `process/conventions.md` §2 + `plan/foundations.md` |
+| **C11** | **生态基座只有一套**:类系统 = `pl.class`,集合 = `pl.List`,跨版本兼容 = `pl.compat`,数组(numpy 的位置)= Insight7,**参数检查 = `argcheck`(冷)/ `_wrap`(热)**。**不得引入第二套** | 见 `process/conventions.md` §2 + `plan/foundations.md` |
 
 ---
 
@@ -76,6 +76,7 @@
 | D27 | **`nn.LayerList` 继承 `Layer`**(Layer 优先)。`is_a(nn.Layer)` 必须为真;因此 `ipairs(ml)` 在 5.1 上跑空,**一律用 `ml:iter()` / `ml:len()`** | `plan/foundations.md` §2.4 |
 | D28 | **「不引入新的强制 C 依赖」已取消。** 判据改为**边际成本**:先看我们自己的 `.so` 能不能顺手做,做不了就引入 | 本文件 §9.1 |
 | D29 | **Insight7 的 `axis` 按 bug 修成 1-based**(成员索引与维度索引都要 1-based)。顺手做,P12 之前完成 | `plan/foundations.md` §3.4 |
+| D30 | **参数检查分层**:冷路径(构造期 API)用 vendored **argcheck**,热路径用 `_wrap`,P3 生成的算子**两者都不用**(构建期静态展开)。argcheck 实测 2.6 µs/call,与小 kernel 同量级 | `plan/foundations.md` §4 |
 
 ---
 
@@ -396,7 +397,9 @@ csrc/sol/gen_*.cpp      ← 生成,禁止手改
 | ~~引入新的强制 C 依赖(除 sol2/Lanes)~~ | ❌ **本条已于 2026-08-03 由人取消。** 需要 C 库就引入。**但成本没有消失**,见 §9.1 的取舍程序 |
 | ~~用 `pl.path` / `pl.dir` / `pl.file` / `pl.app`~~ | ❌ **禁令随上条一并取消。** 需要就用,`lfs` 直接进依赖 |
 | 用 `class.cast` | 它绕过 `_create`,造出没有 `FIELDS` 的破 Layer 实例(`plan/foundations.md` §1.5) |
-| 自己再写一套 class / list | C11 |
+| 自己再写一套 class / list / 参数检查 | C11 |
+| 在热路径或 `lua/paddle/_ops/` 里用 argcheck | D30。它 2.6 µs/call,和一个小 kernel 同量级(`plan/foundations.md` §4.4) |
+| 改 vendored argcheck 却不留 `-- PADDLE-LUA PATCH:` 注释 | 下次同步上游会被无声覆盖,Windows CI 挂在看不懂的报错上(`plan/foundations.md` §4.6) |
 | 手写算子绑定"就这一个特例" | C8。特例会繁殖 |
 | 移植 `paddle.Model` / `paddle.metric.*` | D10 |
 | 在 M0 通过前写产品代码 | G0 |

@@ -51,8 +51,10 @@ paddle-lua/
 ├── lua/paddle/                 ── Lua 侧 ────────────────────────────
 │   ├── init.lua                    require "paddle" 入口,只做装配
 │   ├── _vendor/pl/             【P4】vendored Penlight 受限子集,11 文件,**不许改**
+│   ├── _vendor/argcheck/       【P4】vendored argcheck,7 文件,**只许带 PADDLE-LUA PATCH 注释地改**
 │   ├── _ops/                   【P3】**生成**的 Lua wrapper —— 不许手改
-│   ├── _wrap.lua               【P5】三模式调用(移植自 Insight7)
+│   ├── _wrap.lua               【P5】三模式调用(移植自 Insight7)—— **热路径**
+│   ├── _argcheck_env.lua       【P5】argcheck 的 istype:认 Tensor/Parameter/Layer/insight.Array
 │   ├── slice.lua               【P5】字符串索引的 Lua 侧
 │   ├── tensor.lua              【P5】
 │   ├── dtype.lua  device.lua   【P5】
@@ -99,7 +101,9 @@ paddle-lua/
 | `lua/paddle/_ops/` | P3 | ~20k | **生成** | ops.yaml |
 | `csrc/utils/fs.cc` | P4 | ~200 | 手写 | C++17 |
 | `lua/paddle/_vendor/pl/` | P4 | 5374 | **vendored** | 无 |
+| `lua/paddle/_vendor/argcheck/` | P4 | 842 | **vendored**(5 处改动,foundations §4.6) | `debug` 库 |
 | `lua/paddle/{tensor,slice,_wrap,dtype,device}.lua` | **P5** | ~1.5k | 手写 | 基座 |
+| `lua/paddle/_argcheck_env.lua` | **P5** | ~80 | 手写 | `_vendor/argcheck` |
 | `lua/paddle/{autograd,scope}.lua` | P6 | ~600 | 手写 | P5 |
 | `lua/paddle/serialize/` | P7 | ~1.2k | 手写 | P5 |
 | `lua/paddle/jit/load.lua` | P8 | ~300 | 手写 | P5 |

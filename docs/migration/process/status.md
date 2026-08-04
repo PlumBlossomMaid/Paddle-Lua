@@ -25,8 +25,8 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | | |
 |---|---|
 | 阶段 | **论证 / 文档** |
-| 工程树位置 | `WORKPLAN.md` 节点 **0.13**(API 设计规范 + 样板)-> 下一个 **0.14 L0 CI 落地** |
-| 下一个动作 | **0.14** L0 CI(不需要 libpaddle,现在就能建,见 `plan/ci.md` §2),之后才是 **1.1 无 Python 构建** |
+| 工程树位置 | `WORKPLAN.md` 节点 **0.14**(参数检查选型 argcheck)-> 下一个 **0.15 L0 CI 落地** |
+| 下一个动作 | **0.15** L0 CI(不需要 libpaddle,现在就能建,见 `plan/ci.md` §2),之后才是 **1.1 无 Python 构建**。**并行**:M0 #22/#23(argcheck 的 Q-17,纯 Lua,不阻塞于 G0,但必须在 P5 前闭掉) |
 | 全部 ⛔ 阻塞节点 | `WORKPLAN.md` 4.3 distributed —— 无多卡环境(待拍板 P2) |
 | 待人拍板 | ~~P1(Insight7 `axis`)~~ ✅ **2026-08-03 已拍板:改**(R24)。剩余待拍板:P3 / P4 / P6 / P7 —— 见 `process/decisions.md` §3 §4 |
 | 上次卡在哪 | — |
@@ -78,8 +78,14 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 19 | `SaveTensor`/`LoadTensor` 格式稳定性 | ⬜ |
 | 20 | `string.dump` 往返比对(服务 M4) | ⬜ 可跳过 |
 | 21 | luacheck parser 独立跑 5.1(服务 M4) | ⬜ 可跳过 |
+| 22 | **LuaJIT 上 `debug.setupvalue` 注入 upvalue 是否可用**(argcheck 的命脉,Q-17) | ⬜ **纯 Lua,不依赖 libpaddle,现在就能做** |
+| 23 | **打过补丁的 argcheck 在 5 个 Lua × 3 OS 上跑通上游 `test/test.lua`** | ⬜ 同上,现在就能做 |
 
-**必做 17 项(#20/#21 可跳过),预估 3 周。**
+**必做 19 项(#20/#21 可跳过),预估 3 周。**
+
+> **#22/#23 不阻塞于 G0** —— 它们是纯 Lua 验证,`WITH_PYTHON=OFF` 编不编得出来与它们无关。
+> 挂了的后果是明确的:**冷路径 API 全线退回 `_wrap`**(`plan/foundations.md` §4.7①)。
+> 越早知道越好,因为 P5 之后再改就要重写所有已写的构造期签名。
 
 ---
 
@@ -104,9 +110,9 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 |---|---|---|
 | `plan/overview.md` | 915 | ✅ |
 | `plan/roadmap.md` | 344 | ✅ |
-| `plan/foundations.md` | 521 | ✅ |
+| `plan/foundations.md` | 684 | ✅ **+argcheck(§4)** |
 | `plan/layout.md` | 261 | ✅ **新增** |
-| `plan/ci.md` | 197 | ✅ **新增** |
+| `plan/ci.md` | 208 | ✅ **新增** |
 | `plan/api/README.md` | 139 | ✅ **新增** |
 | `plan/api/io.md` | 236 | ✅ **新增**(样板)|
 | `plan/api/<其余 15 个模块>` | — | ⬜ 各模块开工时写 |
@@ -138,7 +144,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `process/status.md` | 本文件 | ✅ |
 | `process/tasks.md` | 137 | ✅ |
 | `process/conventions.md` | 280 | ✅ |
-| `process/decisions.md` | 167 | ✅ |
+| `process/decisions.md` | 199 | ✅ |
 | `process/open-questions.md` | 160 | ✅ |
 
 ### 5.4 `research/`
@@ -202,3 +208,4 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 2026-08-03 | **新增 `WORKPLAN.md`(总工程树)** —— 智能体按它 DFS 遍历,遍历完 = 工程完成;新增 `plan/layout.md`(权威目录树 + 文件级落地顺序 + 生成代码进版本库的决策)与 `plan/ci.md`(四层 CI、阶段解锁表、五条机器红线)。关键设计:**兄弟节点排成拓扑序**,使朴素 DFS 自动满足 DAG 依赖,`前置` 字段退化为断言 |
 | 2026-08-03 | 人的三条决定落盘:**① `nn.LayerList` 改为继承 `Layer`**(R22,Layer 优先;连带发现 5.1 的 `ipairs` 用 `lua_rawgeti`,`ipairs(ml)` 会静默跑空 -> 改用 `ml:iter()`,新增 Q-16);**② 「不引入新的强制 C 依赖」禁令取消**(R23,判据改为边际成本,`CLAUDE.md` §9.1;解禁 HTTP 下载与图像解码,Q-08 风险下降);**③ Insight7 的 `axis` 按 bug 修成 1-based**(R24,成员索引与维度索引都要 1-based,顺手做、P12 前完成;待拍板 P1 关闭、Q-12 转已决)。新增 D27–D29 |
 | 2026-08-03 | **新增 `plan/foundations.md`(生态基座)**:Penlight 定为一等公民(R19/R21),Insight7 顶替 numpy 的位置(R20)。新增硬约束 C11、决策 D23–D26、未解问题 Q-12–Q-15;`conventions.md` 章节重编号(§2 生态基座、§3 与 Python 的已知差异) |
+| 2026-08-03 | **argcheck 评估落盘(R25)** —— 实测推翻两个前提:「硬编码 Torch7」不成立(耦合共 32 行 2 处,`env.istype` 原注释就是 `-- user configurable function`);「过时」也不准,真实病灶是 `graph.lua:13` 拿 `tostring(t):match('0x…')` 当标识符,**MSVC 的 `%p` 不带 `0x`,所以带默认值的规则集在 Windows 上必崩** —— 改 2 行后上游全套测试在 Windows + Lua 5.1 + 无 Torch 下通过。但实测 **2597 ns/call**(`_wrap` 420 / 裸调用 43),与小 kernel 同量级,**违反 D1 那把尺子** -> 结论是**分层**:冷路径 argcheck、热路径 `_wrap`、生成算子构建期静态展开。新增 `foundations.md` §4、`decisions.md` §2.11、Q-17/Q-18、M0 #22/#23、CI 红线 ①b |
