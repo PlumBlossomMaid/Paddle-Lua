@@ -652,46 +652,64 @@ lua/paddle/_wrap.lua        【P5】保留。移植自 Insight7,不依赖 debug 
 算完的事不要推到运行时)。**但两边共用同一份规则表 schema 和同一套错误信息格式** ——
 这是「基座只有一套」(C11)在参数检查上的落点。
 
-### 4.8 重载:要,但要**显式列举**,不要**隐式枚举**
+### 4.8 重载:**用 `if`,和 Python 一样**
 
-> ⚠️ 本小节修正 §4.5 的一句话。那里说「我们不需要类型重载」——**说过头了。**
+> ⚠️ 本小节两次修正。§4.5 说「我们不需要类型重载」——过头了;
+> 随后改成「显式列举变体 `args.overload{}`」——**也错了,而且错得更微妙。**
 
-argcheck 的 README 第一行就是 "function overloading system"。3^N 那棵树不只是为省略,
-是为**重载**:同一个名字多套签名,靠参数类型走到不同分支。
-Torch7 的惯用法(`torch.rand([gen,] sizes)`、`t:add([res,] [v,] other)`)正需要它。
+**先看事实:Paddle 确实做类型分派,但它写在函数体里:**
 
-**Paddle 也需要,只是它把这件事写在函数体里而不是签名里:**
-
-| API | 分派 | 上游怎么写的 |
+| API | 分派 | 上游 |
 |---|---|---|
 | `paddle.to_tensor(data)` | scalar / ndarray / Tensor / list | `creation.py:794-798` 一串 `isinstance` |
 | `paddle.reshape(x, shape)` | list / `Variable` / `pir.Value` | `manipulation.py:1056,1105` |
 | `optimizer(parameters=)` | 参数列表 / 参数组 dict 列表 | 函数体内判断 |
 
-所以「不需要重载」是错的。**对的说法是:需要的量差了几个数量级。**
+**再看「显式列举变体」错在哪:** 上面这些函数的候选变体,**参数列表是一样的**。
+`to_tensor` 无论 `data` 是 number 还是 table,签名都是 `(data, dtype?)`。
+把它写成三个变体,是在用重载机制表达一件不是重载的事 ——
+**真实情况是「一个参数的类型是联合类型」+「函数体内行为不同」。**
 
-| | argcheck | 我们 |
+#### 所以分两层,各归各
+
+| 层 | 谁负责 | 形式 |
 |---|---|---|
-| 谁决定有哪些变体 | **库去枚举**「哪些参数可能缺席」的全组合 | **作者显式写下**「这个函数有这 2 种签名」 |
-| 变体数 | 3^N(N=16 时 4300 万) | 通常 1,偶尔 2-3 |
-| 代价 | 指数 | **O(变体数 × N)** |
-| 写错了会怎样 | 库猜错,报一个看不懂的 usage | 作者少列一个变体,报「没有匹配的签名」并列出已知的 |
-
-落到 `_args.lua` 的形态:
+| **参数是否合法**(类型、默认值、缺失) | `_args` 的规则表 | `type = {"number", "table", "paddle.Tensor"}` —— **联合类型,一条规则** |
+| **拿到之后怎么做**(行为分支) | **函数体里的 `if`** | 直接照抄上游的 `isinstance` 链 |
 
 ```lua
-paddle.to_tensor = args.overload{
-  { {name="data",  type="number"},  {name="dtype", type="string", opt=true} },
-  { {name="data",  type="table"},   {name="dtype", type="string", opt=true} },
-  { {name="data",  type="paddle.Tensor"} },
-}   -- 3 个变体,顺序尝试,每个 O(N)
+paddle.to_tensor = args.check{
+  {name="data",  type={"number","table","paddle.Tensor","insight.Array"}},
+  {name="dtype", type="string", opt=true},
+}(function(data, dtype)
+  if is_tensor(data)  then return data:astype(dtype)     -- 对应上游 isinstance(data, Tensor)
+  elseif is_array(data) then return from_insight(data, dtype)
+  elseif type(data) == "number" then return scalar_tensor(data, dtype)
+  else return from_table(data, dtype) end
+end)
 ```
 
-**这是本节所有结论里最能一句话概括的一条:**
-**把「组合爆炸」换成「作者写清楚」。**
-argcheck 那个时代的假设是「函数小,库可以替你穷举」;
-关键字参数时代这个假设不成立了,但**声明式规则表这个形式仍然成立** ——
-要换掉的只是求解器,不是接口。
+#### 为什么这个比重载引擎好
+
+1. **它是直译。** 上游是 `if isinstance(...)`,我们就是 `if is_...(...)`。
+   这属于 A1 类「语义可以直抄」—— 项目的核心方法就是逐行翻译,
+   **在这里发明一套声明式重载,等于给一段本来能直抄的代码加了一层要自己维护的抽象**
+2. **`_args` 少一个机制。** 不用写变体匹配、不用设计「所有变体都不匹配」时的错误信息 ——
+   而那个错误信息恰恰很难写好(argcheck 那个「列出所有 3^N 分支」的 usage 就没人看得懂)
+3. **错误信息更好。** 手写 `if` 的 `else` 分支可以说
+   「`to_tensor` 的 data 必须是 number/table/Tensor,你给的是 function」,
+   比通用的「没有匹配的签名」有用
+4. **Python 本来就没有真重载**,所以 Paddle 里**不存在**参数列表不同的情况。
+   Torch7 那种 `torch.rand([gen,] sizes)`(前置可选参数)才需要引擎,
+   **而 Python 的语法根本写不出那种签名** —— 这也正是 3^N 在今天没有客户的根本原因
+
+#### 一句话
+
+**argcheck 那个时代:函数小,库替你穷举组合。**
+**关键字参数时代:参数多,组合穷举不起 —— 而且也不需要,因为分派本来就该是作者写的 `if`。**
+
+**要换掉的只是求解器,声明式规则表这个接口形式仍然成立。**
+`_args` 只做一件事:**验证并规格化一组参数**。分派是控制流,不是签名的事。
 
 ---
 
