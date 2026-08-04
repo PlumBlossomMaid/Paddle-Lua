@@ -257,8 +257,29 @@ paddle.io.DataLoader{ ds, batch_size = 64, num_workers = 4 }    -- ✅ 一张混
 ```lua
 paddle.sum(x, 1)                 -- 位置
 paddle.sum{ x = x, axis = 1 }    -- 全具名
-paddle.sum{ x, axis = 1 }        -- 混合表  ← 日常最常用
+paddle.sum{ x, axis = 1 }        -- 混合表  ← ★ 文档默认用这个
 ```
+
+**★ 为什么把混合表定为文档的默认写法:它是 Python 那行的逐字翻译。**
+
+> 人的话:「这种更符合 Python 那边的习惯,毕竟**大部分玩深度学习的都是从 Python 开始的**。」
+
+```python
+paddle.sum(x, axis=1, keepdim=True)     # Python
+```
+```lua
+paddle.sum{x, axis=1, keepdim=true}     -- Paddle-Lua:( -> { ,别的一个字没动
+```
+
+这不是审美,是**迁移成本**:用户是带着一脑子 Python 代码过来的,
+`( -> {` 是他们唯一需要记住的转换规则。这条也反过来约束我们 ——
+**参数名必须和 Python 侧逐字相同**(所以才有 §2.1.4 的 C12:
+如果我们把 `axis` 改叫 `dim`,这条「只换一个字符」的承诺当场作废),
+**默认值也必须相同**(否则同一行代码在两边行为不同,比报错更糟)。
+
+⚠️ 两处**不**等价,api 文档必须写出来(`process/conventions.md` §5.4):
+① `nil` = 「没给」,无法表达 Python 的显式 `None`(D30 的 3^N 后果);
+② 表内位置写法不能跳过中间参数(`{x, nil, true}` 数组有洞)—— 这正是推荐混合表的第二个理由。
 
 ⚠️ 这条**吃过亏**:项目三份 README 的首屏示例里就写着 `DataLoader(ds, {…})`,
 在纸面上活了很久没人发现(R36)。`f(x, {…})` 和 `f{x, …}` 在 Lua 里只差一个字符,

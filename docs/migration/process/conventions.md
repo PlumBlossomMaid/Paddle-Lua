@@ -114,6 +114,8 @@ ipairs%(                                -> 在 lua/paddle/nn/ 下警告(见 §3 
 | 6 | 层的构造函数是 `__init__` | **`_init`**(Penlight 约定) | D25 |
 | 7 | `super().__init__()` | **`self:super()`** | Penlight 约定 |
 | 8 | 实例字段可叫任何名字 | **不能叫 `super`** | `pl.class` 的 `call_ctor` 占用 |
+| 9 | `paddle.sum(x, axis=1)` | **`paddle.sum{x, axis=1}`** —— 只把 `(` 换成 `{`,**别的一个字不动** | Lua 没有 kwargs,一张混合表就是 kwargs(§5.4)。⛔ **不是** `paddle.sum(x, {axis=1})`,那是错的(R36) |
+| 10 | `f(x, axis=None)` 与不传可区分 | **不可区分,`nil` = 没给** | 区分三态 = 3^N 枚举,D30 |
 
 ---
 
@@ -185,13 +187,45 @@ cross_entropy / embedding / one_hot:
 
 ### 5.4 调用约定
 
-用 `_wrap`(D15),三种写法等价:
+签名层是 `argrule`(R27/D31),**四种写法**,解析顺序定死(`plan/argrule.md` §2.5⑧):
 
 ```lua
-paddle.sum(x, 1, true)
-paddle.sum{ x = x, axis = 1, keepdim = true }
-paddle.sum{ x, 1, true }
+paddle.sum(x, 1, true)                              -- ① 位置
+paddle.sum{ x = x, axis = 1, keepdim = true }       -- ② 全具名
+paddle.sum{ x, 1, true }                            -- ③ 表内位置
+paddle.sum{ x, axis = 1, keepdim = true }           -- ④ 混合表  ← 默认写法
 ```
+
+**★ 文档、示例、教程一律用 ④,除非调用只有位置参数(那就用 ①)。**
+理由不是好看,是**迁移成本**:玩深度学习的人绝大多数是从 Python 过来的,
+而 ④ 与 Python 的 kwargs 写法**只差一个字符**:
+
+```python
+paddle.sum(x, axis=1, keepdim=True)     # Python
+```
+```lua
+paddle.sum{x, axis=1, keepdim=true}     -- Lua:( -> {,别的一个字没动
+```
+
+⛔ **没有第五种。** `paddle.sum(x, {axis = 1})`(位置参数 + 尾随选项表)是**错的** ——
+那是两个实参的位置调用,规则 #2 `axis:number` 会收到一张 table(R36)。
+它是大多数 Lua 库的习惯写法,也因此是最容易写错的一种,由 CI 挡(`plan/ci.md` §6①b)。
+
+⚠️ **④ 与 Python kwargs 的三处不等价,必须写进用户文档:**
+
+| | Python | Paddle-Lua |
+|---|---|---|
+| 显式传 `None` | `f(x, axis=None)` 与不传**可区分** | **不可区分**,`axis = nil` 就是「没给」 |
+| 跳过中间的位置参数 | `f(x, keepdim=True)` 照写 | **表内位置写法 `{x, nil, true}` 不行**(数组有洞,`#t` 未定义)—— 只能用 ② 或 ④ |
+| 动态拼参数 | 要 `f(x, **kwargs)` | **表本身就是 kwargs**,`f(t)` 直接就行,反而更简单 |
+
+第一条是 D30 的直接后果:要区分「给了 / 没给 / 显式 nil」就是 argcheck 的 3^N 枚举,
+`DataLoader` 的 16 个可选参数会直接挂死(`plan/foundations.md` §4.5)。
+所以 **`nil` 一律等于「没给」**。⬜ 上游若有「`None` 与缺省含义不同」的参数,
+必须在 api 文档里逐个点名并给一个显式写法 —— **尚未普查,记 Q-21,P3 前查完**。
+
+第二条正好是**推荐 ④ 而不是 ③ 的第二个理由**:Lua 的数组不能有洞,
+③ 一旦想跳过中间参数就没法写,而 ④ 天然没有这个问题。
 
 ---
 
