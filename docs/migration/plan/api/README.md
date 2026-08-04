@@ -183,6 +183,57 @@ paddle.zeros(2, 3)
      did you mean:  paddle.zeros{2, 3}
 ```
 
+### 2.1.4 ★ 参数名一律用 **Paddle 自己的**,不用 PyTorch 那套
+
+> 人的话:「**所以我们的 paddle-lua 也不要那些 PyTorch 的东西**。」
+
+§2.1.3 挡的是 `decorator_utils.py` 那层**外壳**。但有一批 torch 风格的参数
+**已经进了上游的规范签名本身**,壳挡不住,要在这里挡:
+
+```python
+# python/paddle/tensor/creation.py:1807  zeros 的真实签名
+def zeros(shape, dtype=None, name=None, *,
+          out=None, device=None, requires_grad=False, pin_memory=False)
+```
+
+而 Paddle 自己的名字在 `to_tensor` 里原样保留着(`creation.py:1124-1129`):
+`place` / `stop_gradient`。**同一个概念,两套名字,我们只取 Paddle 那套。**
+
+| ❌ 不用(PyTorch) | ✅ 用(Paddle 原生) | 备注 |
+|---|---|---|
+| `requires_grad` | **`stop_gradient`** | ⚠️ **两者取反**,见下 |
+| `device` | **`place`** | `to_tensor` 用的就是 `place` |
+| `dim` | **`axis`** | 少一个名字 = index 语义标注表少一条(§2.2) |
+| `input` / `tensors` | **`x`** | |
+| `size`(参数) | **`shape`** | ⚠️ `Tensor.size`(元素总数)是 Paddle 原生属性,**不在此列** |
+| `pin_memory = true` | **`place = paddle.CUDAPinnedPlace()`** | 能力不丢,用原生方式表达 |
+
+⚠️ **`requires_grad` 必须挡住的真正原因不是命名洁癖,是它和 `stop_gradient` 取反:**
+
+| | 默认值 | 「要梯度」时写 |
+|---|---|---|
+| `requires_grad` | `False` | `true` |
+| `stop_gradient` | `True` | `false` |
+
+**默认值也是反的。** 两个名字同时存在,任何一次搞混都是**静默地训不动**
+(梯度永远不流,loss 不降,而没有任何报错)。**一个概念只留一个名字。**
+
+**这条规则约束的是「用户看得见的 API 表面」。实现层不受限** ——
+GC 抄 Torch7 九层方案(D5)、规则表 schema 抄 argcheck(D30)都照做,
+因为用户不会在自己的代码里写到它们。
+
+⬜ **未决:`out = ` 参数。** 它不只是改名,是"写进预分配的显存"这个**能力**
+(Paddle 原生的等价物是 `paddle.assign(x, output)`)。倾向 **v1 不做**,
+有真实需求(显存复用)再单独论证 —— 记进 `process/open-questions.md`。
+
+**CI 判据(机械可查):** 规则表里出现下列参数名即失败 ——
+
+```
+grep -rnE 'name *= *"(requires_grad|device|dim|input|tensors|pin_memory)"'  lua/   -> 失败
+```
+
+---
+
 ## 2.2 索引:全 1-based,且必须在文档里逐个标出来
 
 每份 api 文档**必须有一节列出该模块所有吃 index 语义的参数**,

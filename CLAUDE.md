@@ -21,7 +21,7 @@
 
 ## 1. 硬约束(不可协商,违反即回滚)
 
-这 11 条是项目的地基。**任何代码、任何提案,违反其一即无效。**
+这 12 条是项目的地基。**任何代码、任何提案,违反其一即无效。**
 如果你认为某条应该改,**停下来问人,不要自行变通。**
 
 | # | 约束 | 检验方法 |
@@ -37,6 +37,7 @@
 | **C9** | **生成器是开发期工具**,可以用 Python;但产物不得依赖 Python | 生成器在 `tools/gen/`,不进发布包 |
 | **C10** | **不发明 Paddle C++ API**。任何 Paddle 符号必须先在源码里读到才能用 | 见 §4 |
 | **C11** | **生态基座只有一套**:类系统 = `pl.class`,集合 = `pl.List`,跨版本兼容 = `pl.compat`,数组(numpy 的位置)= Insight7,**参数检查 = `_args`**。**不得引入第二套**。判据:**换掉它要改几处?一处 = 外围,可随时替换;全仓库 = 基座,P5 前定死**(`plan/foundations.md` §5.2) | 见 `process/conventions.md` §2 |
+| **C12** | **用户看得见的 API 一律用 Paddle 自己的规范,不引入 PyTorch 的命名与惯例**(`stop_gradient` 不是 `requires_grad`,`place` 不是 `device`,`axis` 不是 `dim`)。**实现层不受限** —— 抄 Torch7 的 GC 方案、argcheck 的 schema 照做 | `grep -rnE 'name *= *"(requires_grad\|device\|dim\|input\|tensors\|pin_memory)"' lua/` 为空;`plan/api/README.md` §2.1.3 §2.1.4 |
 
 ---
 
@@ -413,6 +414,7 @@ csrc/sol/gen_*.cpp      ← 生成,禁止手改
 | 生成一条规则一个 upvalue | D33。Lua 5.1 上限 60 个,Paddle 最大签名 43 参数,撞墙 |
 | 自己写一套类型判定 / 结构校验 | D32。`tableshape` 已经很好,而且它的类型对象本身可调用,塞进 `type` 槽就能用 |
 | 把「容器」写成类名单(`{"table","pl.List","insight.Array"}`) | 判据是**结构**:是个容器 + 装的是整数。写成名单就把框架名硬编码进类型系统,用户自己的容器类被无理由挡住(`plan/argrule.md` §2.3) |
+| 用 `requires_grad` / `device` / `dim` 这些 PyTorch 名字 | C12。`requires_grad` 与 `stop_gradient` **取反且默认值也反**,两个名字并存 = 静默地训不动(`plan/api/README.md` §2.1.4) |
 | 移植 `python/paddle/utils/decorator_utils.py` 那一层(别名 291 处、变长 size、`reshape(2,3)`…) | D35。**它整层是 Paddle 给 PyTorch 用户的兼容壳**(全文 51 处提 `PyTorch`/`torch.`),而糖的收益在 Lua 侧是 0 —— 表调用本来就省括号,`zeros{2,3}` 已经和 `zeros(2,3)` 一样短(`plan/api/README.md` §2.1.3) |
 | 让 `shape` / `axes` 接受裸数字 | Python 侧 `paddle.zeros(5)` 本来就是错的。放行它还会把 §2.6 的调用消歧一起破坏(`plan/api/README.md` §2.1.2) |
 | 支持「位置参数中间省略、靠类型猜」 | Python 不允许这么写,而支持它要付上一行的代价。跳过参数就用具名表 |
