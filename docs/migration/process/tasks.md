@@ -12,7 +12,7 @@
 
 | | |
 |---|---|
-| 状态 | TODO |
+| 状态 | ✅ **DONE(2026-10-22,实际 2 天)** |
 | 前置 | 无 |
 | 预估 | 3-5 天 |
 | 依据 | `plan/overview.md` §11.3 |
@@ -45,7 +45,7 @@ cmake --build . -j
 
 | | |
 |---|---|
-| 状态 | TODO |
+| 状态 | ✅ **DONE(2026-10-22,实际 2 天,与 T-M0-01 并行)** |
 | 前置 | T-M0-01 |
 | 预估 | 1 天 |
 
@@ -60,6 +60,17 @@ egr::Backward({y}, {}, false);
 
 **验收**:`x.grad()` 数值与手算一致。
 
+**结果**:✅ 通过。
+- 冒烟源:`tools/smoke/smoke.cc`(留在仓库,含全部 `文件:行号` 出处注释)
+- 计算图:`a=full({2,2},3)`,`b=full({2,2},4)`,`c=multiply_ad_func(a,b)`,`d=sum_ad_func(c)`,`egr::Backward({d},{})`
+- 手算:`d/da == b == 4.0`,`d/db == a == 3.0`
+- 实测输出:`SMOKE PASS: a.grad == 4.0, b.grad == 3.0, max_err=0`
+- 前置陷阱(已写进 smoke.cc 注释):必须显式 `paddle::framework::InitMemoryMethod();`
+  (出处 `paddle_gtest_main.cc:73`,`init.cc:443`),否则 fail-fast 0xC0000409;
+  kernel 注册需写 `PD_DECLARE_KERNEL(full, ...)` 等(照 `backward_test.cc` 范例),
+  实测无 `PD_DECLARE_KERNEL` 时 `full` 报 `operator is not registered`
+- 链接:EXE 链接需 `/FORCE:MULTIPLE`(见 `process/m0-report.md` §4 的怪癖记录)
+
 ---
 
 ### T-DOC-01 · 文档一致性巡检
@@ -71,7 +82,7 @@ egr::Backward({y}, {}, false);
 | 预估 | 0.5 天 |
 
 - [ ] 所有文档里的 `文件:行号` 出处在当前 Paddle 版本上仍然成立
-- [ ] `CLAUDE.md` §2 决策台账与各专题文档结论一致
+- [ ] `AGENTS.md` §2 决策台账与各专题文档结论一致
 - [ ] `process/status.md` §4 与 `plan/overview.md` §8 的 M0 清单条目一一对应
 
 ---
@@ -134,4 +145,5 @@ egr::Backward({y}, {}, false);
 
 | ID | 完成日期 | 实际耗时 | 备注 |
 |---|---|---|---|
-| — | — | — | — |
+| T-M0-01 | 2026-10-22 | 2 天 | 生死判定编译通过(5195 files / 9.90 GB,`build-nopy`),5 验收符号全导出;1 个补丁 0001(C2 满足);详见 `process/m0-report.md` |
+| T-M0-02 | 2026-10-22 | 2 天(与 T-M0-01 并行) | `tools/smoke/smoke.cc` 冒烟 PASS(`a.grad==4.0, b.grad==3.0, max_err=0`),G0 闸门打开 |

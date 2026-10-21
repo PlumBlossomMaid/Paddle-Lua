@@ -1,19 +1,19 @@
 # STATUS.md · 当前状态
 
 > **每次开工第一个读的文件。每次收工最后一个更新的文件。**
-> 本文件记录**易变**信息;稳定的约束和决策在 `CLAUDE.md`。
+> 本文件记录**易变**信息;稳定的约束和决策在 `AGENTS.md`。
 
 ---
 
 ## 1. 当前闸门
 
 ```
-G0  ⬜ 未通过   WITH_PYTHON=OFF + ON_INFER=OFF 能编出可用 libpaddle
+G0  ✅ 已通过(2026-10-22)  WITH_PYTHON=OFF + ON_INFER=OFF 能编出可用 libpaddle
 G1  ⬜ 未开始   M0 全部 17 项必做验证完成
 G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 ```
 
-**当前允许做的事:仅文档工作 + M0 验证。**
+**当前允许做的事:仅文档工作 + M0 验证(其余 #3–#21)。**
 **⛔ 不得创建 `csrc/` `lua/` 目录,不得写 rockspec/CMakeLists。**
 
 ---
@@ -40,17 +40,33 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 
 | 项 | 值 | 探测时间 |
 |---|---|---|
-| 机器标识 | `E:\code` (Windows) | 2026-08-03 |
+| 机器标识 | `E:\code\paddle-lua` (Windows, 2026-10-21 复测) | 2026-10-21 |
 | `$PADDLE_ROOT` | `E:\code\paddle` | 2026-08-03 |
 | Paddle 分支 | `windows_dataloader_multiprocess` | 2026-08-03 |
 | Paddle 版本 | 3.5.0 | 2026-08-03 |
-| 本仓库 | `E:\code\paddle-lua` | 2026-08-03 |
+| 本仓库 | `E:\code\paddle-lua` | 2026-10-21 |
 | Insight7(参考实现) | `E:\code\Insight7` | 2026-08-03 |
 | vcpkg | `E:\code\vcpkg`(有 lua 5.5.0 / sol2 3.5.0 / luajit) | 2026-08-03 |
-| Lua 版本 | 未探测 | — |
-| 编译器 | 未探测 | — |
-| GPU | 未探测 | — |
+| Lua 版本 | **5.1.5** `C:\Program Files (x86)\Lua\5.1\`(choco 也有 lua5.1);luajit 不在 PATH | 2026-10-21 |
+| Python | 3.11.4 | 2026-10-21 |
+| 编译器 | **MSVC 14.50.35730(cl.exe,VS 18.x)** —— 需 vcvars64 环境;冒烟编译脚本里已固化 `call "C:\Program Files (x86)\Microsoft Visual Studio\...\VC\Auxiliary\Build\vcvars64.bat"` | 2026-10-22 |
+| 构建工具链 | **CMake + Ninja**(`build-nopy` 用 Ninja 生成器);dumpbin 可用(/symbols /exports) | 2026-10-22 |
+| GPU | Quadro P620 4GB | 2026-10-21 |
+| git remote | `github.com/PlumBlossomMaid/Paddle-Lua` | 2026-10-21 |
 | 代理 | `http://127.0.0.1:7890`(http/https 均可) | 2026-08-03 |
+
+---
+
+## 3.1 构建记录(build-nopy,2026-10-22)
+
+| 项 | 值 |
+|---|---|
+| 构建目录 | `E:\code\Paddle\build-nopy` |
+| cmake 配置 | `-DWITH_PYTHON=OFF -DON_INFER=OFF -DWITH_GPU=OFF -DWITH_TESTING=OFF -DCMAKE_BUILD_TYPE=Release -DWITH_SHARED_IR=OFF -GNinja` |
+| 编译并行度 | `-j6`(12 核吃一半,用户 2026-10-21 指令) |
+| 产物规模 | **5195 files / 9.90 GB**(含测试二进制) |
+| 冒烟产物 | `tools/smoke/smoke.exe`(链接 483 库,`/FORCE:MULTIPLE`) |
+| 结果 | ✅ 编译成功;`smoke.exe` 输出 `SMOKE PASS: a.grad == 4.0, b.grad == 3.0, max_err=0` |
 
 ---
 
@@ -58,8 +74,8 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 
 | # | 项 | 状态 |
 |---|---|---|
-| 1 | `WITH_PYTHON=OFF`+`ON_INFER=OFF` 编译 | ⬜ **生死判定,先做这个** |
-| 2 | 该配置下 `egr::Backward` 跑通反向 | ⬜ |
+| 1 | `WITH_PYTHON=OFF`+`ON_INFER=OFF` 编译 | ✅ **DONE(2026-10-22)**:编译成功(5195 files / 9.90 GB),5 个验收符号全部确认导出。详见 `process/m0-report.md` §3。构建目录 `$PADDLE_ROOT\build-nopy`,CPU-only(`-DWITH_GPU=OFF`) |
+| 2 | 该配置下 `egr::Backward` 跑通反向 | ✅ **DONE(2026-10-22)**:`tools/smoke/smoke.exe` 输出 `SMOKE PASS: a.grad == 4.0, b.grad == 3.0, max_err=0`,数值与手算一致。详见 `process/m0-report.md` §4 |
 | 3 | phi kernel / DeviceContext 多线程安全 | ⬜ |
 | 4 | Lanes v3.17.x deep API 与 4.x 差异 | ⬜ |
 | 5 | Lanes 与绑定的 C++ ABI 一致性 | ⬜ |
@@ -79,9 +95,9 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 19 | `SaveTensor`/`LoadTensor` 格式稳定性 | ⬜ |
 | 20 | `string.dump` 往返比对(服务 M4) | ⬜ 可跳过 |
 | 21 | luacheck parser 独立跑 5.1(服务 M4) | ⬜ 可跳过 |
-| 22 | **LuaJIT 上 `debug.setupvalue` 注入 upvalue 是否可用**(`_args` 的命脉,Q-17) | ⬜ **纯 Lua,不依赖 libpaddle,现在就能做** |
-| 23 | **`loadstring`/`load` 在 5 个 Lua × 3 OS 上行为一致**(chunkname 与错误行号) | ⬜ 同上,现在就能做 |
-| 24 | **三道墙的实测值在 5 个 Lua 上各是多少**(upvalue 上限 / 局部变量上限 / 寄存器上限)。5.1 已测 = 60 / 200 / N=122 | ⬜ 同上。基准用 Paddle 最大签名 43 参数(`foundations.md` §5.4.6) |
+| 22 | **LuaJIT 上 `debug.setupvalue` 注入 upvalue 是否可用**(`_args` 的命脉,Q-17) | ✅ **已实测通过(2026-10-21):Lua 5.1.5 与 LuaJIT 2.1 均可注入,含表 upvalue;Q-17 关闭** |
+| 23 | **`loadstring`/`load` 在 5 个 Lua × 3 OS 上行为一致**(chunkname 与错误行号) | 🟡 **部分完成(2026-10-21):5.1 与 LuaJIT 的 `[string "name"]:行号` 格式、命名 chunk 错误行号、运行时错误携带 chunkname 全部一致。5.2/5.3/5.4 待补(走 CI L0)** |
+| 24 | **三道墙的实测值在 5 个 Lua 上各是多少**(upvalue 上限 / 局部变量上限 / 寄存器上限)。5.1 已测 = 60 / 200 / N=122 | 🟡 **部分完成(2026-10-21):5.1 与 LuaJIT 的 upvalue=60 / locals=200 两墙实测一致且与文档吻合;寄存器墙构造依赖 —— 嵌套调用 5.1=194 / LuaJIT=124,宽参数列表 5.1=248 / LuaJIT=247(文档 N=122 来自 argrule 原型形态,量级一致)。5.2/5.3/5.4 三版待补(本机无解释器,走 CI L0 或装版本)** |
 
 **必做 20 项(#20/#21 可跳过),预估 3 周。**
 
@@ -93,14 +109,14 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 
 ## 5. 文档完成度
 
-> 路径相对 `docs/migration/`;`CLAUDE.md` 与三个 README 在仓库根目录。
+> 路径相对 `docs/migration/`;`AGENTS.md` 与三个 README 在仓库根目录。
 
 ### 5.1 顶层
 
 | 文档 | 行数 | 状态 |
 |---|---|---|
 | **`WORKPLAN.md`(总工程树)** | 248 | ✅ **新增** |
-| `/CLAUDE.md` | 502 | ✅ |
+| `/AGENTS.md` | 502 | ✅ |
 | `/README.md`(英文,默认) | 192 | ✅ |
 | `/README.zh-CN.md` | 186 | ✅ |
 | `/README.zh-TW.md` | 186 | ✅ |
@@ -172,8 +188,8 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 
 | 阶段 | 模块 | 状态 |
 |---|---|---|
-| P0 | 无 Python 构建 | ⬜ **下一个动作,生死判定** |
-| P1 | C ABI 中间层 | ⬜ 阻塞于 P0 |
+| P0 | 无 Python 构建 | ✅ **已验证通过(2026-10-22)** 编译成功 + `egr::Backward` 冒烟数值与手算一致(见 `process/m0-report.md`)。注:冒烟与手算对拍,Python 端逐位对拍未做(本构建即无 Python;如需可另建 WITH_PYTHON=ON 构建对拍,列为可选) |
+| P1 | C ABI 中间层 | ⬜ 阻塞于 P0 收尾 |
 | P2 | sol2 绑定层 | ⬜ |
 | P3 | 算子代码生成 | ⬜ |
 | P4 | 构建与打包 | ⬜ |
@@ -199,7 +215,9 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 
 | 日期 | 变更 |
 |---|---|
-| 2026-08-03 | 建立 `CLAUDE.md` / `process/status.md` / `process/tasks.md` / `process/conventions.md` / `process/decisions.md` / `process/open-questions.md` / `README.md` |
+| 2026-10-22 | **✅ G0 闸门通过** —— `WITH_PYTHON=OFF + ON_INFER=OFF`(无 Python 训练态)编译成功:5195 files / 9.90 GB(`build-nopy`,Ninja Release,`-DWITH_SHARED_IR=OFF`,`-j6`),5 个验收符号全部确认导出;`tools/smoke/smoke.exe` 冒烟输出 `SMOKE PASS: a.grad == 4.0, b.grad == 3.0, max_err=0`(T-M0-01/T-M0-02 DONE)。Paddle 补丁 **0001**(`legacy_eager_codegen` no-op target)应用且与 `patches/paddle/` 逐字节一致(C2 满足)。记录 `process/m0-report.md` |
+| 2026-10-21 | 根目录作业手册 `CLAUDE.md` 更名 `AGENTS.md`(`git mv`,历史保留),全仓库 16 个文件 43 处引用同步替换,无残留 |
+| 2026-08-03 | 建立 `AGENTS.md` / `process/status.md` / `process/tasks.md` / `process/conventions.md` / `process/decisions.md` / `process/open-questions.md` / `README.md` |
 | 2026-08-03 | `research/reuse.md`:执行器复用调研,推翻"自研静态图=独立项目"的评估 |
 | 2026-08-03 | `research/to-static.md`:AST 选型 luacheck parser;源码契约可验证化 |
 | 2026-08-03 | `plan/overview.md`:索引改全 1-based;排除清单 9→5 项;Ocean/Metrics 移至 M3 |
@@ -210,7 +228,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 2026-08-03 | `09-nn.md`:恢复**自动注册**(R17);`13-lanes.md`:Tensor 跨 lane 改用 `__lanesclone`,放弃 deep userdata(R18);Q-11 关闭 |
 | 2026-08-03 | **新增 `plan/api/`(按 Lua 模块的接口设计)** —— 与 `plan/modules/`(按阶段的实现设计)分离:一个是「造出来长什么样」,一个是「怎么造」。立了跨模块硬规则(命名映射、index 语义必须逐模块标注、返回 `pl.List` vs 裸表的边界、`require "paddle"` 惰性加载)与固定骨架;`api/io.md` 作为样板写完。工程树里每个模块新增 `x.y.0 API 设计` 子节点 —— **先接口后实现** |
 | 2026-08-03 | **新增 `WORKPLAN.md`(总工程树)** —— 智能体按它 DFS 遍历,遍历完 = 工程完成;新增 `plan/layout.md`(权威目录树 + 文件级落地顺序 + 生成代码进版本库的决策)与 `plan/ci.md`(四层 CI、阶段解锁表、五条机器红线)。关键设计:**兄弟节点排成拓扑序**,使朴素 DFS 自动满足 DAG 依赖,`前置` 字段退化为断言 |
-| 2026-08-03 | 人的三条决定落盘:**① `nn.LayerList` 改为继承 `Layer`**(R22,Layer 优先;连带发现 5.1 的 `ipairs` 用 `lua_rawgeti`,`ipairs(ml)` 会静默跑空 -> 改用 `ml:iter()`,新增 Q-16);**② 「不引入新的强制 C 依赖」禁令取消**(R23,判据改为边际成本,`CLAUDE.md` §9.1;解禁 HTTP 下载与图像解码,Q-08 风险下降);**③ Insight7 的 `axis` 按 bug 修成 1-based**(R24,成员索引与维度索引都要 1-based,顺手做、P12 前完成;待拍板 P1 关闭、Q-12 转已决)。新增 D27–D29 |
+| 2026-08-03 | 人的三条决定落盘:**① `nn.LayerList` 改为继承 `Layer`**(R22,Layer 优先;连带发现 5.1 的 `ipairs` 用 `lua_rawgeti`,`ipairs(ml)` 会静默跑空 -> 改用 `ml:iter()`,新增 Q-16);**② 「不引入新的强制 C 依赖」禁令取消**(R23,判据改为边际成本,`AGENTS.md` §9.1;解禁 HTTP 下载与图像解码,Q-08 风险下降);**③ Insight7 的 `axis` 按 bug 修成 1-based**(R24,成员索引与维度索引都要 1-based,顺手做、P12 前完成;待拍板 P1 关闭、Q-12 转已决)。新增 D27–D29 |
 | 2026-08-03 | **新增 `plan/foundations.md`(生态基座)**:Penlight 定为一等公民(R19/R21),Insight7 顶替 numpy 的位置(R20)。新增硬约束 C11、决策 D23–D26、未解问题 Q-12–Q-15;`conventions.md` 章节重编号(§2 生态基座、§3 与 Python 的已知差异) |
 | 2026-08-03 | **argcheck 评估落盘,当天翻案两次(R25 -> R26)** —— ① 先推翻人的两个前提:「硬编码 Torch7」不成立(耦合共 32 行 2 处,`env.istype` 原注释就是 `-- user configurable function`);「过时」也不准,真实病灶是 `graph.lua:13` 拿 `tostring(t):match(0x…)` 当标识符,**MSVC 的 `%p` 不带 `0x` -> 带默认值的规则集在 Windows 上必崩**(改 2 行后上游全套测试通过)。② 据性能(2597 ns/call)给出「冷路径 vendored argcheck」= **R25,当天即被自己推翻**。③ 补测「能不能表达」:argcheck 对每条规则枚举三态共 **3^N** 路径,9 个可选参数 1.37 MB / 840 ms,**10 个就 `control structure too long`** —— 而 `Conv2D` 11 个、`Adam` 12 个、`DataLoader` 16 个(3^16,**挂死**),**R25 说的「冷路径」正好就是这张表**。④ 定案 **R26:不 vendor,取 schema + `usage.lua`,自写 ~150 行 O(N) 生成器 `_args.lua`** —— 原型实测 3 参 403 ns(快 6.4 倍)、17 参 3.6 KB / <1 ms。教训写进 `decisions.md` §2.11:**找到第一个可接受的缺点会让人停止寻找第二个;「多慢」是程度问题,「能不能表达」是有无问题,应该先问有无** |
 | 2026-08-03 | **参数解析器独立成项目(R27/D31),并按人的两条追加约束定型** —— ① **不轻易造轮子**:普查了 luarocks 全部候选(`tableshape` / `typecheck` / `checks` / `ltypekit` / `geoffleyland/argcheck`),**没有一个提供「同一份签名同时吃位置调用与具名表调用 + 默认值 + usage」** —— 因为那是 **Python kwargs 的形状**,而 Lua 自己没有 kwargs。所以只自写「调用约定层」(~200 行),**类型判定层借现成的**:`type` 槽定为可调用契约,`tableshape` 的类型对象本身就是 callable,塞进去就能用(R28/D32)。② **50 个参数**不是假想需求:Paddle 真实最大签名 `ResNetBasicBlock.__init__` **43 参数 / 33 可选**(`resnet_block.py:434`),≥12 参数的有 156 个。实测 Lua 5.1 三道墙 = **60 upvalue / 200 局部变量 / N=122 寄存器**,而 argcheck 是**一规则若干 upvalue** -> 43 参数 ≈ 86 个 upvalue,**即使没有 3^N 也编不出 Paddle 最大的签名**(R29/D33)。改成单表 upvalue 后实测 50 参数 7.4 KB / ~1 ms / 3.75 µs,N>100 走表形态(1000 参数仍可编译)。③ 名字不能叫 `argcheck`(已被 `geoffleyland/argcheck` 占用),建议 `argsig`(待拍板 P10);④ 「基于 Penlight」与 §1.3 的 vendor 决定冲突(Penlight rockspec 依赖 `lfs`),**新增待拍板 P9**,拍板前按「两边都改声明依赖」写。CI 红线 ①b 从 2 条扩到 4 条,新增 43 参数基准 |

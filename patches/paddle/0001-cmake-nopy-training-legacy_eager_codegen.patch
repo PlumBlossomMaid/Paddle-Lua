@@ -1,0 +1,17 @@
+diff --git a/paddle/fluid/pybind/CMakeLists.txt b/paddle/fluid/pybind/CMakeLists.txt
+index f533f0637f..f96ad2e87d 100755
+--- a/paddle/fluid/pybind/CMakeLists.txt
++++ b/paddle/fluid/pybind/CMakeLists.txt
+@@ -700,3 +700,12 @@ if(WITH_PYTHON)
+   install_py_pybind11_stubgen()
+ 
+ endif()
++
++# NOTE(paddle-lua): WITH_PYTHON=OFF + ON_INFER=OFF (无 Python 训练态) 从未被上游
++# 编译过。该配置下 fluid_generated 会被挂载 (eager/api/generated/CMakeLists.txt:4),
++# 其生成 CMakeLists (generate_file_structures.py) 无条件 DEPENDS legacy_eager_codegen,
++# 而该 target 仅在 if(WITH_PYTHON) 块内定义。这里补一个 no-op target,使依赖图成立。
++# 生成文件已随构建存在于源码树,无需实际运行 eager_generator。
++if(NOT WITH_PYTHON AND NOT ON_INFER)
++  add_custom_target(legacy_eager_codegen)
++endif()

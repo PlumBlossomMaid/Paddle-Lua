@@ -376,7 +376,7 @@ ops.yaml ──► gen_capi.py    ──► paddle_capi_ops.{h,c}   纯 C 声明
 | **`argrule`**(参数签名层) | `>= 0.1, < 0.2` | ✅ **强制,rock 依赖**(R27) | 所有公开 API 的签名(C11)。**已定名**(P10)。见 `plan/argrule.md` |
 | LuaFileSystem(传递) | — | 🔶 **被 Penlight 拖入** | 我们自己不 `require "lfs"`;文件系统走 `paddle.utils.fs`。它只是 Penlight 的 rockspec 声明的 |
 | **Insight7** | — | 🔶 **软强制** | numpy 的位置(C11、D26)。核心路径不 `require` 它,`paddle.np` / `from_insight` / `vision.transforms` 惰性加载 |
-| ~~LuaFileSystem(直接依赖)~~ | — | ❌ **我们不直接用** | 原打算给 `paddle.io` 扫目录。改为 `paddle.utils.fs`(C++17 `std::filesystem`)。~~理由:少一个 C 依赖~~ -> **理由:我们的 `.so` 顺手就能做,边际成本 ≈ 0,比多 15 个构建组合划算**(R23 / `CLAUDE.md` §9.1) |
+| ~~LuaFileSystem(直接依赖)~~ | — | ❌ **我们不直接用** | 原打算给 `paddle.io` 扫目录。改为 `paddle.utils.fs`(C++17 `std::filesystem`)。~~理由:少一个 C 依赖~~ -> **理由:我们的 `.so` 顺手就能做,边际成本 ≈ 0,比多 15 个构建组合划算**(R23 / `AGENTS.md` §9.1) |
 | HTTP+TLS(`luasocket`+`luasec`) | — | 🔶 **P12 待定** | R23 之后**允许引入**。先查 Paddle 有无可绑的 HTTP 能力(Q-08),没有就直接上 rock。见 `12-dataset-vision.md` §3.1 |
 | 图像解码(JPEG/PNG) | — | 🔶 **P12 待定** | 同上。R23 之前这块被逼成"v1 只支持二进制原始格式",现在**可以在 v1 做** |
 

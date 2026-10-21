@@ -49,7 +49,7 @@ paddle-lua/
 
 ### 3.2 找 `libpaddle` 的顺序
 
-和 `CLAUDE.md` §4 的 `$PADDLE_ROOT` 发现顺序保持一致:
+和 `AGENTS.md` §4 的 `$PADDLE_ROOT` 发现顺序保持一致:
 
 1. 环境变量 `PADDLE_LUA_LIBPADDLE`(显式指定,优先级最高)
 2. 环境变量 `PADDLE_ROOT` 下的 `build/paddle/fluid/`
@@ -86,7 +86,7 @@ dependencies = {
 
 **文件系统需求不用 lfs**,用我们自己的 `paddle.utils.fs`
 (C++17 `std::filesystem`,Paddle 本来就要求 C++17,零新依赖)。
-这是 `CLAUDE.md` §9.1 第 1 步的直接应用:我们已经有一个链着 libpaddle 的 `.so`,
+这是 `AGENTS.md` §9.1 第 1 步的直接应用:我们已经有一个链着 libpaddle 的 `.so`,
 往里加几个 `<filesystem>` 转发函数的边际成本 ≈ 0。
 
 ⚠️ **但 §9.1 第 2 步同样适用**:HTTP+TLS 与 JPEG/PNG 解码我们的 `.so` 做不了

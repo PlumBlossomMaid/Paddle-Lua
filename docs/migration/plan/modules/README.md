@@ -70,5 +70,5 @@
 ## 6. 未解问题                    ← 同步到 process/open-questions.md
 ```
 
-**§2 里每一条 Paddle API 都必须有 `file:line` 出处**,这是 `CLAUDE.md` §4 反幻觉规程的硬要求。
+**§2 里每一条 Paddle API 都必须有 `file:line` 出处**,这是 `AGENTS.md` §4 反幻觉规程的硬要求。
 写不出出处的,标 `⚠️ 未核实`。

@@ -1,4 +1,4 @@
-# CLAUDE.md · Paddle-Lua 智能体作业手册
+# AGENTS.md · Paddle-Lua 智能体作业手册
 
 > **你(智能体)在开始任何工作前必须完整读完本文件。**
 > 本文件是**约束与流程**的唯一来源。技术论证在其他文档里,本文件不重复论证,只给结论和规则。
@@ -27,7 +27,7 @@
 | # | 约束 | 检验方法 |
 |---|---|---|
 | **C1** | **不需要 Python 运行时**。发布产物中不得有任何 Python 依赖 | 发布包里搜不到 `.py`;`ldd`/`dumpbin` 无 `libpython` |
-| **C2** | **零上游 Paddle 改动**。不提交任何 patch 到 Paddle 仓库 | Paddle 仓库 `git status` 必须干净 |
+| **C2** | **Paddle 补丁:允许,但必须走 patch 文件、可还原**。2026-10-21 由人推翻"零上游改动"(P0 构建必然撞上游 bug,允许打补丁;方式照 Paddle 惯例:`patches/<lib>/xxx.patch` + cmake apply)。**补丁文件归档在本仓库 `patches/paddle/`**,应用后 Paddle 工作区 diff 必须与 patch 文件逐字节一致 | `patches/paddle/` 与 `git -C $PADDLE_ROOT diff` 可互逆还原 |
 | **C3** | **我们写的 Lua 代码必须是 Lua 5.1 语法子集** | 见 `process/conventions.md` §1 + `tools/lint_51.lua` |
 | **C4** | **面向用户的一切索引是 1-based**,含 `axis`/`dim`/返回的 index tensor/label | 见 `process/conventions.md` §5 |
 | **C5** | **目标 Lua 版本 = 5.1 / 5.2 / 5.3 / 5.4 / LuaJIT**。**不支持 5.5** | sol2 不支持 5.5,已证实 |
@@ -211,7 +211,7 @@ sed -n 'N,Mp' $PADDLE_ROOT/paddle/path/to/header.h
 **仓库结构**
 
 ```
-CLAUDE.md            ← 本文件,唯一在根目录的作业文档
+AGENTS.md            ← 本文件,唯一在根目录的作业文档
 README.md            英文(默认)
 README.zh-CN.md      简体中文
 README.zh-TW.md      繁體中文
@@ -252,7 +252,7 @@ docs/
 
 > **路径约定:** 本文件及 `docs/migration/` 内所有文档中,形如 `process/status.md`、
 > `research/reuse.md` 的路径**一律相对 `docs/migration/`**。
-> 只有 `CLAUDE.md` 和三个 README 在仓库根目录。
+> 只有 `AGENTS.md` 和三个 README 在仓库根目录。
 >
 > **`docs/` 下不要再新建平级目录**,除非是与"迁移计划"无关的新用途
 > (例如未来的 `docs/api/` 放 API 使用说明、`docs/tutorials/` 放教程)。
@@ -260,7 +260,7 @@ docs/
 
 | 文件 | 内容 | 什么时候读 |
 |---|---|---|
-| **`/CLAUDE.md`** | 本文件:约束、决策、流程 | **每次开工必读** |
+| **`/AGENTS.md`** | 本文件:约束、决策、流程 | **每次开工必读** |
 | **`docs/migration/WORKPLAN.md`** | **总工程树。全树唯一的 🔵 就是你的位置** | **每次开工必读,第二个读** |
 | **`process/status.md`** | 当前闸门/任务/环境路径 | **每次开工必读** |
 | **`process/tasks.md`** | 任务板,原子任务 + 验收标准 | 每次开工必读 |
@@ -287,7 +287,7 @@ docs/
 **阅读优先级:**
 
 ```
-/CLAUDE.md  →  process/status.md  →  plan/roadmap.md  →  plan/modules/<当前阶段>.md
+/AGENTS.md  →  process/status.md  →  plan/roadmap.md  →  plan/modules/<当前阶段>.md
 (约束/决策)      (做到哪了)          (下一步是哪个阶段)     (这个阶段怎么做)
 ```
 
@@ -316,7 +316,7 @@ docs/
 - ❌ 在多个文档里重复同一份论证 → 一处论证,他处引用
 - ❌ 无出处的性能数字 / 行数估算 → 标"估"
 - ❌ 把未验证的东西写成已验证
-- ❌ 在仓库根目录新建除 `CLAUDE.md` / 三个 README / `LICENSE` 以外的文件
+- ❌ 在仓库根目录新建除 `AGENTS.md` / 三个 README / `LICENSE` 以外的文件
 - ❌ 在 `docs/` 下直接放松散文件 —— 必须落进某个子目录
 
 ### 7.3 新文档放哪儿
@@ -410,7 +410,7 @@ csrc/sol/gen_*.cpp      ← 生成,禁止手改
 
 | ❌ | 为什么 |
 |---|---|
-| 改 Paddle 仓库任何文件 | C2 |
+| 改 Paddle 仓库任何文件 | ~~C2~~ ✅ **已改(2026-10-21):允许,但必须走 `patches/paddle/` 的 patch 文件、可还原**(见 §1 C2) |
 | 为了绕过困难而放宽 Lua 5.1 约束 | C3。5.1 语法在任何项目里都能用,这是核心卖点 |
 | ~~引入新的强制 C 依赖(除 sol2/Lanes)~~ | ❌ **本条已于 2026-08-03 由人取消。** 需要 C 库就引入。**但成本没有消失**,见 §9.1 的取舍程序 |
 | ~~用 `pl.path` / `pl.dir` / `pl.file` / `pl.app`~~ | ❌ **禁令随上条一并取消。** 需要就用,`lfs` 直接进依赖 |

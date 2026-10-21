@@ -67,7 +67,7 @@ docs/migration/
 ### 如果你是**智能体**
 
 ```
-/CLAUDE.md  →  WORKPLAN.md  →  process/status.md  →  <当前叶节点的文档>
+/AGENTS.md  →  WORKPLAN.md  →  process/status.md  →  <当前叶节点的文档>
 (约束/决策)     (找到那个 🔵)    (上次卡在哪)          (这个节点怎么做)
 ```
 

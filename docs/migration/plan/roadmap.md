@@ -336,6 +336,6 @@ P17 distributed 可以写,但验收标准里必须明写"当前环境无法验�
 1. 更新 `process/status.md`:阶段状态、变更日志、环境记录若有变化
 2. 更新 `process/tasks.md`:勾掉完成项,把下一阶段拆成原子任务
 3. 若过程中推翻了某个已定决策 -> 写进 `process/decisions.md` 的**翻案记录**,
-   并同步 `CLAUDE.md` §2 决策台账
+   并同步 `AGENTS.md` §2 决策台账
 
 **三件事没做完,该阶段不算完工。**

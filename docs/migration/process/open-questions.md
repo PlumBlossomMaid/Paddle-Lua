@@ -74,7 +74,7 @@
 |---|---|
 | 现象 | `paddle.dataset` / `paddle.vision` 需要下载、解压、解码 JPEG;Lua 无标准库支持 |
 | ~~原退路~~ | ~~调外部 `curl`;v1 只支持二进制原始格式数据集~~ —— **这两条退路是"不引入新的强制 C 依赖"逼出来的,该规则已于 2026-08-03 取消(R23)** |
-| 现在的选项 | ① 我们自己那个已链着 libpaddle 的 `.so` 顺手导出(边际成本 ≈ 0,优先);② 引入 `luasocket` + `luasec`(HTTP+TLS)、图像解码库 —— 现在**允许**,但要按 `CLAUDE.md` §9.1 给出 5 Lua × 3 OS 的覆盖证据与降级路径 |
+| 现在的选项 | ① 我们自己那个已链着 libpaddle 的 `.so` 顺手导出(边际成本 ≈ 0,优先);② 引入 `luasocket` + `luasec`(HTTP+TLS)、图像解码库 —— 现在**允许**,但要按 `AGENTS.md` §9.1 给出 5 Lua × 3 OS 的覆盖证据与降级路径 |
 | 需要 | 先查 Paddle C++ 侧有没有现成的(方案 ①);没有就按 ② 选库并核实 rock 覆盖 |
 | 影响 | P12 的工期。**风险已大幅下降** —— 原本的"做不了"变成了"选哪条路" |
 
@@ -134,8 +134,9 @@
 |---|---|
 | 现象 | `_args` 沿用 argcheck 的机制:「生成源码 -> `loadstring` -> 逐个 `debug.setupvalue` 注入 upvalue」。**这条路在 LuaJIT 上没验过。** |
 | 为什么要问 | 它是 D-R26 的**命脉**。挂了不是"慢一点",是**冷路径 API 全线退回 `_wrap`** |
-| 需要 | M0 #22。**纯 Lua,不需要 libpaddle,现在就能做** |
+| ~~需要~~ | ~~M0 #22。纯 Lua,不需要 libpaddle,现在就能做~~ |
 | 影响 | **必须在 P5 之前有答案。** 挂了不是翻案,是 `_args` 走解释式降级路径(§4.7 已设计这条兜底),但性能与代码形态都要重估 |
+| ✅ **已关闭(2026-10-21)** | **M0 #22 实测通过**:Lua 5.1.5 与 LuaJIT 2.1(`2.1.1774896198`)上 `debug.setupvalue` 均能给 `loadstring` 出来的函数注入标量与表 upvalue,结果正确。`_args` 的主路径在 P5 之前无需降级 |
 
 ### Q-18 · `_args` 的规则表是否也用来生成 API 文档
 
@@ -162,7 +163,7 @@
 |---|---|
 | 现象 | D35 决定整层跳过,依据是 35 处 `wrapper.__signature__ = inspect.signature(func)` —— 壳只动参数、内层签名不变。但个别装饰器名字看起来不像纯改参(`legacy_reduction_decorator` / `view_decorator` / `maxpool_decorator`) |
 | 需要什么才能关 | 逐个读那几个 wrapper 的函数体,确认它只做参数搬运(`kwargs[a] = kwargs.pop(b)` 一类),不做 dispatch / 不改返回值 |
-| 倾向 | 跳过。但**发现任何一个改了行为的,单独记一条,不默认放行**(`CLAUDE.md` §4) |
+| 倾向 | 跳过。但**发现任何一个改了行为的,单独记一条,不默认放行**(`AGENTS.md` §4) |
 | 影响 | 不阻塞 G0;必须在 P3(算子代码生成)之前查完 |
 
 ### Q-22 · phi 层有没有**不依赖 pybind** 的 DLPack 通道
@@ -178,7 +179,7 @@
 
 | | |
 |---|---|
-| 现象 | 我在讨论里说:`data-apis.org/array-api` 正在做"把 numpy 语义**语言无关地**标准化",已剔掉 `np.matrix` / masked array,用严格类型提升取代 value-based casting,numpy/cupy/torch/jax 都在往上靠,且带官方测试套件 `array-api-tests`。**这一整段是凭记忆写的,离线核实不了 —— 按 `CLAUDE.md` §4,核实前不算成立** |
+| 现象 | 我在讨论里说:`data-apis.org/array-api` 正在做"把 numpy 语义**语言无关地**标准化",已剔掉 `np.matrix` / masked array,用严格类型提升取代 value-based casting,numpy/cupy/torch/jax 都在往上靠,且带官方测试套件 `array-api-tests`。**这一整段是凭记忆写的,离线核实不了 —— 按 `AGENTS.md` §4,核实前不算成立** |
 | 需要什么才能关 | 走代理(`http://127.0.0.1:7890`)读一遍规范本体,回答三问:① 它是否真的语言中立(还是仍以 Python 类型系统为前提)?② 类型提升规则是否已严格化?③ `array-api-tests` 能不能被非 Python 实现复用,还是绑死 pytest |
 | 若属实的价值 | 等于免费拿到**一份包袱已剔的语义规格 + 一批别人已经吵完的设计决策 + 一套可直接跑的验收测试** —— 那 Insight7 的语义基线就照它定,能省掉大量自己拍的决定(而自己拍的每一条,将来都要自己维护) |
 | 影响 | 不阻塞 paddle-lua 任何节点;影响的是 Insight7「慢慢对齐 numpy」那条线的起点选择 |

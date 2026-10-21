@@ -1,6 +1,6 @@
 # CONVENTIONS.md · 代码约定
 
-> 写代码前读。`CLAUDE.md` §8 是速查,本文件是完整规则。
+> 写代码前读。`AGENTS.md` §8 是速查,本文件是完整规则。
 
 ---
 
@@ -274,7 +274,7 @@ csrc/sol/gen_*.cpp    生成
 
 ---
 
-## 8. Paddle API 引用(反幻觉,`CLAUDE.md` §4)
+## 8. Paddle API 引用(反幻觉,`AGENTS.md` §4)
 
 每处调用必须带出处:
 

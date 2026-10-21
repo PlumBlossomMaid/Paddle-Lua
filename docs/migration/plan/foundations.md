@@ -52,9 +52,9 @@ Penlight 的四条硬指标(均已核实):
 
 ### 1.2 依赖闭包:核心 11 个文件,`pl.path` 一族按需再加
 
-> 🔄 **2026-08-03 变更(人的决定):`CLAUDE.md` §9 的「不引入新的强制 C 依赖」禁令已取消。**
+> 🔄 **2026-08-03 变更(人的决定):`AGENTS.md` §9 的「不引入新的强制 C 依赖」禁令已取消。**
 > 本节原先花了很大篇幅论证怎么绕开 `luafilesystem`,**那部分论证作废**。
-> 需要 C 库就引入,判据改为「边际成本」,见 `CLAUDE.md` §9.1。
+> 需要 C 库就引入,判据改为「边际成本」,见 `AGENTS.md` §9.1。
 
 Penlight 的 rockspec 声明 `dependencies = {"lua >= 5.1", "luafilesystem"}`。
 `lfs` 是 C 库,但**现在这不再是障碍**。
@@ -78,7 +78,7 @@ pl.utils  pl.stringx  pl.lexer  pl.operator  pl.text  pl.types
 | `pl.app` / `pl.lapp` 等 CLI 模块 | 不用 —— 与框架无关,不是依赖问题 |
 
 **但文件系统的默认实现仍然是 `paddle.utils.fs`(C++17 `std::filesystem`),不是 lfs。**
-理由**变了**:不再是「禁止 C 依赖」,而是 `CLAUDE.md` §9.1 第 1 步 ——
+理由**变了**:不再是「禁止 C 依赖」,而是 `AGENTS.md` §9.1 第 1 步 ——
 我们已经有一个链着 libpaddle 的 `.so`,往里加 `mkdir`/`exists`/`listdir`
 的边际成本约等于零,而 `lfs` 是 15 个构建组合。
 **同样的结论,但现在是因为划算,不是因为被禁。**
@@ -806,7 +806,7 @@ end)
 所以顺序是:
 
 1. **能用现成 rock 就用**(Penlight 就是这么来的 —— 它是 Lua 生态的通用库,不是我们的)
-2. **能塞进已有的 `.so` 就塞**(边际成本 ≈ 0,`CLAUDE.md` §9.1)
+2. **能塞进已有的 `.so` 就塞**(边际成本 ≈ 0,`AGENTS.md` §9.1)
 3. **实在没有才自己写,而且写完要能独立于 paddle-lua 存在**(见 §5.4)
 
 **三块基座已经到顶了。** 再想加第四块,先回答「换掉它要改几处」——
@@ -1033,15 +1033,15 @@ Penlight 正是为了避开 `lfs`。若解析器声明 `penlight` 依赖而 padd
 
 ## 6. 对硬约束的影响
 
-~~`CLAUDE.md` §9 原文:「引入新的强制 C 依赖(除 sol2 / Lanes)」-> 禁止。~~
-🔄 **该禁令已于 2026-08-03 由人取消(R23)。判据改为「边际成本」,见 `CLAUDE.md` §9.1。**
+~~`AGENTS.md` §9 原文:「引入新的强制 C 依赖(除 sol2 / Lanes)」-> 禁止。~~
+🔄 **该禁令已于 2026-08-03 由人取消(R23)。判据改为「边际成本」,见 `AGENTS.md` §9.1。**
 
 本决策在**新旧两套判据下都成立**:
 - Penlight 的受限子集是**纯 Lua**,vendored,零 C 依赖 —— 旧判据下合规
 - Insight7 是**软强制**,且不进核心路径 —— 它带来的价值(API 本就是 Paddle 命名)
   远大于一个 rock 的构建成本,新判据下划算
 
-`CLAUDE.md` 新增了一条约束 **C11**,把「基座只有这一套」写死,
+`AGENTS.md` 新增了一条约束 **C11**,把「基座只有这一套」写死,
 防止后来者再引入第二套 class 或第二个 list 实现。
 **注意 C11 与被取消的 §9 是两回事:C11 管的是「不要有两套做同一件事的东西」,
 不是「不要有依赖」。取消 §9 不动摇 C11。**
@@ -1052,9 +1052,9 @@ Penlight 正是为了避开 `lfs`。若解析器声明 `penlight` 依赖而 padd
 
 | 文档 | 改什么 |
 |---|---|
-| `CLAUDE.md` §1 | 新增 C11:类系统用 `pl.class`,集合用 `pl.List`,兼容层用 `pl.compat` |
-| `CLAUDE.md` §2 | 新增 D23-D26 |
-| `CLAUDE.md` §9 | ~~补注:Penlight 受限子集是纯 Lua 例外~~ -> **整条禁令删除(R23)**,改为 §9.1 的边际成本判据 |
+| `AGENTS.md` §1 | 新增 C11:类系统用 `pl.class`,集合用 `pl.List`,兼容层用 `pl.compat` |
+| `AGENTS.md` §2 | 新增 D23-D26 |
+| `AGENTS.md` §9 | ~~补注:Penlight 受限子集是纯 Lua 例外~~ -> **整条禁令删除(R23)**,改为 §9.1 的边际成本判据 |
 | `plan/modules/09-nn.md` §3.1 | 翻案为 `pl.class` + `_create` / `_class_init` |
 | `plan/modules/09-nn.md` §3.2 | `FIELDS` 的装配点改到 `_create` |
 | `plan/modules/07-serialization.md` | manifest 读取改用 `pl.pretty.read` |

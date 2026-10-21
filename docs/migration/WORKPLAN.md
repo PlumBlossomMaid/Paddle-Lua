@@ -3,7 +3,7 @@
 > **这不是说明文档,是执行计划。**
 > 智能体按本文件做**深度优先遍历**;**树遍历完 = 工程完成**。
 >
-> 约束与决策在 `/CLAUDE.md`;当前位置在 `process/status.md`;
+> 约束与决策在 `/AGENTS.md`;当前位置在 `process/status.md`;
 > 每个叶节点的做法在它自己的文档里。
 
 ---
@@ -101,9 +101,9 @@
  |    +-- [✅] 0.10 代码目录与模块           -> plan/layout.md
  |    +-- [✅] 0.11 CI 计划                  -> plan/ci.md
  |    +-- [✅] 0.12 工程树(本文件)         -> WORKPLAN.md
- |    +-- [✅] 0.13 API 设计规范 + 样板       -> plan/api/README.md + api/io.md
- |    +-- [🔵] 0.14 参数检查选型(argcheck)  -> plan/foundations.md §4   前置:0.9 0.13
- |    +-- [⬜] 0.15 L0 CI 落地               -> plan/ci.md §2   前置:0.11 0.14
+ |    +-- [✅] 0.13 API 设计规范 + 样板       -> plan/api/README.md + plan/api/io.md
+ |    +-- [✅] 0.14 参数检查选型(argcheck)  -> plan/foundations.md §4   前置:0.9 0.13
+ |    +-- [🔵] 0.15 L0 CI 落地               -> plan/ci.md §2   前置:0.11 0.14
  |
  +-- [⬜] 1. M0 可行性闸门 (G0/G1)          -> plan/modules/00-build.md
  |    +-- [⬜] 1.1 无 Python 构建 ★生死判定  -> process/tasks.md T-M0-01
@@ -194,7 +194,7 @@
 其余模块的 api 文档**不在这里一次写完**,而是挂在各自模块下的 `x.y.0` 节点上,
 在那个模块开工时写 —— 提前写会写成猜测。
 
-**🔵 0.14 参数检查选型** —— 论证已完成并落盘(`plan/foundations.md` §4,D-R26):
+**✅ 0.14 参数检查选型** —— 论证已完成并落盘(`plan/foundations.md` §4,D-R26):
 **不 vendor argcheck**,取它的规则表 schema 与 `usage.lua`,求解器自写 `_args.lua`(~150 行,O(N))。
 
 | 完工判据 | 状态 |
@@ -202,9 +202,9 @@
 | `foundations.md` §4 写明否决理由(3^N,编不出 `Conv2D`/`DataLoader`)与替代形态 | ✅ |
 | `decisions.md` 有 R25 -> R26 的**完整翻案痕迹**(含「为什么第一次判错」) | ✅ |
 | `api/README.md` §2.1 写明「不支持位置参数中间省略」 | ✅ |
-| `layout.md` / `ci.md` / `CLAUDE.md` 同步 | ✅ |
-| **M0 #22(LuaJIT `debug.setupvalue`)有结论** | ⬜ **Q-17,纯 Lua,不阻塞于 G0** |
-| **M0 #23(`loadstring` 跨 5 Lua × 3 OS 行为一致)** | ⬜ |
+| `layout.md` / `ci.md` / `AGENTS.md` 同步 | ✅ |
+| **M0 #22(LuaJIT `debug.setupvalue`)有结论** | ✅ **2026-10-21 实测:Lua 5.1.5 与 LuaJIT 2.1 均可注入(含表 upvalue);Q-17 关闭** |
+| **M0 #23(`loadstring` 跨 5 Lua × 3 OS 行为一致)** | 🟡 **5.1/LuaJIT 已测一致(2026-10-21);5.2-5.4 腿并入 0.15 的 lua-matrix CI job** |
 
 ⚠️ **这个节点不能只凭文档写完就打 ✅** —— 判据里那两项是**可执行**的(§3)。
 但它们不需要 libpaddle,可以和 0.15 并行跑,只须在进 **3.5(P5)之前**闭掉。
@@ -220,6 +220,15 @@ DFS 的下一个是 **0.15(L0 CI 落地)**,然后回溯到根,进入 **1. M0**,
 ⚠️ **注意 0.15 排在 M0 之前不是笔误。** L0 CI 不需要 libpaddle(`ci.md` §2),
 现在就能建;而且它检查的 `doctree` 正好保护这棵树本身。
 先建它,后面每个节点都受保护。
+
+**🔵 0.15 L0 CI 落地** —— 按 `plan/ci.md` §2 建静态层。产出:
+
+| 产出 | 完工判据 |
+|---|---|
+| `.github/workflows/l0.yml` | 四 job 齐活:doctree / redlines / no-crlf / lua-matrix |
+| `tools/ci/check_doctree.lua` | 本机 Lua 5.1 跑通,且能抓出「指针指向不存在文件」 |
+| `tools/ci/lua_matrix.lua` | 5 个 Lua 上跑通 M0 #23/#24(替代本机缺失的 5.2-5.4) |
+| `plan/roadmap.md` / `AGENTS.md` §6 同步登记 `tools/ci/` | 两处都查得到 |
 
 ---
 
