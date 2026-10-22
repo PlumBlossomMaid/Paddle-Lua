@@ -108,8 +108,8 @@
  +-- [🔵] 1. M0 可行性闸门 (G0/G1)          -> plan/modules/00-build.md
  |    +-- [✅] 1.1 无 Python 构建 ★生死判定  -> process/tasks.md T-M0-01
  |    +-- [✅] 1.2 C++ 侧反向验证            -> process/tasks.md T-M0-02
- |    +-- [🔵] 1.3 线程安全验证              -> process/tasks.md T-M0-03
- |    +-- [⬜] 1.4 Lanes 三项验证            -> process/tasks.md T-M0-04..06
+ |    +-- [✅] 1.3 线程安全验证              -> process/tasks.md T-M0-03
+ |    +-- [🔵] 1.4 Lanes 三项验证            -> process/tasks.md T-M0-04..06
  |    +-- [⬜] 1.5 GC / OOM 验证             -> process/tasks.md T-M0-07..10
  |    +-- [⬜] 1.6 序列化与执行器验证        -> process/tasks.md T-M0-11..19
  |    +-- [⬜] 1.7 参数签名层(独立项目)     -> plan/argrule.md(孵化说明书)

@@ -93,7 +93,7 @@ egr::Backward({y}, {}, false);
 
 | ID | 任务 | 前置 | 预估 | 状态 |
 |---|---|---|---|---|
-| T-M0-03 | phi kernel / DeviceContext 多线程共享安全性 | T-M0-01 | 2d | TODO |
+| T-M0-03 | phi kernel / DeviceContext 多线程共享安全性 | T-M0-01 | 2d | ✅ **DONE(2026-10-22)**:`tools/smoke/smoke_mt.cc` 多线程冒烟 —— 4 线程×50 轮 + 8 线程×200 轮(共 1800 次 full→multiply→sum→Backward 完整图),共享框架 DeviceContextPool,全部 `a.grad==4.0 / b.grad==3.0 / max_err=0`。结论:CPU 上多线程共享 DeviceContext 安全,无需 per-thread context |
 | T-M0-04 | Lanes v3.17.x deep API 与 4.x 差异核对 | — | 1d | TODO |
 | T-M0-05 | Lanes 与绑定的 C++ ABI 一致性(MSVC) | T-M0-04 | 1d | TODO |
 | T-M0-06 | Lanes `on_state_create` 钩子是否存在 | T-M0-04 | 0.5d | TODO |

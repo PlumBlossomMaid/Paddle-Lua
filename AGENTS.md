@@ -54,7 +54,7 @@
 | D4 | 5.5 出局(sol2 三个 issue 全 open,且报错形态是一堆编译错误) | `research/gc.md` §6.4 |
 | D5 | GC 用 Torch7 九层方案;`RegisterOOMCallback` 已是公共 API | `research/gc.md` §4 |
 | D6 | 堆追踪**默认开启**(Torch7 就是默认开的) | `research/gc.md` §6.3 |
-| D7 | DataLoader 用线程不用进程;用 Lanes deep userdata + Linda | `research/dataloader.md` §9 |
+| D7 | DataLoader 用线程不用进程;用 Lanes deep userdata + Linda。**R41(2026-10-22):不搞多进程,多线程即可** —— python 用多进程是因 GIL + 解释器隔离,Lua 的 lua_State 天然隔离,Windows spawn 的坑不存在 | `research/dataloader.md` §9 |
 | D8 | Lanes 强制依赖 | `research/dataloader.md` §9.5(a) |
 | D9 | **不**用 `new_executor/workqueue/` 做 DataLoader | `research/reuse.md` §5.2 |
 | D10 | `paddle.Model` / `paddle.metric.*` 不移植 | `plan/overview.md` §2.2 |
@@ -67,7 +67,7 @@
 | D17 | 静态图反向用 `run_program_ad_func`,**不自己建反向图** | `research/reuse.md` §4 |
 | D18 | `jit::Layer` 提到 M1 可选项("Python训练/Lua推理") | `research/reuse.md` §3 |
 | D19 | `paddle.save/load` 先走 `SaveTensor`/`LoadTensor`;pickle 降为加分项 | `research/reuse.md` §5.1 |
-| D20 | 动转静:**trace 模式(M3,零 AST)先于 script 模式(M4)** | `research/to-static.md` §0 |
+| D20 | 动转静:**trace 模式(M3,零 AST)先于 script 模式(M4)**。**R40(2026-10-22):SOT/静态图编译/script 先不做,推迟到生态有需求** —— 纯 Python 层的机制,Lua 侧无迁移压力;静态推理加速已被 P8 `jit::Layer` 覆盖;优先做胶水层 | `research/to-static.md` §0 |
 | D21 | AST 用 vendored luacheck `parser/lexer/utils`;printer 自己写 | `research/to-static.md` §5 |
 | D22 | 源码契约 = 君子之约 + `string.dump` 往返验证 | `research/to-static.md` §4 |
 | D23 | **`nn.Layer` 自动注册**(实例 raw 表保持空 + 私有 `FIELDS` 键) | `plan/modules/09-nn.md` §3.2 |

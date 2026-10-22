@@ -76,7 +76,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 |---|---|---|
 | 1 | `WITH_PYTHON=OFF`+`ON_INFER=OFF` 编译 | ✅ **DONE(2026-10-22)**:编译成功(5195 files / 9.90 GB),5 个验收符号全部确认导出。详见 `process/m0-report.md` §3。构建目录 `$PADDLE_ROOT\build-nopy`,CPU-only(`-DWITH_GPU=OFF`) |
 | 2 | 该配置下 `egr::Backward` 跑通反向 | ✅ **DONE(2026-10-22)**:`tools/smoke/smoke.exe` 输出 `SMOKE PASS: a.grad == 4.0, b.grad == 3.0, max_err=0`,数值与手算一致。详见 `process/m0-report.md` §4 |
-| 3 | phi kernel / DeviceContext 多线程安全 | ⬜ |
+| 3 | phi kernel / DeviceContext 多线程安全 | ✅ **DONE(2026-10-22)**:`tools/smoke/smoke_mt.cc` 多线程冒烟 PASS —— 4 线程×50 轮 + 8 线程×200 轮(1800 次完整图)共享框架 DeviceContextPool,`a.grad==4.0 / b.grad==3.0 / max_err=0`。CPU 多线程共享上下文安全,无需 per-thread context |
 | 4 | Lanes v3.17.x deep API 与 4.x 差异 | ⬜ |
 | 5 | Lanes 与绑定的 C++ ABI 一致性 | ⬜ |
 | 6 | Lanes `on_state_create` 钩子 | ⬜ |

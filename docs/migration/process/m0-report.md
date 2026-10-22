@@ -132,6 +132,15 @@ git apply -R                        # 可逆还原(未执行,保持工作区现�
 
 - ✅ 冒烟与**手算**逐位一致;与 **Python 端**逐位对拍未做(本构建即无 Python)。如需,可
   另建 `WITH_PYTHON=ON` 构建对拍 —— 列为可选,不阻塞。
-- M0 其余验证项(#3–#21)按 `status.md` §4 顺序继续,下一项 = T-M0-03(phi kernel /
-  DeviceContext 多线程安全)。
+- ✅ **T-M0-03 已加验(2026-10-22)**:`tools/smoke/smoke_mt.cc` 多线程冒烟 ——
+  4 线程×50 轮 + 8 线程×200 轮(共 1800 次 full→multiply→sum→Backward 完整图),
+  全部线程**共享框架 DeviceContextPool**,每轮 `a.grad==4.0 / b.grad==3.0 / max_err=0`。
+  **结论:CPU 上多线程共享 DeviceContext 安全,不需要 per-thread context。**
+  依据:① `CPUContext::Impl` 仅含 `place_` + `Eigen::DefaultDevice*`(无 per-thread
+  可变缓冲,`phi/backends/cpu/cpu_context.cc:27-54`);② 分配器链 `IsAllocThreadSafe`
+  强制为真(`phi/core/memory/allocation/retry_allocator.h:48`)。这直接支撑 R41
+  (DataLoader 多线程方案)与绑定层多线程安全。编译/链接复用 smoke.cc 的完整 483 库
+  基线(从 `paddle_inference_c` 的 CMake `LINK_LIBRARIES` 提取)。
+- M0 其余验证项(#4–#21)按 `status.md` §4 顺序继续,下一项 = T-M0-04(Lanes
+  v3.17.x deep API 与 4.x 差异核对)。
 - 生成器必须把 `PD_DECLARE_KERNEL` 组自动写进绑定(§4.3),记入 `plan/modules/03-codegen.md`。
