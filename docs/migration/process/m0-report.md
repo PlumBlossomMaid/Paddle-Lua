@@ -343,3 +343,56 @@ cl lanes_alloc_check.obj *.obj E:\code\vcpkg\...\lua51.lib /MT
 REM 运行:lanes_alloc_check.exe <lanes.lua 路径> [noalloc]
 REM noalloc = 对照组(不装 allocator),验证 lane 机制本身正常
 ```
+
+---
+
+## 15. 纯 Lua pickle 读真实 `.pdparams`(T-M0-11)
+
+**验收**:不依赖 Python,纯 Lua 读出 Paddle 保存的权重文件结构,
+与 Python `pickle.load` 的结果逐项一致。
+
+**结论:通过。** 实现落在**独立仓库 `E:\code\lua-pickle`**(rock/模块名
+`pickle`;双向可逆 picker+unpickler,见 `lua-pickle/docs/design.md`),
+不在本仓库。`tools/check.lua` 在本机 **Lua 5.1.5** 上读通真实样本
+`m0-11-sample.pdparams`(326 B, protocol 4),并与 Python `pickle.load`
+生成的权威基准 `m0-11-expected.lua` 逐字节对拍 PASS:
+`linear.weight`(2x3 f4)、`linear.bias`(2 f4)、`StructuredToParameterName@@`
+(dict[str,str])键、shape、dtype、raw bytes 全对。
+
+### 15.1 对拍基准的教训(反幻觉规程)
+
+**必须用 `pickle.load` 生成基准,不能用 `paddle.load`** —— 文件里存的
+本来就是 numpy(上游 `io.py:184` `np.array(value.cpu())` 先把 Tensor 转
+numpy 再 pickle),而 `paddle.load` 返回的是 `paddle.Tensor`,与纯 Lua 读
+出的 numpy 结构不匹配,对拍会报 `TypeError: unsupported`。
+
+### 15.2 numpy 还原语义(对照 numpy 2.4.6 实测)
+
+| 对象 | pickle 形态 | Lua 侧还原 |
+|---|---|---|
+| `dtype` | `REDUCE(numpy.dtype, ('f4', False, True))` 后接 `BUILD (3, '<', None, None, None, -1, -1, 0)` | `dtype_new` 记 code,`dtype_setstate` 取 `state[2]` 拼 `str='<f4'` |
+| `ndarray` | `REDUCE(numpy._core.multiarray._reconstruct, (numpy.ndarray, (0,), b'b'))` 造骨架,再 `BUILD (1, shape, dtype, is_fortran, rawdata)` | `reconstruct` 造骨架表,`ndarray_setstate` 解 5 元组填 shape/dtype/data |
+| numpy 标量 | `REDUCE(numpy._core.multiarray.scalar, (dtype, rawbytes))` | `scalar` 记 dtype+bytes(R3 接 Insight7 0-d) |
+
+兼容两条 reducer 路径:numpy 1.x `numpy.core.multiarray` 与 2.x
+`numpy._core.multiarray` 都注册(`registry.lua`)。Paddle 自己的类
+(`io_utils._reconstruct_dense_tensor_data` 等)由 paddle-lua 通过
+`pickle.register("module.Name", fn)` 注入 —— pickle 不认识下游(设计 §2.1)。
+
+### 15.3 踩坑:Lua 5.1 的 `#` 对洞表未定义 ⚠️
+
+`load_tuple2/3` 初版用 `stack[#stack]=nil` 收缩栈 → 栈表末尾留 nil 洞 →
+**后续任何 `#stack` 索引都错位**(REDUCE 把 func 取成了字符串)。
+修法:`table.remove(stack)` 收缩(Lua 会重排,不留洞)。
+同一原则适用于一切自建栈机:栈表必须时刻保持密集,否则 `#` 不可信。
+
+### 15.4 已定事项
+
+- **CI 框架(2026-10-23 人拍板)**:Lua 侧用 **busted**(spec/ 权威,五版本
+  lua-matrix),Python 侧开发期工具用 **pytest**(只护生成器,不进发布包)。
+  `tools/check.lua` 保留为手动 smoke 前端。
+- **分层定位**:pickle 认识上游(pl.List / insight.Array,pcall 探测可选),
+  不认识下游(不内置 paddle)—— 下游 register 注入(设计 §2.1)。
+- 后续路线(roadmap R2–R5):writer(picker)→ numpy 类型接 Insight7 →
+  registry 白名单/security → rockspec 打包 + CI。Insight7 的 0-d Lua
+  入口(`ins.scalar` + `item()` 严格 ndim 检查)延后建设,不阻塞。
