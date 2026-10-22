@@ -187,3 +187,32 @@ obj + Lua 5.1(导入库),从 C++ TU 调用 `luaopen_lanes_core` 创建模块表,
 **对绑定层的落地**:P13 绑定时把 Lanes 源码(C 文件)编译进我们的 `.dll`(`luaopen_lanes_embedded`
 正是为嵌入场景设计的入口),与绑定同 toolset / 同 CRT / 同 Lua 头,即不存在 ABI 问题。
 本机开发用 vcpkg 的 LuaJIT(Lua 5.1 ABI)作为链接目标,与 sol2 无冲突。
+
+---
+
+## 11. OOM 回调救回验证(T-M0-07)
+
+**实测通过**:`tools/smoke/oom_smoke.cc` 输出 `OOM SMOKE PASS`(三用例全过)。
+用 `MockOomAllocator`(前 N 次 `AllocateImpl` 抛 `BadAlloc`,之后 malloc 成功)
+包进 `RetryAllocator`,验证 `RegisterOOMCallback` 的重试语义
+(`retry_allocator.cc:60-82`):
+
+| 用例 | 回调返回 | 实测 | 结论 |
+|---|---|---|---|
+| ① 能救回 | 1024(模拟 `lua_gc` 释放的字节) | 回调被调 **2 次**,第 3 次分配成功 | `>0` 即重试,直到成功 —— **Torch7 的 1.3 方案在 Paddle 侧成立** |
+| ② 救不回 | 0(GC 没释放任何东西) | 回调被调 **1 次**,`BadAlloc` 逃逸 | `>0` 判据正确,不会无限重试 |
+| ③ 无回调 | —(未注册) | 无回调重试,`BadAlloc` 逃逸 | 与源码 `g_oom_callback == nullptr` 短路一致 |
+
+**两个必须先设的前提(绑定层启动时照抄)**:
+
+1. **`FLAGS_offload_retry_times` 必须 > 0**,默认是 **-1**(`common/flags.cc:2363`)——
+   `retry_allocator.cc:67` 的 `if (FLAGS_offload_retry_times <= 0 || g_oom_callback == nullptr)`
+   直接短路,**回调一次都不会被调用**(第一版冒烟就是这么失败的)。
+2. **CPU 分配链默认不包 `RetryAllocator`** —— `allocator_facade.cc:401-403` 只在
+   `FLAGS_gpu_allocator_retry_time > 0` 时包 **CUDA/XPU** 路径。CPU 上要手动包,
+   或依赖 GPU 路径自动包。这是实现细节,不影响 API 形状。
+
+**`RetryAllocator` 外层还有一层 waiter 重试**(`retry_allocator.cc:88-115`):
+OOM 回调放弃后,它会等 `retry_time_` 毫秒让别的线程释放内存,期间反复重试,
+超时后再试最后一次。所以"无回调"不等于"立即失败",冒烟里 `retry_ms=0` 才能
+立刻得到确定性行为 —— 绑定时默认值要留意(0 = 不等)。
