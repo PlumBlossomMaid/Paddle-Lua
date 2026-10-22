@@ -339,3 +339,8 @@ P17 distributed 可以写,但验收标准里必须明写"当前环境无法验�
    并同步 `AGENTS.md` §2 决策台账
 
 **三件事没做完,该阶段不算完工。**
+
+**CI 的门**:每个阶段完工必须同时交付它的 CI job(`plan/ci.md` §8 解锁表)。
+L0 静态层已建成:`.github/workflows/l0.yml`(四 job:doctree / redlines / no-crlf /
+lua-matrix),脚本在 `tools/ci/`(`check_doctree.lua` 校验 WORKPLAN 工程树链接完整性;
+`lua_matrix.lua` 在 5 个 Lua 上跑 M0 #23/#24 断言)。其余层按解锁表随阶段逐个加。

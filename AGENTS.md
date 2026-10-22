@@ -248,6 +248,14 @@ docs/
         ├── reuse.md           可复用 C++ 资产
         ├── to-static.md       动转静
         └── _ref/              外部参考源码出处
+tools/
+├── ci/                  ★ L0 CI 脚本(plan/ci.md §2,每个阶段完工前的门)
+│   ├── check_doctree.lua   WORKPLAN 工程树链接完整性(§5)
+│   └── lua_matrix.lua      M0 #23/#24 五版本断言(5.1/5.2/5.3/5.4/LuaJIT)
+├── lint_51.lua          Lua 5.1 子集检查器(C3)
+├── gen/                 ★ 算子生成器(开发期工具,可用 Python;产物不带 Python,C9)
+└── smoke/
+    └── smoke.cc         M0 冒烟:P0 产物 egr::Backward 反向验证(数值与手算一致)
 ```
 
 > **路径约定:** 本文件及 `docs/migration/` 内所有文档中,形如 `process/status.md`、

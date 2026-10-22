@@ -1,0 +1,107 @@
+name: L0 - static checks
+# 四层 CI 的第一层(plan/ci.md §1):不需要 libpaddle,每次 push 都跑,< 30s。
+# 挡住:文档树断链、GoA redlines(基座/语法/行尾)、Lua 版本行为差异(M0 #23/#24)。
+# 各 job 详解:plan/ci.md §2 §5 §6;脚本在 tools/ci/。
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  doctree:
+    name: doctree (WORKPLAN link integrity)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.1"
+      # 工程树是执行计划:✅/🔵 节点断链 = 有任务永远不会被执行(plan/ci.md §5)
+      - run: lua tools/ci/check_doctree.lua
+
+  redlines:
+    name: redlines (conventions; plan/ci.md §6)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.1"
+      # --- 本阶段(论证期)生效的红线 ---
+      # ① 全生态只许一份 Penlight(D34):仓库内不得出现 _vendor/pl
+      - name: redline - D34 no vendored Penlight
+        run: |
+          if grep -rn "_vendor/pl" . ; then
+            echo "FAIL: _vendor/pl found (D34 - Penlight is a rock dep, never vendored)"
+            exit 1
+          fi
+          echo "OK: no _vendor/pl"
+      # ② tools/ci 自身必须是 Lua 5.1 子集(C3):luac -p 编译全部脚本
+      - name: redline - C3 Lua 5.1 syntax (tools/ci)
+        run: |
+          if ! luac -p tools/ci/*.lua ; then
+            echo "FAIL: tools/ci scripts are not valid Lua 5.1 (C3)"
+            exit 1
+          fi
+          echo "OK: tools/ci scripts compile under Lua 5.1"
+      # ③ 根目录作业手册与 plan/roadmap.md 必须登记 tools/ci/
+      #    (WORKPLAN 0.15 完工判据:两处都查得到)
+      - name: redline - tools/ci registered in AGENTS.md and roadmap.md
+        run: |
+          grep -q "tools/ci" AGENTS.md || { echo "FAIL: AGENTS.md must mention tools/ci"; exit 1; }
+          grep -q "tools/ci" docs/migration/plan/roadmap.md || { echo "FAIL: roadmap.md must mention tools/ci"; exit 1; }
+          echo "OK: tools/ci registered in both AGENTS.md and roadmap.md"
+      # --- 其余红线(lua/ 代码、生成器、argrule)随各阶段解锁,见 ci.md §6 §8 ---
+
+  no-crlf:
+    name: no-crlf (line endings; .gitattributes eol=lf)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Windows 开发 + Linux CI 的经典噪音源:git add 时 autocrlf 归一,
+      # 但任何绕过 .gitattributes 的 CRLF 提交都会在这里现形。
+      # 判据:git 索引(而非工作区)里不允许出现 CRLF —— Linux checkout 就是 git 视角。
+      - name: check no CRLF in tracked files
+        run: |
+          BAD=0
+          for f in $(git ls-files); do
+            if git cat-file blob ":$f" 2>/dev/null | grep -q $'\r'; then
+              echo "CRLF: $f"
+              BAD=1
+            fi
+          done
+          if [ "$BAD" -ne 0 ]; then
+            echo "FAIL: tracked files contain CRLF (.gitattributes requires eol=lf)"
+            exit 1
+          fi
+          echo "OK: all tracked files are LF"
+
+  lua-matrix:
+    name: lua-matrix (${{ matrix.lua }}; M0 #23/#24)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lua: "5.1"
+          - lua: "5.2"
+          - lua: "5.3"
+          - lua: "5.4"
+          - lua: "luajit"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: leafo/gh-actions-lua@v10
+        if: matrix.lua != 'luajit'
+        with:
+          luaVersion: ${{ matrix.lua }}
+      - uses: leafo/gh-actions-luajit@v2
+        if: matrix.lua == 'luajit'
+      # M0 #23(loadstring/load 行为)+ #24(upvalue/局部/寄存器三道墙)
+      # 本机只有 5.1 + LuaJIT,5.2-5.4 只在这里跑(plan/ci.md §2 lua-matrix)
+      - name: run lua_matrix.lua
+        run: |
+          if [ "${{ matrix.lua }}" = "luajit" ]; then
+            luajit tools/ci/lua_matrix.lua
+          else
+            lua tools/ci/lua_matrix.lua
+          fi
