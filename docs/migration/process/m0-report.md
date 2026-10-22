@@ -168,3 +168,22 @@ userdata 的 C API 形态两版不同,但我们已不依赖它(R18 改走 `__lan
 2. 两版 `__lanesclone` 都在**源 state** 里调用(注释 "call cloning function in source
    state"),所以绑定层写它时拿到的 self 是**源 userdata** —— 语义是"在源侧产出一个
    可跨 state 的拷贝",不是"在目标侧填充"。
+
+---
+
+## 10. MSVC ABI 一致性(T-M0-05)与 on_state_create(T-M0-06)
+
+**T-M0-05 实测通过**:`tools/smoke/lanes_abi_check.cc` 链接 Lanes v3.17.2 的 10 个 C
+obj + Lua 5.1(导入库),从 C++ TU 调用 `luaopen_lanes_core` 创建模块表,运行输出
+`LANES ABI OK: v3.17.2 C core linked from C++ TU under MSVC`(exit 0)。
+
+| 结论 | 说明 |
+|---|---|
+| **v3.17.2 是纯 C** | 10 个 `.c` / 0 个 `.cpp`,`CMakeLists.txt` `PROJECT(lanes C)`。§9.5(c) 的「虚函数 ABI」担忧**只适用于 4.x**(`DeepFactory`/`DeepPrelude` C++ class,NVI 虚函数),不适用于 v3.17 |
+| **导出符号是 C 链接** | `lanes.h:8` `LANES_API __declspec(dllexport)`;导出 `luaopen_lanes_core` / `luaopen_lanes_embedded`;`deep.h:63-64` 导出 `luaG_newdeepuserdata` / `luaG_todeep`。从 C++ TU 链接无需 `extern "C"` 包裹(头文件本身是 C,`.cc` 里包了更没有错) |
+| **⚠️ 实测陷阱:Lua 头必须统一** | 第一次链接失败(LNK4272):本机 `Lua\5.1` 是 **x86** 库,x64 目标冲突。第二次改用 vcpkg x64 `lua51.lib`,但**头文件混用**了 —— Lanes 用 PUC 5.1 头编、调用方用 LuaJIT 头编,**链接过、运行即崩**(负数退出码,`lua_State` 布局不同)。统一用 `vcpkg/installed/x64-windows/include/luajit`(LUA_VERSION_NUM=501)后通过。**绑定层三条纪律:Lanes 与绑定同编译器、同 CRT(/MT)、同一份 Lua 头** |
+| **on_state_create(T-M0-06)** | 两版都有。v3.17.2:`state.h:19-20`(`initialize_on_state_create` / `call_on_state_create`)、`universe.h:60`(`on_state_create_func` 字段);4.x:`state.cpp:212` / `keeper.cpp:1126`。语义:每个新 lane 由 keeper 调一次,`lua_CFunction` 签名 —— **正好承载 13-lanes.md §4.4 的「每个 worker lane 重新 require "paddle"」**,Q-03 关闭,Detail 在 §9 对比表 |
+
+**对绑定层的落地**:P13 绑定时把 Lanes 源码(C 文件)编译进我们的 `.dll`(`luaopen_lanes_embedded`
+正是为嵌入场景设计的入口),与绑定同 toolset / 同 CRT / 同 Lua 头,即不存在 ABI 问题。
+本机开发用 vcpkg 的 LuaJIT(Lua 5.1 ABI)作为链接目标,与 sol2 无冲突。

@@ -78,8 +78,8 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 2 | 该配置下 `egr::Backward` 跑通反向 | ✅ **DONE(2026-10-22)**:`tools/smoke/smoke.exe` 输出 `SMOKE PASS: a.grad == 4.0, b.grad == 3.0, max_err=0`,数值与手算一致。详见 `process/m0-report.md` §4 |
 | 3 | phi kernel / DeviceContext 多线程安全 | ✅ **DONE(2026-10-22)**:`tools/smoke/smoke_mt.cc` 多线程冒烟 PASS —— 4 线程×50 轮 + 8 线程×200 轮(1800 次完整图)共享框架 DeviceContextPool,`a.grad==4.0 / b.grad==3.0 / max_err=0`。CPU 多线程共享上下文安全,无需 per-thread context |
 | 4 | Lanes v3.17.x deep API 与 4.x 差异 | ✅ **DONE(2026-10-22)**:`__lanesclone` 两版调用约定一致(3 参 `lua_call(L,3,0)`);deep userdata API 两版结构不同(C vs C++ class),但 D24 走 `__lanesclone` 不受影响;`on_state_create` 两版都有(T-M0-06 顺带确认)。详见 `m0-report.md` §9 |
-| 5 | Lanes 与绑定的 C++ ABI 一致性 | ⬜ |
-| 6 | Lanes `on_state_create` 钩子 | ⬜ |
+| 5 | Lanes 与绑定的 C++ ABI 一致性 | ✅ **DONE(2026-10-22)**:`lanes_abi_check.cc` 实测 PASS(`LANES ABI OK`)。v3.17.2 纯 C(10 .c / 0 .cpp),无虚函数 ABI 问题(那是 4.x);MSVC 编译 Lanes obj 从 C++ TU 链接 Lua 5.1 成功。**陷阱:Lanes 与调用方必须用同一份 Lua 头,混用 PUC/LuaJIT 头运行即崩**。详见 `m0-report.md` §10 |
+| 6 | Lanes `on_state_create` 钩子 | ✅ **DONE(2026-10-22)**:存在。v3.17.2 `state.h:19-20`(`initialize_on_state_create`/`call_on_state_create`)+ `universe.h:60`(`on_state_create_func` 字段);4.x 同有(`state.cpp:212`/`keeper.cpp:1126`)。承载"每个 worker lane 重新 `require "paddle"`"(13-lanes.md §4.4,Q-03 关闭) |
 | 7 | `RegisterOOMCallback`+`lua_gc` 救回 OOM | ⬜ |
 | 8 | LuaJIT GC64 | ⬜ |
 | 9 | `__close` 对 userdata(5.4) | ⬜ |
