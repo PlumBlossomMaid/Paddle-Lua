@@ -94,7 +94,7 @@ egr::Backward({y}, {}, false);
 | ID | 任务 | 前置 | 预估 | 状态 |
 |---|---|---|---|---|
 | T-M0-03 | phi kernel / DeviceContext 多线程共享安全性 | T-M0-01 | 2d | ✅ **DONE(2026-10-22)**:`tools/smoke/smoke_mt.cc` 多线程冒烟 —— 4 线程×50 轮 + 8 线程×200 轮(共 1800 次 full→multiply→sum→Backward 完整图),共享框架 DeviceContextPool,全部 `a.grad==4.0 / b.grad==3.0 / max_err=0`。结论:CPU 上多线程共享 DeviceContext 安全,无需 per-thread context |
-| T-M0-04 | Lanes v3.17.x deep API 与 4.x 差异核对 | — | 1d | TODO |
+| T-M0-04 | Lanes v3.17.x deep API 与 4.x 差异核对 | — | 1d | ✅ **DONE(2026-10-22)**:已核对(v3.17.2 tag + master@4aa54c9 双 clone)。**`__lanesclone` 两版都有且调用约定一致**(`clone:__lanesclone(dest, source, size)`,`lua_call(L,3,0)`;`tools.c:1616-1618` vs `intercopycontext.cpp:869-871`)——D24 依赖的接口面不变。**deep userdata API 两版结构不同**:v3.17 是 C API(`deep.h`: `luaG_newdeepuserdata`/`luaG_todeep`/`DeepPrelude` struct),4.x 是 C++ class(`deep.hpp`: `DeepFactory`/`DeepPrelude`,NVI 虚函数)——但 D24 已改走 `__lanesclone`,不依赖 deep userdata,故差异无影响。**`on_state_create` 两版都存在**(v3.17 `state.h:19-20`/`universe.h:60`;4.x `state.cpp:212`/`keeper.cpp:1126`),T-M0-06 顺带确认。详见 `m0-report.md` §9 |
 | T-M0-05 | Lanes 与绑定的 C++ ABI 一致性(MSVC) | T-M0-04 | 1d | TODO |
 | T-M0-06 | Lanes `on_state_create` 钩子是否存在 | T-M0-04 | 0.5d | TODO |
 | T-M0-07 | `RegisterOOMCallback` + `lua_gc` 救回 OOM | T-M0-01 | 1d | TODO |

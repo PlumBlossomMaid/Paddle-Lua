@@ -348,7 +348,7 @@ class DeepFactory
 
 **(b) v4.0.0 太新。** 2026-02-27 发布,大版本跳跃通常伴随 API 变动。
 建议先按 **v3.17.2** 开发,4.x 观望。
-⚠️ 注意:上面引用的 `deep.hpp` 我读的是 **master(4.x)**,3.17 的 deep API 可能不同,**需核对**。
+✅ **已核对(2026-10-22,T-M0-04)**:`__lanesclone` 两版调用约定一致(`clone:__lanesclone(dest, source, size)`,`lua_call(L,3,0)`);deep userdata API 两版结构不同(v3.17 C API `deep.h` vs 4.x C++ class `deep.hpp`),但 D24 已改走 `__lanesclone`,不受影响。`on_state_create` 两版都有。详见 `process/m0-report.md` §9。
 
 **(c) C++ ABI 一致性。** Lanes 4.x 是 C++,deep userdata 接口是**虚函数**,
 意味着 Lanes 和我们的绑定必须用同一编译器/同一 C++ 运行时编译(MSVC 上尤其敏感)。

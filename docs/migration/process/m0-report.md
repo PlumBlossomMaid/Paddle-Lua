@@ -141,6 +141,30 @@ git apply -R                        # 可逆还原(未执行,保持工作区现�
   强制为真(`phi/core/memory/allocation/retry_allocator.h:48`)。这直接支撑 R41
   (DataLoader 多线程方案)与绑定层多线程安全。编译/链接复用 smoke.cc 的完整 483 库
   基线(从 `paddle_inference_c` 的 CMake `LINK_LIBRARIES` 提取)。
-- M0 其余验证项(#4–#21)按 `status.md` §4 顺序继续,下一项 = T-M0-04(Lanes
-  v3.17.x deep API 与 4.x 差异核对)。
+- ✅ **T-M0-04 已加验(2026-10-22)**:Lanes v3.17.2 与 4.x(master@4aa54c9)双 clone
+  对比,见 §9。
+- M0 其余验证项(#5–#21)按 `status.md` §4 顺序继续,下一项 = T-M0-05(Lanes 与
+  绑定的 C++ ABI 一致性,MSVC)。
 - 生成器必须把 `PD_DECLARE_KERNEL` 组自动写进绑定(§4.3),记入 `plan/modules/03-codegen.md`。
+
+---
+
+## 9. Lanes 版本差异核对(T-M0-04)
+
+**结论:`__lanesclone`(D24 的接口面)在 v3.17 与 4.x 上调用约定完全一致;deep
+userdata 的 C API 形态两版不同,但我们已不依赖它(R18 改走 `__lanesclone`)。**
+
+| 项 | v3.17.2 | 4.x(master@4aa54c9) | 影响 |
+|---|---|---|---|
+| `__lanesclone` 元方法 | ✅ `src/tools.c:1542-1618, 1752-1758` | ✅ `src/intercopycontext.cpp:807-871, 1007-1016` | **两版一致**。调用:push lightuserdata(clone/source) + integer(size),`lua_call(L, 3, 0)` —— 即 `clone:__lanesclone(dest, source, size)`。D24 绑定层写一份即可跨版本 |
+| deep userdata API | C API:`deep.h` —— `luaG_newdeepuserdata` / `luaG_todeep` / `DeepPrelude` struct + `luaG_IdFunction` 函数指针 + `DEEP_VERSION`(fnv164) | C++ class:`deep.hpp` —— `DeepFactory`(NVI 虚函数)/ `DeepPrelude` class + `std::atomic<int> refcount` + `kDeepVersion`(xxh64) | **结构不同,但无影响** —— R18/D24 已弃用 deep userdata,Tensor 走 sol2 usertype + `__lanesclone` |
+| `on_state_create` 钩子 | ✅ `src/state.h:19-20`(`initialize_on_state_create`/`call_on_state_create`)、`src/universe.h:60`(`on_state_create_func`) | ✅ `src/state.cpp:212`、`src/keeper.cpp:1126`、`src/lanes.cpp:840` | **两版都存在**(T-M0-06 顺带确认);4.x 明确注释 "users should provide an on_state_create function to setup custom loaders"(intercopycontext.cpp:1363) |
+| 版本 | `lanes-3.17.2-0.rockspec`,release 2025-10-23 | `lanes-4.0.0-0.rockspec`,release 2026-02-27 | 仍按 dataloader.md §9.5(b) 建议:**锁 v3.17.2 开发**,4.x 观望 |
+
+**对绑定的两个结论**:
+1. `__lanesclone` 的实参是 `(dest_clone_ud, source_ud, size)` 三个,不是两个 ——
+   sol2 里写这个 metamethod 时**第三个参数是 userdata 字节数**,用于 `*dest = *source`
+   式 memcpy;Tensor 的 `shared_ptr` 拷贝即完成,size 参数可忽略但**必须接受**。
+2. 两版 `__lanesclone` 都在**源 state** 里调用(注释 "call cloning function in source
+   state"),所以绑定层写它时拿到的 self 是**源 userdata** —— 语义是"在源侧产出一个
+   可跨 state 的拷贝",不是"在目标侧填充"。
