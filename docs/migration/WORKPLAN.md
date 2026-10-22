@@ -110,8 +110,8 @@
  |    +-- [✅] 1.2 C++ 侧反向验证            -> process/tasks.md T-M0-02
  |    +-- [✅] 1.3 线程安全验证              -> process/tasks.md T-M0-03
  |    +-- [✅] 1.4 Lanes 三项验证            -> process/tasks.md T-M0-04..06
- |    +-- [🔵] 1.5 GC / OOM 验证             -> process/tasks.md T-M0-07..10
- |    +-- [⬜] 1.6 序列化与执行器验证        -> process/tasks.md T-M0-11..19
+ |    +-- [✅] 1.5 GC / OOM 验证             -> process/tasks.md T-M0-07..10
+ |    +-- [🔵] 1.6 序列化与执行器验证        -> process/tasks.md T-M0-11..19
  |    +-- [⬜] 1.7 参数签名层(独立项目)     -> plan/argrule.md(孵化说明书)
  |         1.7.0 ✅ 定名 argrule(P10 已拍板)-> ⬜ 去 luarocks 占位
  |         1.7.1 Penlight 分发方式拍板(待拍板 P9)

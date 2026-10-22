@@ -287,3 +287,59 @@ assert(closed_by == "gc")   -- GC 走 __gc,__close 不触发
 本机从 lua.org 用 MSVC 编出了 `lua54.exe`(解决 luac.obj 与 lua.obj 的 main 重复,
 链接清单排除 luac.obj 即可);Temp 下 `lua-5.4.7/` 保留至 M0 收尾(5.2/5.3 同理
 可随时编译,避免为每个版本装全局解释器)。
+
+---
+
+## 14. 堆追踪 vs Lanes 自定义分配器(T-M0-10)
+
+**实测通过**:`tools/smoke/lanes_alloc_check.cc` 输出 `LANES ALLOC PASS`。
+在 master state 上装计数 `lua_Alloc`(模拟堆追踪探针),加载**真实 `lanes.lua`**,
+用 `on_state_create` 钩子在**新 lane state 自己身上**调 `lua_getallocf` 回答
+"我的分配器是谁?",然后跑一个分配 ~1.2MB 的 lane(20000 × 64B 字符串)。
+
+### 14.1 结论先行
+
+| 问题 | 实测结果 | 结论 |
+|---|---|---|
+| master 上的自定义 allocator 会到 lane 吗? | **3 个 lane state 全部 `!= counting_alloc`**(inherited=0) | **LuaJIT 下不会** —— `state.c:253-255` `#if LUAJIT_FLAVOR()==64` 分支 lane 一律 `luaL_newstate()`,分配器只从 `lua_newstate(allocf)` 参数来,`lua_setallocf` 改的是**单个 state 自己** |
+| PUC Lua 下呢? | (源码判定)`state.c:257-271`:`create_state` 非 LuaJIT 分支走 `lua_newstate(U->protected_allocator.definition.allocF, ...)`——**复用 master 的 allocator** | PUC 下我们的计数 allocator 会被 lane 线程调用 → **必须线程安全**;本机是 LuaJIT,此分支留给 CI 矩阵 |
+| 堆追踪与 Lanes 冲突吗? | 不冲突,但有一个**非显而易见的陷阱**(§14.3) | 堆追踪应做**张量字节计数器**(`14-gc.md` §3.1),**与 Lua allocator 无关**;LuaJIT 上靠 allocator 钩子根本看不到 lane 分配 |
+
+### 14.2 方法(为什么用 on_state_create 而不是猜)
+
+`lua_getallocf` 只能从某个 `lua_State*` 上查。查 master 容易,查 **lane 自己**
+需要在 lane state 上执行代码 —— 正好用 `on_state_create` 钩子(它在**新 state 上**
+被调用,`state.c:283+` `call_on_state_create`):钩子里 `lua_getallocf(L)` 的 `L`
+就是刚创建的 lane state。三个 lane(定时器 + 我们的 worker + 一个内部 state)
+全部返回非 counting_alloc,直接证实 LuaJIT 分支。
+
+### 14.3 实测陷阱:`lua_setallocf` 不能裸 `realloc/free` 替换 ⚠️
+
+第一版冒烟在 `lua_setallocf(L, counting_alloc, NULL)` 里直接调 `realloc/free`,
+**运行即 0xC0000374 堆损坏**。根因:vcpkg 的 LuaJIT 是 **`lua51.dll`** —— Lua state
+的内存由 DLL 自己的 CRT 堆分配;我们 exe 用 `/MT` 静态 CRT,`free(ptr)` 把 DLL
+堆的指针交给 exe 堆 = 堆损坏。
+
+**正确姿势(照抄 Lanes `protected` 模式)**:替换前先 `lua_getallocf(L, &orig_ud)`
+存下原分配器,新分配器**链式转发** `orig_alloc(orig_ud, ptr, osize, nsize)`,
+自己只做计数。Lanes 的 `protected_lua_Alloc`(`tools.c:173-190`)就是这么干的
+(mutex + 转发)—— 我们的计数探针与 Lanes 的 mutex 包装天然可叠加,互不干扰。
+
+### 14.4 对绑定层的落地规则(P14 前置)
+
+1. **堆追踪 = 张量字节计数器,彻底不碰 Lua allocator**(`14-gc.md` §3.1 的
+   `pd_gc_account` 设计成立,且这是 LuaJIT 下**唯一**能看到 lane 分配压力的
+   途径 —— allocator 钩子看不到)。
+2. 计数要 `__thread`(每个 lane 线程各一份),触发 `lua_gc` 时用**当前线程的
+   `lua_State*`**(由 `on_state_create` 钩子写入 thread_local)。
+3. PUC 分支若未来要装 Lua 侧钩子:必须线程安全 + 链式转发,照 §14.3。
+
+### 14.5 构建方式(dev-only,与 lanes_abi_check 相同纪律)
+
+```bat
+REM 10 个 Lanes .c + 本 TU 全部用 vcpkg LuaJIT 头(include\luajit)、/MT、同编译器
+cl /c /O2 /MT src\*.c && cl /c /O2 /MT lanes_alloc_check.cc
+cl lanes_alloc_check.obj *.obj E:\code\vcpkg\...\lua51.lib /MT
+REM 运行:lanes_alloc_check.exe <lanes.lua 路径> [noalloc]
+REM noalloc = 对照组(不装 allocator),验证 lane 机制本身正常
+```
