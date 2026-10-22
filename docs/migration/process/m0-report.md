@@ -216,3 +216,23 @@ obj + Lua 5.1(导入库),从 C++ TU 调用 `luaopen_lanes_core` 创建模块表,
 OOM 回调放弃后,它会等 `retry_time_` 毫秒让别的线程释放内存,期间反复重试,
 超时后再试最后一次。所以"无回调"不等于"立即失败",冒烟里 `retry_ms=0` 才能
 立刻得到确定性行为 —— 绑定时默认值要留意(0 = 不等)。
+
+---
+
+## 12. LuaJIT GC64 确认(T-M0-08)
+
+**实测通过**:`tools/ci/lua_gc64_check.lua` 在 vcpkg LuaJIT 2.1.1774896198
+(x64/Windows)上输出 `lua-gc64 OK: x64 LuaJIT, 16-byte GC64 layout confirmed`。
+
+三层判据(源码 + 运行时双重验证,不靠猜):
+
+1. **源码**:`lj_arch.h:168/181/216-217/303/459` —— x64 目标默认
+   `LJ_TARGET_GC64=1`(`#ifndef LUAJIT_DISABLE_GC64`,macOS 甚至强制);
+   `:597-604` 把它投影为 `LJ_GC64`。
+2. **运行时布局**:GC64 下 GCobj 头 16 字节,连续分配的 userdata 地址差
+   必须为 16 的倍数 —— 脚本断言 8 个连续 `newproxy(false)` 的地址差 `%16==0`。
+3. **架构锚定**:`ffi.sizeof("void*")==8` 确认 x64,让第 2 条判据有意义。
+
+**结论**:本机与 CI 的 LuaJIT 一律是 GC64。绑定层(sol2 usertype + `__lanesclone`)
+按 GC64 布局写,userdata 头 16 字节,不需要兼容非 GC64 构建 —— 若要兼容,
+那是 `LUAJIT_DISABLE_GC64` 的编译期决定,与我们无关。

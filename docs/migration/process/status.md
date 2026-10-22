@@ -81,7 +81,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 5 | Lanes 与绑定的 C++ ABI 一致性 | ✅ **DONE(2026-10-22)**:`lanes_abi_check.cc` 实测 PASS(`LANES ABI OK`)。v3.17.2 纯 C(10 .c / 0 .cpp),无虚函数 ABI 问题(那是 4.x);MSVC 编译 Lanes obj 从 C++ TU 链接 Lua 5.1 成功。**陷阱:Lanes 与调用方必须用同一份 Lua 头,混用 PUC/LuaJIT 头运行即崩**。详见 `m0-report.md` §10 |
 | 6 | Lanes `on_state_create` 钩子 | ✅ **DONE(2026-10-22)**:存在。v3.17.2 `state.h:19-20`(`initialize_on_state_create`/`call_on_state_create`)+ `universe.h:60`(`on_state_create_func` 字段);4.x 同有(`state.cpp:212`/`keeper.cpp:1126`)。承载"每个 worker lane 重新 `require "paddle"`"(13-lanes.md §4.4,Q-03 关闭) |
 | 7 | `RegisterOOMCallback`+`lua_gc` 救回 OOM | ✅ **DONE(2026-10-22)**:`tools/smoke/oom_smoke.cc` 实测 PASS。MockAllocator 抛 `BadAlloc` + `RetryAllocator` 验证:回调返回释放字节数 >0 -> 重试至成功;返回 0 -> 只调一次、异常逃逸;无回调 -> 不重试。**要点**① `offload_retry_times` 默认 **-1**(`common/flags.cc:2363`),必须设 >0 才开重试路径;② `RetryAllocator` 外层有 waiter 重试(`retry_allocator.cc:88-115`)。详见 `m0-report.md` §11 |
-| 8 | LuaJIT GC64 | ⬜ |
+| 8 | LuaJIT GC64 | ✅ **DONE(2026-10-22)**:`tools/ci/lua_gc64_check.lua` 实测 PASS —— vcpkg LuaJIT 2.1.1774896198(x64/Windows)`16-byte GC64 layout confirmed`。判据:源码 `lj_arch.h:168/216-217/303/459` x64 默认 `LJ_TARGET_GC64=1` + 运行时 userdata 地址间隙 16 倍数 + `ffi.sizeof("void*")==8`。绑定层按 GC64 布局 |
 | 9 | `__close` 对 userdata(5.4) | ⬜ |
 | 10 | 堆追踪与 Lanes 分配器冲突 | ⬜ |
 | 11 | 纯 Lua pickle 读 `.pdparams` | ⬜ |
