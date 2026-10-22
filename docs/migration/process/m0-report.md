@@ -236,3 +236,54 @@ OOM 回调放弃后,它会等 `retry_time_` 毫秒让别的线程释放内存,�
 **结论**:本机与 CI 的 LuaJIT 一律是 GC64。绑定层(sol2 usertype + `__lanesclone`)
 按 GC64 布局写,userdata 头 16 字节,不需要兼容非 GC64 构建 —— 若要兼容,
 那是 `LUAJIT_DISABLE_GC64` 的编译期决定,与我们无关。
+
+---
+
+## 13. Lua 5.4 `__close` / `__gc` 语义(T-M0-09)
+
+**实测通过**:`tools/ci/lua_close_check.lua` 在 Lua 5.4.7(从 lua.org 源码 MSVC 编译)与
+Lua 5.1.5(choco)上输出 `lua-close OK`。已登记 l0.yml 的 lua-matrix job(5 版本全跑)。
+
+### 13.1 结论先行
+
+| Case | 语义 | 实测 |
+|---|---|---|
+| A:`<close>` 变量作用域退出 | **触发 `__close`**(任何对象,含纯表 —— to-be-closed 机制只看对象有没有 `__close`) | ✅ 5.4 上 `n==1` |
+| B:普通 userdata 被 GC | **只调 `__gc`,不调 `__close`** —— 没有 GC 兜底调用 `__close` 的路径 | ✅ 同挂两元方法,GC 后 `closed_by=="gc"` |
+
+**对绑定层(R6 起)的落地规则**:sol2 的 RAII usertype 必须**同时挂 `__close` 与 `__gc`**
+两个元方法 —— `__close` 给 5.4 用户用 `<close> x = tensor` 做确定性释放,`__gc` 做
+用户未声明 `<close>` 时的兜底释放;**两者必须幂等**(shared_ptr 自减天然幂等;若是
+裸指针/手动标志,两个 handler 都要检查同一个"已释放"标志,否则双释放)。
+
+### 13.2 方法(为什么改了两版)
+
+第一版 Case B 用 `setmetatable({}, mt2)` 造"userdata" —— 那是**表**,不是 userdata;
+而 5.4 的 GC 只对 userdata 调 `__close`…… 实测打脸:**GC 根本不调 `__close`**。
+所以脚本改为拿真实 userdata(`io.tmpfile()` 句柄),用 `debug.setmetatable` 把它的
+metatable 换成同时带 `__gc` 与 `__close` 的版本 —— 谁被调就是谁的路径,不靠猜:
+
+```lua
+local tmp = assert(io.tmpfile())
+local closed_by = nil
+debug.setmetatable(tmp, {
+  __gc    = function() closed_by = "gc" end,
+  __close = function() closed_by = "close" end,
+})
+tmp = nil
+collectgarbage("collect"); collectgarbage("collect")
+assert(closed_by == "gc")   -- GC 走 __gc,__close 不触发
+```
+
+### 13.3 为什么这对 paddle-lua 是"验证"而非"兴趣研究"
+
+5.4 是目标版本之一(C5)。若绑定层只挂 `__close` 不挂 `__gc`:
+用户在 5.4 上不用 `<close>` 声明时,`Tensor` 显存**永不释放**(GC 不管 `__close`)
+—— 这是静默泄漏,和 M0 #7 的 OOM 回调正好接上(泄漏多了才触发 OOM 救回)。
+脚本 Case B 的断言把"GC 不调 `__close`"钉死,防止未来实现想当然地只挂一个。
+
+### 13.4 副产品
+
+本机从 lua.org 用 MSVC 编出了 `lua54.exe`(解决 luac.obj 与 lua.obj 的 main 重复,
+链接清单排除 luac.obj 即可);Temp 下 `lua-5.4.7/` 保留至 M0 收尾(5.2/5.3 同理
+可随时编译,避免为每个版本装全局解释器)。

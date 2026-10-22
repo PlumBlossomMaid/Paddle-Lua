@@ -105,3 +105,19 @@ jobs:
           else
             lua tools/ci/lua_matrix.lua
           fi
+      # M0 #8:GC64 布局(非 LuaJIT 下脚本自行 SKIP)
+      - name: run lua_gc64_check.lua
+        run: |
+          if [ "${{ matrix.lua }}" = "luajit" ]; then
+            luajit tools/ci/lua_gc64_check.lua
+          else
+            lua tools/ci/lua_gc64_check.lua
+          fi
+      # M0 #9:5.4 __close 语义(Case A <close> 作用域 / Case B GC 只走 __gc)
+      - name: run lua_close_check.lua
+        run: |
+          if [ "${{ matrix.lua }}" = "luajit" ]; then
+            luajit tools/ci/lua_close_check.lua
+          else
+            lua tools/ci/lua_close_check.lua
+          fi

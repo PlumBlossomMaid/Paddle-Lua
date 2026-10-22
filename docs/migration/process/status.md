@@ -82,7 +82,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 6 | Lanes `on_state_create` 钩子 | ✅ **DONE(2026-10-22)**:存在。v3.17.2 `state.h:19-20`(`initialize_on_state_create`/`call_on_state_create`)+ `universe.h:60`(`on_state_create_func` 字段);4.x 同有(`state.cpp:212`/`keeper.cpp:1126`)。承载"每个 worker lane 重新 `require "paddle"`"(13-lanes.md §4.4,Q-03 关闭) |
 | 7 | `RegisterOOMCallback`+`lua_gc` 救回 OOM | ✅ **DONE(2026-10-22)**:`tools/smoke/oom_smoke.cc` 实测 PASS。MockAllocator 抛 `BadAlloc` + `RetryAllocator` 验证:回调返回释放字节数 >0 -> 重试至成功;返回 0 -> 只调一次、异常逃逸;无回调 -> 不重试。**要点**① `offload_retry_times` 默认 **-1**(`common/flags.cc:2363`),必须设 >0 才开重试路径;② `RetryAllocator` 外层有 waiter 重试(`retry_allocator.cc:88-115`)。详见 `m0-report.md` §11 |
 | 8 | LuaJIT GC64 | ✅ **DONE(2026-10-22)**:`tools/ci/lua_gc64_check.lua` 实测 PASS —— vcpkg LuaJIT 2.1.1774896198(x64/Windows)`16-byte GC64 layout confirmed`。判据:源码 `lj_arch.h:168/216-217/303/459` x64 默认 `LJ_TARGET_GC64=1` + 运行时 userdata 地址间隙 16 倍数 + `ffi.sizeof("void*")==8`。绑定层按 GC64 布局 |
-| 9 | `__close` 对 userdata(5.4) | ⬜ |
+| 9 | `__close` 对 userdata(5.4) | ✅ **DONE(2026-10-22)**:`tools/ci/lua_close_check.lua` 在 Lua 5.4.7(源码 MSVC 编译)与 5.1.5(choco)上实测 PASS,已登记 l0.yml lua-matrix 五版本。**Case A**:`<close>` 变量作用域退出触发 `__close`(表也触发 —— to-be-closed 机制对任何有 `__close` 的对象生效)。**Case B 关键发现**:GC 只走 `__gc`,**不调 `__close`** —— 用 `io.tmpfile()` 真实 userdata + `debug.setmetatable` 同挂 `__gc`/`__close`,实测 GC 后 `closed_by=="gc"`。**绑定层结论:RAII usertype 必须同时挂 `__close`(5.4 `<close>` 确定性释放)与 `__gc`(兜底释放),两者需幂等**。详见 `m0-report.md` §13 |
 | 10 | 堆追踪与 Lanes 分配器冲突 | ⬜ |
 | 11 | 纯 Lua pickle 读 `.pdparams` | ⬜ |
 | 12 | ~~sol2 + Lua 5.5~~ | ✅ 已完成:不支持,5.5 出局 |
@@ -215,6 +215,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 
 | 日期 | 变更 |
 |---|---|
+| 2026-10-22 | **T-M0-09 DONE:Lua 5.4 `__close`/`__gc` 语义实测**(#9 ✅)。`tools/ci/lua_close_check.lua` 在 5.4.7 + 5.1.5 上 PASS,已登记 l0.yml lua-matrix。关键发现:**GC 只调 `__gc`,不调 `__close`** —— RAII usertype 必须双挂且幂等(详见 `process/m0-report.md` §13) |
 | 2026-10-22 | **✅ G0 闸门通过** —— `WITH_PYTHON=OFF + ON_INFER=OFF`(无 Python 训练态)编译成功:5195 files / 9.90 GB(`build-nopy`,Ninja Release,`-DWITH_SHARED_IR=OFF`,`-j6`),5 个验收符号全部确认导出;`tools/smoke/smoke.exe` 冒烟输出 `SMOKE PASS: a.grad == 4.0, b.grad == 3.0, max_err=0`(T-M0-01/T-M0-02 DONE)。Paddle 补丁 **0001**(`legacy_eager_codegen` no-op target)应用且与 `patches/paddle/` 逐字节一致(C2 满足)。记录 `process/m0-report.md` |
 | 2026-10-21 | 根目录作业手册 `CLAUDE.md` 更名 `AGENTS.md`(`git mv`,历史保留),全仓库 16 个文件 43 处引用同步替换,无残留 |
 | 2026-08-03 | 建立 `AGENTS.md` / `process/status.md` / `process/tasks.md` / `process/conventions.md` / `process/decisions.md` / `process/open-questions.md` / `README.md` |
