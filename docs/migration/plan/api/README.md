@@ -19,7 +19,7 @@
 
 | Lua 模块 | 阶段 | api 文档 | 说明 |
 |---|---|---|---|
-| `paddle`(顶层) | P5 | `top.md` | Tensor 构造、算子、`paddle.to_tensor`、懒加载装配 |
+| `paddle`(顶层) | P5 | `top.md` ✅ | Tensor 构造、算子、`paddle.to_tensor`、懒加载装配。第一批约 80 个核心成员契约已定(2026-10-23) |
 | `paddle.Tensor`(类型) | P5 | `tensor.md` | 方法、元方法、字符串索引 |
 | `paddle.dtype` / `paddle.device` | P5 | `dtype-device.md` | 与 Insight7 命名对齐(foundations §3.2) |
 | `paddle.autograd` | P6 | `autograd.md` | `backward` / `no_grad` / `grad` |
