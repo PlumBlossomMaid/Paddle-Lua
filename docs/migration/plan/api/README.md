@@ -28,7 +28,7 @@
 | `paddle.nn` | **P9** | `nn.md` ✅ | 40 个层 + 容器 + 损失。基类/容器/核心层(Linear/Conv/Embedding/损失)契约已定;Embedding/CrossEntropyLoss 的 index 1-based 是 C4 对齐关键(2026-10-23) |
 | `paddle.nn.functional` | P9 | `nn-functional.md` ✅ | 多数是对 `_ops` 的一行转发。激活/丢弃/池化核心签名已定;`_` in-place 变体随生成器;与顶层同名函数同一绑定(2026-10-23) |
 | `paddle.nn.initializer` | P9 | `nn-initializer.md` ✅ | 随机数必须走 Paddle 的生成器。可调用对象约定 + 核心初始化器(Normal/Uniform/Xavier/Kaiming)契约已定;旧名别名不搬(2026-10-23) |
-| `paddle.optimizer` | P10 | `optimizer.md` | 优化器 + `paddle.optimizer.lr` 调度器 |
+| `paddle.optimizer` | P10 | `optimizer.md` ✅ | 优化器 + `paddle.optimizer.lr` 调度器。Optimizer 基类 + SGD/Momentum/Adam/AdamW 契约已定;`step()` 在 `backward()` 后调用 + `clear_grad()` 四行循环写死(2026-10-23) |
 | `paddle.io` | **P11** | `io.md` | ★ **本目录的样板文档** |
 | `paddle.dataset` | P12 | `dataset.md` | MNIST / CIFAR … |
 | `paddle.vision` | P12 | `vision.md` | `transforms` / `models` / `datasets` |

@@ -143,7 +143,8 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `plan/api/nn.md` | — | ✅ **新增(2026-10-23)**:`paddle.nn` 契约(Layer 基类/容器/核心层 Linear·Conv·Embedding·损失);Embedding/CrossEntropyLoss 的 index 1-based 是 C4 对齐关键;`Module` 新框架待 P3 拍板 |
 | `plan/api/nn-functional.md` | — | ✅ **新增(2026-10-23)**:`paddle.nn.functional` 契约(37 激活 + dropout/池化/归一化/损失函数);`_` in-place 变体随生成器;`dropout.training` 显式传参、`normalized_shape` 轴范围 1-based |
 | `plan/api/nn-initializer.md` | — | ✅ **新增(2026-10-23)**:`paddle.nn.initializer` 契约(可调用对象 + Normal/Uniform/Xavier/Kaiming/Constant 等);随机数必须走 Paddle 生成器;旧 `*Initializer` 别名不搬 |
-| `plan/api/<其余 6 个模块>` | — | ⬜ 各模块开工时写 |
+| `plan/api/optimizer.md` | — | ✅ **新增(2026-10-23)**:`paddle.optimizer` 契约(Optimizer 基类 + SGD/Momentum/Adam/AdamW + lr 调度器);`step()` 在 `backward()` 后 + `clear_grad()` 四行循环写死;weight_decay 语义 AdamW 解耦 vs Adam 耦合 |
+| `plan/api/<其余 5 个模块>` | — | ⬜ 各模块开工时写 |
 | `plan/modules/README.md` | 70 | ✅ |
 | `plan/modules/00-build.md` | 115 | ✅ |
 | `plan/modules/01-c-abi.md` | 150 | ✅ |
