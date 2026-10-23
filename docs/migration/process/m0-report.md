@@ -501,3 +501,52 @@ numpy 再 pickle),而 `paddle.load` 返回的是 `paddle.Tensor`,与纯 Lua 读
   proto 校验,上游 Python 侧 `translated_layer.py:557-559` 就是这么用的):
   Lua 侧写一个等价小 C ABI 函数(遍历 `OpInfoMap` + SerializeToString),
   即可替代 Python 的 `OpProtoHolder`。这条链已被本项验证,无需补丁。
+
+---
+
+## 18. T-M0-17:`jit::Layer Load()` 在 `WITH_PYTHON=OFF` 下可链接、可加载
+
+### 18.1 任务与结论
+
+对应 `process/tasks.md` 的 T-M0-17。问题是:「Python 训练 + Lua 推理」的标准
+互通路径上,`jit::Load`(读 `paddle.jit.save` 的 `.pdmodel`/`.pdiparams`/`.meta`)
+在无 Python 构建里能不能用。
+
+| 验收项 | 结果 |
+|---|---|
+| `jit::Load` 符号可链接 | ✅ `libfluid_jit.lib` 导出 `?Load@jit@paddle`(T-M0-01 已核);但需要 **2 个 shim**(见 §18.2 ①) |
+| `jit::Load` 可加载产物 | ✅ 实测:`.pdmodel` ProgramDesc / `.pdiparams` 参数 / `.meta` 属性全部读入,Layer + 引擎构造成功 |
+| InterpreterEngine 可用 | ✅ `FLAGS_jit_engine_type="New"` 时 `New Executor is Running.`(`program_interpreter.cc:255`) |
+| forward 跑通 | ⚠️ **撞上游 fc 算子 + oneDNN bug**(Predictor 抛 `NotFoundError`;New 引擎 0xC0000005)—— 非无 Python 特有,记 Q-24 |
+
+### 18.2 发现与证据链(全部 file:line)
+
+**① 链接缺口:上游把两个 PIR 辅助函数放进了 pybind 目录。**
+`libfluid_jit` 的 `PirFunctionInfo` 构造函数(`function_schema.cc:112/115`)无条件
+调用 `paddle::GetFeedTargetNames/GetFetchTargetNames`,但它们定义在
+`paddle/fluid/pybind/pir_utils.cc:20/36` —— **pybind 目录,`WITH_PYTHON=OFF`
+不产出该库**。这不是我们的缺口,是上游无 Python 训练态从未链接过 libfluid_jit
+的证据(上游测试 `test/cpp/jit/CMakeLists.txt:2` 仅 `NOT WIN32` 且 CI 带 Python)。
+冒烟自带等价实现(纯 PIR,零 Python)验证链路,已写入 `smoke_jit_load.cc` 头部。
+
+**② Load 本体成功。** 测试产物来自上游 CI(`test/cpp/jit/CMakeLists.txt:6`
+`multi_program_load_with_property.tar.gz`),4 个文件
+(`export.pdmodel` / `export.infer.pdmodel` / `export.pdiparams` / `export.meta`);
+`Deserializer::operator()`(`serializer.cc:37-98`)读入 ProgramDesc + params + attrs
+均无异常;`Layer` 构造与两种引擎(`InterpreterEngine` 于 `interpreter_engine.cc:72`
+创建 `InterpreterCore`)都成功。
+
+**③ forward 撞上游 fc+oneDNN 问题(记 Q-24)。** sample 网络含 fc 算子
+(pdmodel 二进制扫到 `fc` 4 次);fc 的 oneDNN kernel 查输入名 `W` 失败
+(`onednn_context.cc:347`,`operator < fc >`);`FLAGS_use_mkldnn=false` 后
+`oneDNN v3.6.2` 仍被初始化(`onednn_context.cc:81`)。**判定:非无 Python 构建
+特有**(fc+oneDNN 组合在新版 Paddle 上未被 jit 路径验证过),不阻塞 G1;P8 落地时
+用新导出产物或打补丁(见 open-questions Q-24)。
+
+### 18.3 对绑定层的意义
+
+- `jit.load{path}` 的 C 侧基座已确认可用:**符号、加载、InterpreterEngine 全通**。
+- 链接时记得带 `GetFeedTargetNames/GetFetchTargetNames` 的等价实现(或修上游
+  目录归属)—— 这属于 P8 jit 模块的已知前置。
+- forward 的 fc/oneDNN 兼容问题与 `paddle.jit.save` 的导出模型构成强相关:
+  绑定层文档要提示「新导出产物优先」。
