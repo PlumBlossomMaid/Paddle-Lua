@@ -175,7 +175,15 @@
 | 为什么重要 | 它决定 **Insight7 内存协议怎么定**,而那个协议在 Tensor↔Array 零拷贝、DataLoader、Lanes 跨线程、将来 InsightPlot 上全是关键路径。**顺带解决一个挂着的旧问题**:`DType`/`Place` 现在还要在 Insight7 与 Paddle 的边界上转换一次(R28 备注),两边都认 DLPack 的话这个转换就不存在了 |
 | 影响 | **不阻塞 G0,但应在 Insight7 协议动刀之前查完** —— 现在改最便宜,晚半年是三个仓库一起动 |
 
-**进度备注(2026-10-23,Insight7 侧已落地)**:Insight7 的原生 DLPack v1.3 桥接已完成 —— C ABI 层(`include/insight/c_api/dlpack.h` + `src/core/dlpack.cpp`,5 个导出函数,8/8 gtest)+ Lua 绑定(`ins.to_dlpack(arr)` / `ins.from_dlpack(managed)` / `ins.from_dlpack(shape, dtype, bytes[, strides])` 便捷入口,`DLManagedTensor` userdata 带 RAII deleter),lua-pickle 的 `to_native` 已通过 `ins.from_dlpack` 把 numpy ndarray 原始字节映射为 `ins.Array`。**本问题(phi 层通道)未动**:paddle 侧 DLPack 仍只在 `paddle/fluid/pybind/tensor.cc`,需读它确认是调 phi 公开 API 还是纯 pybind 层实现 —— 这是将来 paddle-lua 做 `paddle.Tensor` 与 Insight7 互操作时的核查项,现不阻塞任何已排期任务。
+**进度备注 1(2026-10-23,Insight7 侧已落地)**:Insight7 的原生 DLPack v1.3 桥接已完成 —— C ABI 层(`include/insight/c_api/dlpack.h` + `src/core/dlpack.cpp`,5 个导出函数,8/8 gtest)+ Lua 绑定(`ins.to_dlpack(arr)` / `ins.from_dlpack(managed)` / `ins.from_dlpack(shape, dtype, bytes[, strides])` 便捷入口,`DLManagedTensor` userdata 带 RAII deleter),lua-pickle 的 `to_native` 已通过 `ins.from_dlpack` 把 numpy ndarray 原始字节映射为 `ins.Array`。
+
+**进度备注 2(2026-10-23,phi 侧已核实 → 判定 (a) 有)**:读源码确认 Paddle 的 DLPack 转换逻辑**不在 pybind 里,在 framework 层纯 C++**:
+- `paddle/fluid/framework/dlpack_tensor.h` 是纯 C++ 头(无 pybind),声明 `ToDLPack`/`FromDLPack`/`ToDLPackVersioned`/`FromDLPackVersioned`/`ToDLPackNonOwningImpl`,直接吃 `phi::DenseTensor`
+- 实现:`paddle/fluid/framework/dlpack_tensor.cc:338-411`(`ToDLPack`:338,`FromDLPack`:406);编译归属 `cc_library(dlpack_tensor, SRCS dlpack_tensor.cc, DEPS dlpack phi)`(`paddle/fluid/framework/CMakeLists.txt:537-540`)
+- pybind 的 `paddle/fluid/pybind/tensor.cc:639 TensorToDLPack` 只是 PyCapsule 包装壳,底下调 `framework::DLPackTraits<T>::ToDLPack`
+- phi 层本身(`paddle/phi/**/*.cc`)没有 DLPack 符号;`paddle/phi/api/include/compat/c10/util/UniqueVoidPtr.h:111` 只是注释提到 DLManagedTensor
+
+**结论:Q-22 = 情形 (a)。** Insight7 ↔ `paddle.Tensor` 边界直接定 DLPack,无需照着重写。**遗留核查项(不阻塞)**:`dlpack_tensor.h` 中仅 `ToDLPack` 带 `TEST_API` 修饰、其余三个没有,且 `TEST_API` 在 Windows 非 PADDLE_WITH_TESTING 下为空宏(`paddle/utils/test_macros.h:17-22`)——若最终以 `libpaddle` 动态库形式链接,需确认这 4 个符号的导出可见性(必要时在补丁层补 `__declspec(dllexport)`);若走静态链接则无此问题。
 
 ### Q-23 · Array API Standard 是不是真如我记忆所述
 
