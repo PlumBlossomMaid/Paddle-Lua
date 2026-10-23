@@ -32,7 +32,7 @@
 | `paddle.io` | **P11** | `io.md` | ★ **本目录的样板文档** |
 | `paddle.dataset` | P12 | `dataset.md` | MNIST / CIFAR … |
 | `paddle.vision` | P12 | `vision.md` | `transforms` / `models` / `datasets` |
-| `paddle.jit` | P8/P15/P18 | `jit.md` | `load`(P8)/ `trace`(P15)/ `script`(P18)分三批 |
+| `paddle.jit` | P8/P15/P18 | `jit.md` ✅ | `load`(P8)/ `trace`(P15)/ `script`(P18)分三批。`load` C++ 侧已由 T-M0-17 验证;已知链接缺口(GetFeedTargetNames shim)+ Q-24(fc/oneDNN)已记录(2026-10-23) |
 | `paddle.amp` | 延后 | — | 未排期 |
 | `paddle.distributed` | P17 | `distributed.md` | ⛔ 无环境,写得了测不了 |
 | `paddle.utils` | P4 | `utils.md` | `fs` / `download`,我们自己的,Python 侧无对应 |
