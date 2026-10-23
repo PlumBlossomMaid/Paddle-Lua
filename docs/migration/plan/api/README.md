@@ -38,6 +38,9 @@
 | `paddle.utils` | P4 | `utils.md` | `fs` / `download`,我们自己的,Python 侧无对应 |
 | `paddle.pl` | P4 | — | 暴露 vendored Penlight(foundations §1.3) |
 
+**★ 顶层 `paddle` 命名空间的迁移清单**:`inventory.md` —— 机器分桶(`python/paddle/__init__.py` 的 `__all__` 551 项 × yaml 算子表):
+**直接绑定 196 / LEGACY 17 / Lua 侧重设计或放放 328 / 跳过 10**。它是各模块 api 文档开工前的路书,按它决定顺序。
+
 **明确不做的模块**(理由见 `plan/overview.md` §2.2):
 
 | | 替代 |
