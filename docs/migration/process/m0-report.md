@@ -397,3 +397,63 @@ numpy 再 pickle),而 `paddle.load` 返回的是 `paddle.Tensor`,与纯 Lua 读
 - 后续路线(roadmap R2–R5):writer(picker)→ numpy 类型接 Insight7 →
   registry 白名单/security → rockspec 打包 + CI。Insight7 的 0-d Lua
   入口(`ins.scalar` + `item()` 严格 ndim 检查)延后建设,不阻塞。
+
+---
+
+## 16. T-M0-14:`x[::-1]` 走 strided_slice 是 view 不是 copy(auto grad 可用)
+
+### 16.1 任务与结论
+
+对应 `process/tasks.md` 的 T-M0-14。问题是:Python `__getitem__` 在
+`step != 1` 时选择 `strided_slice`(`variable_index.py:409-415`),eager 层这个
+算子是 **view(共享 buffer)** 还是 **copy(新分配)**?以及 `egr::Backward` 能否
+穿透它。
+
+| 验收项 | 结果 |
+|---|---|
+| 是 view 还是 copy | ✅ **view** —— **旧记录"copy 语义"是错的**,那是 fallback 路径 |
+| autograd 梯度是否流通 | ✅ `seed=[1,2,3,4]` → `x.grad=[4,3,2,1]` |
+| 实测程序 | `tools/smoke/smoke_strided_slice.cc`,输出 `SMOKE PASS` |
+
+### 16.2 证据链(全部 file:line)
+
+**为什么是 view:**
+
+1. `FLAGS_use_stride_kernel` **默认 true**(`paddle/phi/core/kernel_factory.cc:31`
+   `PHI_DEFINE_EXPORTED_bool(use_stride_kernel, true, ...)`)—— eager 层默认启用
+   STRIDED 系 kernel。
+2. STRIDED kernel 的实现就是 view:
+   ```cpp
+   // paddle/phi/kernels/stride/strided_slice_kernel.cc:95-99
+   out->set_meta(meta);                    // 只改 offset/dims/strides
+   out->ResetHolder(input.Holder());       // 共享 input 的 buffer!
+   out->ShareInplaceVersionCounterWith(input);
+   ```
+3. 实测三个证据:① `py == px + 12 字节`(offset 恰为 3 个 float32);② **写穿透**:
+   `py[0] = 99` 后 `px[3] == 99`(同一块内存);③ 逻辑值 `y[i] == x[3-i]`。
+
+**为什么旧记录错了:** `funcs/strided_slice.h:266-281` 的 `StridedSliceCompute`
+(`Alloc<T>(out)` + Eigen `stridedSlice` 拷贝)确实是 copy,但那是
+`FLAGS_use_stride_kernel=false` 时的 fallback;默认路径被 STRIDED kernel 顶替。
+
+**autograd 可用:** `strided_slice_ad_func`(`dygraph_functions.h:1038`)与
+`strided_slice_grad_ad_func`(`dygraph_grad_functions.h:656`)都存在;
+`egr::Backward({y}, {seed})`(`backward.h:26-31`)实测正确。
+
+### 16.3 对绑定层/API 设计的影响
+
+- **`Tensor.__getitem__` 的切片是 view**—— 与 numpy 语义一致,用户在 Lua 侧
+  `x["::-1"]` 之后修改 view 会改到原张量。API 文档必须写明,不能当 copy 迁移。
+- 不需要手工区分 kernel:绑定走 `strided_slice_ad_func` 即可,view 语义自动继承。
+- 迁移 Python `x[::-1]` 的 1-based 转换:参数起点/终点传 `axis-1` 后的负步长,
+  具体映射仍由 `index_semantics.lua` 标注表负责。
+
+### 16.4 冒烟构建备注(供重编)
+
+- 链接基线:483 库清单从 `build.ninja` 的 `paddle_inference_c_shared`
+  LINK_LIBRARIES 提取(见本报告 §2);**必须补 `/LIBPATH:E:\code\Paddle\build-nopy`**
+  (`libonednn.lib`/`libcblas.lib` 在 build-nopy 根部)与 `/FORCE:MULTIPLE`。
+- **缺 DEFINES 会编译失败**(C2236):`interface_support.h:27` 需要
+  `-DPHI_INNER -DSTATIC_IR -DPADDLE_NO_PYTHON` 等 35 个宏。
+- **运行时 DLL 路径**:`paddle\phi`、`paddle\common`、`third_party\install\onednn\bin`
+  (mkldnn.dll)、`third_party\install\mklml\lib`(libiomp5md.dll)—— 缺则 0xC0000005。
