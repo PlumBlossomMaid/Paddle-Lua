@@ -457,3 +457,47 @@ numpy 再 pickle),而 `paddle.load` 返回的是 `paddle.Tensor`,与纯 Lua 读
   `-DPHI_INNER -DSTATIC_IR -DPADDLE_NO_PYTHON` 等 35 个宏。
 - **运行时 DLL 路径**:`paddle\phi`、`paddle\common`、`third_party\install\onednn\bin`
   (mkldnn.dll)、`third_party\install\mklml\lib`(libiomp5md.dll)—— 缺则 0xC0000005。
+
+---
+
+## 17. T-M0-15:`OpProtoHolder` 链在 `WITH_PYTHON=OFF` 下可用
+
+### 17.1 任务与结论
+
+对应 `process/tasks.md` 的 T-M0-15。问题是:Python 侧 `OpProtoHolder`
+(算子原型注册表,`paddle.base.framework`)这条链在无 Python 构建里是否可用——
+即 Lua 侧能否拿到每个算子的 `OpProto`(参数/输入/输出 schema)。
+
+| 验收项 | 结果 |
+|---|---|
+| C++ 底层链(`OpInfoMap`)在 build-nopy 有无定义 | ✅ **有**,`libop_info.lib`/`libop_registry.lib` 均导出 External 定义 |
+| 是否依赖 pybind | ❌ 不依赖。Python 的 `OpProtoHolder` 只是 pybind 薄壳,核心是纯 C++ |
+| Lua 侧等价实现路径 | ✅ 直接调 `OpInfoMap::Instance()` 遍历(见 §17.2) |
+
+### 17.2 证据链(全部 file:line)
+
+1. Python 侧 `OpProtoHolder` 类定义于 `python/paddle/base/framework.py:3202`;其
+   `__init__` 调 `get_all_op_protos()`(`framework.py:3187`),该函数调
+   `core.get_all_op_protos()`(pybind 绑定,`pybind.cc:2591`)。
+2. pybind 绑定实现(`pybind.cc:2591-2603`)= 遍历 `OpInfoMap::Instance().map()`,
+   对每个 `info.HasOpProtoAndChecker()` 的算子做 `Proto().SerializeToString()`。
+   **整段逻辑不涉及 Python 运行时的特有能力,纯 C++ 可等价复制。**
+3. C++ 侧类型:`OpInfo`(`op_info.h:42`,含 `proto_`/`checker_` 与
+   `HasOpProtoAndChecker()` :64、`Proto()` :71)、`OpInfoMap`
+   (`op_info.h:139`,singleton + `map()`/`Get()`/`Has()`);
+   `OpInfoMap::Instance()` 定义于 `op_info.cc:22`。
+4. **无 Python 环境同链已被上游自己使用**:`custom_operator.cc:1270-1275`
+   (自定义算子注册)直接 `OpInfoMap::Instance().Insert(...)`——这是
+   `WITH_PYTHON=OFF` 也编译的路径,证明该链无 pybind 依赖。
+5. build-nopy 实测(dumpbin /symbols):
+   - `libop_info.lib`:`?Instance@OpInfoMap@framework@paddle@@SAAEAV123@XZ`
+     **SECT244 External 定义**
+   - `libop_registry.lib`:`?Get@OpInfoMap@...` SECT614 External 定义
+
+### 17.3 对绑定层/生成器的意义
+
+- **生成器不需要运行期 OpProto**:schema 已在构建期从 yaml 拿到(C8/R42)。
+- **需要运行期查询的场景**(自定义算子、`jit::TranslatedLayer` 反向翻译 op 时拿
+  proto 校验,上游 Python 侧 `translated_layer.py:557-559` 就是这么用的):
+  Lua 侧写一个等价小 C ABI 函数(遍历 `OpInfoMap` + SerializeToString),
+  即可替代 Python 的 `OpProtoHolder`。这条链已被本项验证,无需补丁。

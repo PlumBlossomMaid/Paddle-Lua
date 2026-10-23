@@ -88,7 +88,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 12 | ~~sol2 + Lua 5.5~~ | ✅ 已完成:不支持,5.5 出局 |
 | 13 | ~~Lanes 可选依赖~~ | ✅ 已决策:强制依赖 |
 | 14 | `x["::-1"]` 走 `strided_slice` 是否 view | ✅ **DONE(2026-10-23)**:`tools/smoke/smoke_strided_slice.cc` 实测 PASS —— **是 view,不是 copy**(旧记录"拷贝语义"是错的,那是 fallback 路径)。`FLAGS_use_stride_kernel` 默认 true(`kernel_factory.cc:31`),STRIDED kernel `out->ResetHolder(input.Holder())`(`stride/strided_slice_kernel.cc:95-99`);实测 `py==px+12B` + 写穿透 `px[3]` 随 `py[0]` 变。autograd 正常(seed=[1,2,3,4] → `x.grad=[4,3,2,1]`,`egr::Backward`)。详见 `m0-report.md` §16 |
-| 15 | `WITH_PYTHON=OFF` 下 `OpProtoHolder` 链 | ⬜ |
+| 15 | `WITH_PYTHON=OFF` 下 `OpProtoHolder` 链 | ✅ **DONE(2026-10-23)**:**可用,不依赖 pybind**。Python 侧 `OpProtoHolder`(`framework.py:3202`)只是 pybind 薄壳(`pybind.cc:2591` 遍历 `OpInfoMap`),C++ 侧 `OpInfo`/`OpInfoMap` 纯 C++(`op_info.h:42/139`);上游无 Python 环境路径自己就用它(`custom_operator.cc:1270`);build-nopy dumpbin 实测 `libop_info.lib`/`libop_registry.lib` 均导出 External 定义。Lua 侧写等价 C ABI 即可替代,无需补丁。详见 `m0-report.md` §17 |
 | 16 | `WITH_PYTHON=OFF` 下 `new_executor`/`jit` 可链接 | ⬜ 与 #1 合并做 |
 | 17 | `jit::Layer Load()` 加载 `jit.save` 产物 | ⬜ |
 | 18 | 手工构造 `AttributeMap` 喂 `run_program_ad_func` | ⬜ |
