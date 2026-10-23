@@ -30,7 +30,7 @@
 | `paddle.nn.initializer` | P9 | `nn-initializer.md` ✅ | 随机数必须走 Paddle 的生成器。可调用对象约定 + 核心初始化器(Normal/Uniform/Xavier/Kaiming)契约已定;旧名别名不搬(2026-10-23) |
 | `paddle.optimizer` | P10 | `optimizer.md` ✅ | 优化器 + `paddle.optimizer.lr` 调度器。Optimizer 基类 + SGD/Momentum/Adam/AdamW 契约已定;`step()` 在 `backward()` 后调用 + `clear_grad()` 四行循环写死(2026-10-23) |
 | `paddle.io` | **P11** | `io.md` | ★ **本目录的样板文档** |
-| `paddle.dataset` | P12 | `dataset.md` | MNIST / CIFAR … |
+| `paddle.dataset` | P12 | `dataset.md` ✅ | MNIST / CIFAR …。上游是静态图 reader 生成器(`__all__=[]`),Lua 侧适配成 `io.Dataset`;MNIST label 1-based 是 M1 验收对齐点(2026-10-23) |
 | `paddle.vision` | P12 | `vision.md` | `transforms` / `models` / `datasets` |
 | `paddle.jit` | P8/P15/P18 | `jit.md` ✅ | `load`(P8)/ `trace`(P15)/ `script`(P18)分三批。`load` C++ 侧已由 T-M0-17 验证;已知链接缺口(GetFeedTargetNames shim)+ Q-24(fc/oneDNN)已记录(2026-10-23) |
 | `paddle.amp` | 延后 | — | 未排期 |

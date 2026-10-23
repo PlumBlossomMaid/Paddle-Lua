@@ -145,7 +145,8 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `plan/api/nn-initializer.md` | — | ✅ **新增(2026-10-23)**:`paddle.nn.initializer` 契约(可调用对象 + Normal/Uniform/Xavier/Kaiming/Constant 等);随机数必须走 Paddle 生成器;旧 `*Initializer` 别名不搬 |
 | `plan/api/optimizer.md` | — | ✅ **新增(2026-10-23)**:`paddle.optimizer` 契约(Optimizer 基类 + SGD/Momentum/Adam/AdamW + lr 调度器);`step()` 在 `backward()` 后 + `clear_grad()` 四行循环写死;weight_decay 语义 AdamW 解耦 vs Adam 耦合 |
 | `plan/api/jit.md` | — | ✅ **新增(2026-10-23)**:`paddle.jit` 契约(load P8 / trace P15 / script P18);`load` 链 T-M0-17 实证(serializer.h:78);链接缺口 shim + Q-24(fc/oneDNN)已记录;save 不做(Lua 导出走 SaveTensor) |
-| `plan/api/<其余 4 个模块>` | — | ⬜ 各模块开工时写 |
+| `plan/api/dataset.md` | — | ✅ **新增(2026-10-23)**:`paddle.dataset` 契约(12 子模块 + mnist/cifar 首批);上游 reader 生成器(`__all__=[]`)适配成 `io.Dataset`;MNIST label 1-based 是 M1 验收对齐点;IDX 解析需逐字节对拍 |
+| `plan/api/<其余 3 个模块>` | — | ⬜ 各模块开工时写 |
 | `plan/modules/README.md` | 70 | ✅ |
 | `plan/modules/00-build.md` | 115 | ✅ |
 | `plan/modules/01-c-abi.md` | 150 | ✅ |
