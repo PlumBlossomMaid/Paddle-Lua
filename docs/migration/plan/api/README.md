@@ -35,7 +35,7 @@
 | `paddle.jit` | P8/P15/P18 | `jit.md` ✅ | `load`(P8)/ `trace`(P15)/ `script`(P18)分三批。`load` C++ 侧已由 T-M0-17 验证;已知链接缺口(GetFeedTargetNames shim)+ Q-24(fc/oneDNN)已记录(2026-10-23) |
 | `paddle.amp` | 延后 | — | 未排期 |
 | `paddle.distributed` | P17 | `distributed.md` | ⛔ 无环境,写得了测不了 |
-| `paddle.utils` | P4 | `utils.md` | `fs` / `download`,我们自己的,Python 侧无对应 |
+| `paddle.utils` | P4 | `utils.md` ✅ | `fs` / `download`。**修正旧说法**:上游确有此模块(`utils/__init__.py:13-30`,挂 download/dlpack/image_util 等),只有 `fs` 是我们新增;`decorator_utils` 整层不移植(D35)(2026-10-23) |
 | `paddle.pl` | P4 | — | 暴露 vendored Penlight(foundations §1.3) |
 
 **★ 顶层 `paddle` 命名空间的迁移清单**:`inventory.md` —— 机器分桶(`python/paddle/__init__.py` 的 `__all__` 551 项 × yaml 算子表):
