@@ -605,3 +605,62 @@ numpy 再 pickle),而 `paddle.load` 返回的是 `paddle.Tensor`,与纯 Lua 读
 - 已知边界:空 program 走到的是预期失败路径;真实 `pir::Program` 的构造
   与执行仍依赖 model 文件(见 T-M0-17),`forward_program` 非空时的完整链路
   留待 P16 落地时再验。
+
+---
+
+## 20. T-M0-19:`SaveTensor`/`LoadTensor` 格式稳定性(往返 + 版本 + 幂等)
+
+### 20.1 任务与结论
+
+对应 `process/tasks.md` 的 T-M0-19。问题是:`paddle.save/load` 单张量路径
+(D19:先走 `SaveTensor`/`LoadTensor`)的磁盘格式在 `WITH_PYTHON=OFF` 下
+是否稳定、可往返、可重存字节一致(无时间戳/随机性)?这决定 Lua 侧
+`paddle.save{...}` / `paddle.load{...}` 能否直接以它为线格式,以及
+Lua 保存的文件能否被 Python 侧读回(互通)。
+
+| 验收项 | 结果 |
+|---|---|
+| `SaveTensor`/`LoadTensor` 符号可链接 | ✅ 冒烟链接成功(483 库基线),`libpaddle_framework` 含定义 |
+| 往返(存→读)shape/dtype/data 全一致 | ✅ 2x3 float32,6 元素逐位相等 |
+| 格式带版本号(可演进) | ✅ 字段 1 = uint32 version = 0(`dense_tensor_serialize.cc:69`/`dense_tensor_tostream.cc:100`) |
+| 重存字节一致(无时间戳/随机性) | ✅ 两次 `SaveTensor` 输出 `file_size=50` 逐字节相同 |
+| Python 侧 `paddle.save/load` 走同一条链 | ✅ `pybind/io.cc:140` `load_dense_tensor` = `framework::LoadTensor`(D19 成立) |
+
+**结论:格式稳定,链可用。** 无 Python 构建下 `SaveTensor`/`LoadTensor`
+完整往返无损,版本字段固定为 0,重存字节级幂等 —— Lua 侧可以直接把它
+当 `paddle.save/load` 的线格式,C ABI 层只需 `capi_save_tensor(tensor,
+path)` / `capi_load_tensor(path) -> tensor` 两个函数。
+
+### 20.2 证据链(全部 file:line)
+
+- **入口**:`SaveTensor(const DenseTensor&, const std::string&, bool overwrite)`
+  / `LoadTensor(const std::string&, DenseTensor*)`(`framework/io/save_load_tensor.h:20-24`)。
+- **实现 = phi 序列化薄壳**:`SaveTensor` 打开文件后 `phi::SerializeToStream(fout, x)`;
+  `LoadTensor` 打开文件后 `phi::DeserializeFromStream(fin, out)`
+  (`save_load_tensor.cc:24-45`)。
+- **DenseTensor 格式**(`phi/core/framework/dense_tensor_serialize.cc`):
+  字段 1 = `uint32_t` 版本(常量 0,`:69`);字段 2 = LoD(`uint64_t` 级数 +
+  每级 `uint64_t` 字节数 + 数据,`:71-81`);字段 3 = `TensorToStream`。
+- **TensorToStream 格式**(`phi/core/framework/dense_tensor_tostream.cc:97-228`):
+  `uint32_t` 版本 0 + `int32_t` proto 字节数 + `proto::VarType::TensorDesc`
+  (dtype + dims)+ 原始数据;写前 `ensure_contiguous`(非连续张量先
+  `InnerTensorContiguous`,`:99-107`);CPU 直接 `os.write`,`:221-227`。
+- **反序列化校验**:版本必须为 0(`dense_tensor_serialize.cc:133-140` /
+  `dense_tensor_tostream.cc:234-240`),LoD 字节数必须是 `sizeof(size_t)`
+  倍数(`:153-157`)。损坏文件会在 C++ 层报错,不会静默产出坏张量。
+- **Python 互通确认**:`pybind/io.cc:140` `load_dense_tensor(path)` =
+  `paddle::framework::LoadTensor(path, &tensor_load)`;`save_dense_tensor_to_memory`
+  = `phi::SerializeToStream(ss, tensor)`(`io.cc:120-126`)。
+- **实测输出**:`SMOKE PASS: round-trip ok (dims/dtype/data), version=0,
+  file_size=50, re-save byte-identical` —— exit 0。
+
+### 20.3 对绑定层的意义
+
+- **线格式已定**:`paddle.save`/`paddle.load`(单张量)直接用 `SaveTensor`/
+  `LoadTensor`,无需 pickle(T-M0-11 的纯 Lua unpickler 降级为 `.pdparams`
+  多变量格式与模型参数场景)。D19 决策被本项验证坐实。
+- **C ABI 面**:`capi_save_tensor` / `capi_load_tensor` 两个函数即可,
+  注意非连续张量会被先拷贝为连续(`dense_tensor_tostream.cc:99-107`)
+  —— Lua 侧 `x["::-1"]` 这类 view(T-M0-14)保存时会实体化,语义正确。
+- **错误路径**:文件打不开 / 版本不对 / LoD 损坏都在 C++ 层抛
+  `PADDLE_ENFORCE`(C7 要求 C++ 异常不得穿过 Lua,中间层要转码)。
