@@ -26,7 +26,7 @@
 | `paddle.scope` | P6/P14 | `scope.md` ✅ | 显存作用域,gc.md 九层里唯一用户可见的一层。**上游无此 API,纯 Lua 设计**(gc.md §4 第 6 层);逃逸保守策略 + 默认阈值待 P6 实测(2026-10-23) |
 | `paddle.linalg` | P5 | `linalg.md` ✅ | 绝大部分是生成的算子的重导出。核心分解/范数/转置契约已定;`svd/lstsq/slogdet` 仅存在于 `linalg` 子模块(2026-10-23) |
 | `paddle.nn` | **P9** | `nn.md` ✅ | 40 个层 + 容器 + 损失。基类/容器/核心层(Linear/Conv/Embedding/损失)契约已定;Embedding/CrossEntropyLoss 的 index 1-based 是 C4 对齐关键(2026-10-23) |
-| `paddle.nn.functional` | P9 | `nn-functional.md` | 多数是对 `_ops` 的一行转发 |
+| `paddle.nn.functional` | P9 | `nn-functional.md` ✅ | 多数是对 `_ops` 的一行转发。激活/丢弃/池化核心签名已定;`_` in-place 变体随生成器;与顶层同名函数同一绑定(2026-10-23) |
 | `paddle.nn.initializer` | P9 | `nn-initializer.md` | 随机数必须走 Paddle 的生成器 |
 | `paddle.optimizer` | P10 | `optimizer.md` | 优化器 + `paddle.optimizer.lr` 调度器 |
 | `paddle.io` | **P11** | `io.md` | ★ **本目录的样板文档** |
