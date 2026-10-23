@@ -550,3 +550,58 @@ numpy 再 pickle),而 `paddle.load` 返回的是 `paddle.Tensor`,与纯 Lua 读
   目录归属)—— 这属于 P8 jit 模块的已知前置。
 - forward 的 fc/oneDNN 兼容问题与 `paddle.jit.save` 的导出模型构成强相关:
   绑定层文档要提示「新导出产物优先」。
+
+---
+
+## 19. T-M0-18:手工构造 `AttributeMap` 喂 `run_program_ad_func`(WITH_PYTHON=OFF)
+
+### 19.1 任务与结论
+
+对应 `process/tasks.md` 的 T-M0-18。问题是:P15/P16 静态图路径(D16/D17)的
+入口 `egr::to_static::run_program_ad_func` 输入是纯 C++ 类型(`vector<Tensor>`,
+`vector<Scope*>`, `AttributeMap`)。Lua 侧没有 Python,能不能**手工构造**
+`AttributeMap` 把这个函数喂起来?`AttributeMap` 里的值类型
+(`Attribute = paddle::variant<...>`)能否不经 pybind 直接填?
+
+| 验收项 | 结果 |
+|---|---|
+| `run_program_ad_func` 符号可链接 | ✅ libeager_to_static.lib 解析,冒烟链接成功(483 库基线) |
+| 手工构造 `AttributeMap`(含 `pir::Value` 向量 / `shared_ptr<pir::Program>`)可编译 | ✅ 直接 `prog_attrs["program_id"] = ...` 赋值,无 pybind 参与 |
+| 调用到达 C++ 逻辑、不泄漏 pybind 错误 | ✅ 实测:空 program 触发 C++ Traceback(预期错误),输出非 pybind/python 字样 |
+
+**结论:链可用。** 手工拼出的 `AttributeMap` 一路走到 `run_program_impl.cc`
+的 C++ 逻辑(在空 program 上按预期失败),证明 `WITH_PYTHON=OFF` 构建里
+这个入口对纯 C++ 调用方完全敞开 —— P16 静态图运行时不需要 Python 参与构造
+运行时参数。
+
+### 19.2 证据链(全部 file:line)
+
+- **入口签名**:`run_program_ad_func(const std::vector<egr::Tensor>& inputs,
+  const std::vector<egr::Tensor>& params, std::vector<paddle::framework::Scope*>
+  step_scope, const paddle::framework::AttributeMap& prog_attrs,
+  const paddle::framework::AttributeMap& cuda_graph_attrs)`(`run_program_func.h:24-28`)。
+- **`AttributeMap` / `Attribute` 定义**:
+  `Attribute = variant<bool, int, int64_t, float, double, std::string, std::vector<bool>,
+  std::vector<int>, std::vector<int64_t>, std::vector<float>, std::vector<double>,
+  std::vector<std::string>, std::vector<pir::Value>, std::vector<BlockDesc*>,
+  int8_t, int16_t, BlockDesc*, std::shared_ptr<pir::Program>>`(`type_defs.h:51`);
+  `AttributeMap = unordered_map<std::string, Attribute>`(`type_defs.h:73`)。
+- **`RunProgramImpl` 消费的键**(冒烟按此构造,冒烟源码头注释完整列出):
+  `is_test`/`program_id`/`in_sot_mode`/`fx_names`/`fp_names`/`fo_names`/
+  `no_need_buffers_names`/`fo_values`/`forward_program`/`backward_program` +
+  `cuda_graph_state`/`cuda_graph_dispatch_key`(`run_program_impl.cc:449-490`)。
+- **外层 scope 要求**:`step_scope` 非空且索引 0 是事件 scope
+  (`run_program_impl.cc:461-466`)。
+- **实测输出**:`SMOKE PASS: hand-built AttributeMap reached C++ logic
+  (expected error for empty program: C++ Traceback ...)` —— exit 0。
+
+### 19.3 对绑定层的意义
+
+- P16 静态图模块的 C ABI 面可以很薄:透传字符串键 + 十几种原子值
+  (variant 的成员类型都是可序列化/可构造的标量与容器),绑定层写一个
+  `capi_set_prog_attr(prog, "is_test", bool)` 家族即可,无需 pybind。
+- 与 T-M0-17 互补:那边证明**读**静态产物可用,这边证明**手搓运行时参数**
+  可用 —— 静态图执行的两半都在无 Python 侧立住了。
+- 已知边界:空 program 走到的是预期失败路径;真实 `pir::Program` 的构造
+  与执行仍依赖 model 文件(见 T-M0-17),`forward_program` 非空时的完整链路
+  留待 P16 落地时再验。
