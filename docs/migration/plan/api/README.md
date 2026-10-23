@@ -75,6 +75,15 @@
 **不做"Lua 风格化"改名。** 用户是冲着 Paddle API 来的,
 `paddle.add_n` 改成 `paddle.addN` 只会让所有 Python 文档失效。
 
+**★ 命名铁律(用户 2026-10-23 拍板,两段式)**:① **一般 API 忠实迁移**——
+Python 里叫什么,Lua 里就叫什么(`paddle.to_tensor` → `paddle.to_tensor`,`paddle.zeros` → `paddle.zeros`)。
+**不改名、不合并、不发明新名字**;api 名字不一样会让用户困惑。② **numpy 特例换 Insight**——
+凡参数类型就是 numpy 对象的,入口名换成 Insight 对应物:唯一典型
+`paddle.from_numpy` → Lua **`paddle.from_insight`**(numpy 在 Lua 生态的位置被 Insight7 顶替,D26;
+参数从 `numpy.ndarray` 换成 `insight.Array`,底层走 DLPack 桥)。这是语义槽位对齐,不是发明新 API。
+**每个导出函数/类方法的签名都走 `argrule` 规则表**(D31);Python 侧为兼容 PyTorch 加的装饰器
+(别名、`size_args`、`variadic` 等)不移植(D35/R33)。
+
 **第二行是硬规则,不是风格偏好。** 我们的调用形式**只有两种**:
 全位置(可以尾部省略)、或者一个具名表。**不允许位置参数中间留空靠类型猜** ——
 Python 不允许,而支持它要付 3^N 的生成代码代价,argcheck 就是死在这上面的
