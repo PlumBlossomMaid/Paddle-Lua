@@ -142,7 +142,8 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `plan/api/scope.md` | — | ✅ **新增(2026-10-23)**:`paddle.scope` 契约——**上游无此 API,纯 Lua 设计**(`gc.md` §4 第 6 层,唯一用户可见的 gc 层);逃逸保守策略 + 默认阈值待 P6 实测 |
 | `plan/api/nn.md` | — | ✅ **新增(2026-10-23)**:`paddle.nn` 契约(Layer 基类/容器/核心层 Linear·Conv·Embedding·损失);Embedding/CrossEntropyLoss 的 index 1-based 是 C4 对齐关键;`Module` 新框架待 P3 拍板 |
 | `plan/api/nn-functional.md` | — | ✅ **新增(2026-10-23)**:`paddle.nn.functional` 契约(37 激活 + dropout/池化/归一化/损失函数);`_` in-place 变体随生成器;`dropout.training` 显式传参、`normalized_shape` 轴范围 1-based |
-| `plan/api/<其余 7 个模块>` | — | ⬜ 各模块开工时写 |
+| `plan/api/nn-initializer.md` | — | ✅ **新增(2026-10-23)**:`paddle.nn.initializer` 契约(可调用对象 + Normal/Uniform/Xavier/Kaiming/Constant 等);随机数必须走 Paddle 生成器;旧 `*Initializer` 别名不搬 |
+| `plan/api/<其余 6 个模块>` | — | ⬜ 各模块开工时写 |
 | `plan/modules/README.md` | 70 | ✅ |
 | `plan/modules/00-build.md` | 115 | ✅ |
 | `plan/modules/01-c-abi.md` | 150 | ✅ |
