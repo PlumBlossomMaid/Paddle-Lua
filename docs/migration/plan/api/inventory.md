@@ -273,6 +273,10 @@
 | `paddle.matmul` (`linalg.py:24-34`) | **纯 re-export**:`from paddle._C_ops import (... matmul ...)`,本体就是绑定算子 | **LEGACY 桶**(`legacy/static_ops.yaml:669`);Lua 侧 `paddle.matmul{x, y, transpose_x, transpose_y}` 生成绑定,签名走 argrule |
 | `paddle.sum` (`math.py:116`) | **纯 re-export**:`from paddle._C_ops import (... sum ...)`,本体就是绑定算子 | **直接绑定**(`sum` 在 `ops.yaml`,见 DIRECT 桶 §1);Lua 侧 `paddle.sum{x, axis, dtype, keepdim}` 生成绑定(`axis` 标 1-based,§2.2) |
 | `paddle.add_n` (`math.py:1994`) | 动态模式一行 `_C_ops.add_n(inputs)`(`:2052`);静态模式走 `LayerHelper` + `append_op`,对列表逐个 check | **直接绑定 + 一个 Lua 适配**:底层 `add_n` 算子对接(不在顶层 yaml,核实 `_C_ops.add_n` 为 pybind 手工绑定,P3 时评估);`inputs` 参数用 `TensorList` 类型(`api/README.md` §2.1 首个参数为列表规则),Lua 侧 `paddle.add_n{ {a,b,c} }` |
+| `paddle.concat` (`manipulation.py:1481`) | 动态模式 `_C_ops.concat(input, axis, out=out)`(`:1556-1558`);静态模式先 AMP 检查再逐元素 check | **直接绑定**(DIRECT 桶);`axis` 标 1-based;⚠️ 别名 `tensors`/`dim` 在 docstring 里明确写着(`:1494-1496`),D35 不移植——Lua 侧只有 `x`/`axis` |
+| `paddle.stack` (`manipulation.py:2170`) | 动态模式 `_C_ops.stack(x, axis, out=out)`(`:2327-2328`);静态模式走 DENSE_TENSOR_ARRAY 特判 | **直接绑定**(DIRECT 桶);`axis` 标 1-based;同名别名 `tensors`/`dim` 不移植(D35) |
+| `paddle.transpose` (`manipulation.py:636`) | 动态模式 `_C_ops.transpose(x, perm)`(`:697`);静态模式 check 后 append_op | **直接绑定**(DIRECT 桶);参数名 `perm`(Paddle 原生,非 PyTorch `dims`),Lua 侧 `paddle.transpose{x, perm}` |
+| `paddle.reshape` (`manipulation.py:5513/5517/5521`) | **三重签名**:`reshape(x, shape)` + `reshape(input, *shape)`(变长)+ 实体 `@reshape_decorator`;动态模式 `_C_ops.reshape(x, new_shape)`(`:5648-5649`),`new_shape == x.shape` 时直接返回 x | **直接绑定 + 一个 Lua 适配**:变长签名 `reshape(2,3)` 是 `decorator_utils` 兼容糖(D35 不移植)——Lua 侧只有 `reshape{x, shape}`;`shape` 用 `IntList`(`api/README.md` §2.1.2);返回值与 Python 一样**共享内存**(docstring `:5524-5527` 明说 "output Tensor will share data with origin Tensor") |
 
 **抽样结论:创建类在 Python 侧是"装饰器 + 一行转发",真实现全在 `_C_ops`/`_to_tensor_non_static` 里。** 名字按命名铁律处理(一般忠实迁移、numpy 特例换 Insight);同一底层可以供多个入口共用。Lua 侧每个导出函数/方法都有一张 `argrule` 规则表,签名与 Python 规范签名逐字对齐(`plan/api/README.md` §2.1);PyTorch 兼容装饰器相关参数(别名、`size_args`、`variadic`)不移植(D35)。
 
