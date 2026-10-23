@@ -249,6 +249,29 @@
 > (索引解析/形状推断/装饰器) → 按 Lua 特性重写(**先做出来再谈优化**,D35 兼容糖不移植);
 > ③ 依赖 Python 运行时(pybind 壳、`paddle.static` 程序、DLPack capsule)→ 先放放。
 
+### 3.1 已抽查核心成员的三态去向(2026-10-23,修订)
+
+> 抽查判据:`既然底层是 X,Lua 侧就抄 X`。出处均为上游源码,不是印象。
+>
+> **★ 命名铁律(用户 2026-10-23 拍板,两段式)**:
+> ① **一般 API 忠实迁移**:Python 里叫什么,Lua 里就叫什么——`paddle.to_tensor` → Lua `paddle.to_tensor`,
+> `paddle.zeros` → `paddle.zeros`。**不改名、不合并、不发明新名字**(如 `paddle.tensor` 收敛之类一律不做),api 名字不一样会让用户困惑。
+> ② **numpy 特例换 Insight**:**凡参数类型就是 numpy 对象的,入口名换成 Insight 对应物** ——
+> 唯一典型 `paddle.from_numpy` → Lua **`paddle.from_insight`**(numpy 在 Lua 生态的位置被 Insight7 顶替,D26;
+> 参数从 `numpy.ndarray` 换成 `insight.Array`)。这是"语义槽位对齐",不是发明新 API。
+> 每个导出函数/类方法的签名都走 `argrule` 规则表(D31);Python 侧为兼容 PyTorch 加的
+> 装饰器(别名、`size_args`、`variadic` 等)不移植(D35/R33)。
+
+| 名字 | 上游实现体 | 去向 |
+|---|---|---|
+| `paddle.tensor` (`creation.py:1009`) | 动态模式走 `_to_tensor_non_static`(`:1121`),静态模式走 `_to_tensor_static`(`:1125`) | **Lua 同名忠实迁移** `paddle.tensor{data, dtype, place, requires_grad}`;签名走 argrule;数据→Tensor 的构造逻辑在 Lua 侧实现(数组→`full` 或 DLPack,标量→0-d) |
+| `paddle.to_tensor` (`creation.py:1201`) | 实现体就一行:`return tensor(data, dtype=dtype, device=place, requires_grad=not stop_gradient)`(`:1205`) | **Lua 同名独立入口** `paddle.to_tensor{data, dtype, place, stop_gradient}`——名字照搬,不合并 |
+| `paddle.from_numpy` (`creation.py:1208`) | 实现体:`return tensor(ndarray)`(`:1230`) | **numpy 特例换 Insight** → Lua `paddle.from_insight{array}`——参数从 `numpy.ndarray` 换 `insight.Array`,底层走 DLPack 桥(Insight7/lua-pickle 已就绪) |
+| `paddle.zeros`/`ones`/`full`/`full_like` | 装饰 `@size_args_decorator`(`creation.py:1807/1621/1378/1380`),内核走 `_C_ops.zeros/ones/full/full_like` | **直接绑定**(已在 DIRECT 桶);`size_args` 装饰器不移植(D33),Lua 侧 `zeros{2,3}` 直接生成绑定 |
+| `paddle.add` (`math.py:723`) | 动态模式一行 `_C_ops.add(x, scaled_y, out=out)`(`:802`);静态模式走 `LayerHelper` + `append_op` | **直接绑定**;`alpha` 参数 → Lua 侧 `add{x,y,alpha}` 生成绑定处理,`out` 暂不做(Q-19) |
+
+**抽样结论:创建类在 Python 侧是"装饰器 + 一行转发",真实现全在 `_C_ops`/`_to_tensor_non_static` 里。** 名字按命名铁律处理(一般忠实迁移、numpy 特例换 Insight);同一底层可以供多个入口共用。Lua 侧每个导出函数/方法都有一张 `argrule` 规则表,签名与 Python 规范签名逐字对齐(`plan/api/README.md` §2.1);PyTorch 兼容装饰器相关参数(别名、`size_args`、`variadic`)不移植(D35)。
+
 | 名字 |
 |---|
 | `BFloat16Tensor` |
