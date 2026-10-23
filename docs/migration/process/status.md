@@ -148,7 +148,8 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `plan/api/dataset.md` | — | ✅ **新增(2026-10-23)**:`paddle.dataset` 契约(12 子模块 + mnist/cifar 首批);上游 reader 生成器(`__all__=[]`)适配成 `io.Dataset`;MNIST label 1-based 是 M1 验收对齐点;IDX 解析需逐字节对拍 |
 | `plan/api/vision.md` | — | ✅ **新增(2026-10-23)**:`paddle.vision` 契约(datasets 类/MNIST·FashionMNIST 首批 + models/transforms 分批);验证 `vision.datasets.MNIST` 是 `io.Dataset` 类(非 reader);图像后端按 §9.1 决策;ToTensor 是 Insight→Tensor 边界 |
 | `plan/api/utils.md` | — | ✅ **新增(2026-10-23)**:`paddle.utils` 契约(download/dlpack/deprecated/run_check/require_version/try_import + **新增 fs**);**纠正 `api/README.md` 旧说法**(上游确有此模块,`utils/__init__.py:13-30`);`decorator_utils` 整层不移植(D35) |
-| `plan/api/<其余 1 个模块>` | — | ⬜ 各模块开工时写 |
+| `plan/api/distributed.md` | — | ✅ **新增(2026-10-23)**:`paddle.distributed` 契约级文档(集合通信/parallel 环境/数据并行形态;⛔ 无环境,实现与验收挂起);rank 语义是 C4 唯一冲突候选,P17 拍板 |
+| `plan/api/<其余 0 个模块>` | — | ⬜ 全部完成(除 amp 未排期无文档) |
 | `plan/modules/README.md` | 70 | ✅ |
 | `plan/modules/00-build.md` | 115 | ✅ |
 | `plan/modules/01-c-abi.md` | 150 | ✅ |
