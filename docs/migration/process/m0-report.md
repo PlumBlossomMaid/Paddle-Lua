@@ -7,6 +7,40 @@
 
 ---
 
+## 0. G1 验收总表(2026-10-23 开闸依据)
+
+> **结论:G1 闸门通过(2026-10-23)。** M0 必做 17 项全部完成,允许进入 M1。
+> 各详细节的证据链见对应小节,此处只列结论与出处,不重复论证。
+
+| # | 必做项(17) | 状态 | 证据 |
+|---|---|---|---|
+| 1 | `WITH_PYTHON=OFF`+`ON_INFER=OFF` 编译(**#16 合并于此**:`new_executor`/`jit` 链接面已在 #17/#18 冒烟验证) | ✅ 2026-10-22 | §2/§3(5195 files,5 验收符号全导出) |
+| 2 | 该配置下 `egr::Backward` 跑通反向 | ✅ 2026-10-22 | §4(`SMOKE PASS: a.grad==4.0, b.grad==3.0`) |
+| 3 | phi kernel / DeviceContext 多线程安全 | ✅ 2026-10-22 | §5(`smoke_mt.cc`,1800 次完整图全 PASS) |
+| 4 | Lanes v3.17.x deep API 与 4.x 差异 | ✅ 2026-10-22 | §9(`__lanesclone` 两版调用约定一致) |
+| 5 | Lanes 与绑定的 C++ ABI 一致性 | ✅ 2026-10-22 | §10(`LANES ABI OK`;纯 C,无虚函数 ABI 问题) |
+| 6 | Lanes `on_state_create` 钩子 | ✅ 2026-10-22 | §9/§10(v3.17.2 `state.h:19-20` / 4.x `state.cpp:212`) |
+| 7 | `RegisterOOMCallback`+`lua_gc` 救回 OOM | ✅ 2026-10-22 | §11(`oom_smoke.cc` PASS;`offload_retry_times` 默认 -1) |
+| 8 | LuaJIT GC64 确认 | ✅ 2026-10-22 | §12(`lua_gc64_check.lua`,16-byte GC64 layout) |
+| 9 | `__close` 对 userdata(5.4) | ✅ 2026-10-22 | §13(**GC 只调 `__gc` 不调 `__close`**,RAII 双挂且幂等) |
+| 10 | 堆追踪 vs Lanes 分配器冲突 | ✅ 2026-10-22 | §14(LuaJIT 下 master allocator 到不了 lane;必须链式转发) |
+| 11 | 纯 Lua pickle 读 `.pdparams` | ✅ 2026-10-23 | §15(`lua-pickle` 独立仓库,读通 326B 样本与 Python 对拍) |
+| 14 | `x["::-1"]` 走 `strided_slice` 是否 view | ✅ 2026-10-23 | §16(**view 不是 copy**,写穿透 + autograd 正常) |
+| 15 | `WITH_PYTHON=OFF` 下 `OpProtoHolder` 链 | ✅ 2026-10-23 | §17(纯 C++,无 pybind 依赖;dumpbin 双库 External) |
+| 17 | `jit::Layer Load()` 加载 `jit.save` 产物 | ✅ 2026-10-23(部分) | §18(可链接可加载;forward 撞上游 fc+oneDNN bug,记 **Q-24**,不阻塞) |
+| 18 | 手工构造 `AttributeMap` 喂 `run_program_ad_func` | ✅ 2026-10-23 | §19(纯 C++ 构造到达 C++ 逻辑,无 pybind 泄漏) |
+| 19 | `SaveTensor`/`LoadTensor` 格式稳定性 | ✅ 2026-10-23 | §20(往返无损、版本=0、重存字节一致;Python 侧同链,D19 成立) |
+
+**不在必做清单内**:#12/#13(决策项,已完成)、#20/#21(可跳过,服务 M4)、
+#22/#23/#24(补充实测,已部分完成,见 `status.md` §4)。
+
+**G1 开启的遗留事项**(都不阻塞):
+- **Q-24**:jit forward 撞上游 fc 算子 + oneDNN bug(`onednn_context.cc:347`),
+  非无 Python 特有;P8 落地时用新导出产物或打补丁(见 §18 与 `open-questions.md`)。
+- `#20/#21`(`string.dump` 往返 / luacheck parser)服务 M4,可跳过,届时补做。
+
+---
+
 ## 1. 任务与验收
 
 对应 `process/tasks.md` 的 T-M0-01(生死判定编译)与 T-M0-02(反向冒烟)。

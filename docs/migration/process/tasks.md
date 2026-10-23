@@ -147,3 +147,8 @@ egr::Backward({y}, {}, false);
 |---|---|---|---|
 | T-M0-01 | 2026-10-22 | 2 天 | 生死判定编译通过(5195 files / 9.90 GB,`build-nopy`),5 验收符号全导出;1 个补丁 0001(C2 满足);详见 `process/m0-report.md` |
 | T-M0-02 | 2026-10-22 | 2 天(与 T-M0-01 并行) | `tools/smoke/smoke.cc` 冒烟 PASS(`a.grad==4.0, b.grad==3.0, max_err=0`),G0 闸门打开 |
+| T-M0-14 | 2026-10-23 | 0.5d | `tools/smoke/smoke_strided_slice.cc` PASS:**eager strided_slice 是 view**(写穿透 + autograd);详见 `m0-report.md` §16 |
+| T-M0-15 | 2026-10-23 | 0.5d | `OpProtoHolder` 链无 pybind 依赖(C++ `OpInfoMap` 纯 C++);详见 `m0-report.md` §17 |
+| T-M0-17 | 2026-10-23 | 1d | `jit::Load` 可链接可加载;发现链接缺口 + fc/oneDNN bug(Q-24);详见 `m0-report.md` §18 |
+| T-M0-18 | 2026-10-23 | 1d | 手工 `AttributeMap` 喂 `run_program_ad_func` PASS;详见 `m0-report.md` §19 |
+| T-M0-19 | 2026-10-23 | 0.5d | `SaveTensor`/`LoadTensor` 往返无损、重存字节一致;详见 `m0-report.md` §20 |

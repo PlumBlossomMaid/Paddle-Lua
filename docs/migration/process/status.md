@@ -9,12 +9,12 @@
 
 ```
 G0  ✅ 已通过(2026-10-22)  WITH_PYTHON=OFF + ON_INFER=OFF 能编出可用 libpaddle
-G1  ⬜ 未开始   M0 全部 17 项必做验证完成
+G1  ✅ 已通过(2026-10-23)  M0 必做 17 项全部完成,产出 M0_REPORT(见 m0-report.md §0)
 G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 ```
 
-**当前允许做的事:仅文档工作 + M0 验证(其余 #3–#21)。**
-**⛔ 不得创建 `csrc/` `lua/` 目录,不得写 rockspec/CMakeLists。**
+**当前允许做的事:M1 全部工作(建 `csrc/` `lua/` 目录、rockspec、CMakeLists)。**
+**⛔ 尚未开 G2:先做 M1 MVP(MNIST 训练收敛)。**
 
 ---
 
@@ -24,12 +24,12 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 
 | | |
 |---|---|
-| 阶段 | **论证 / M0 验证** |
-| 工程树位置 | `WORKPLAN.md` 节点 **1.6 序列化与执行器验证(T-M0-11..19)** —— T-M0-11 ✅(lua-pickle unpickler) |
-| 下一个动作 | **T-M0-14**(`x["::-1"]` 走 `strided_slice` 是否 view + autograd)—— 1.6 里下一个 TODO 且无阻塞前置 |
+| 阶段 | **M1(已开闸)** —— 先搭 `csrc/` C ABI 中间层 + sol2 绑定 + MNIST 收尾 |
+| 工程树位置 | `WORKPLAN.md` 节点 **1.7 参数签名层 / 2. M1 MVP 2.1 C ABI 中间层**(见 `WORKPLAN.md` 🔵) |
+| 下一个动作 | **M1 第一步**(见 `plan/modules/00-build.md`/`01-c-abi.md`):建 `csrc/` C ABI 中间层 + `lua/` 骨架,MINI 训练循环(i.e. 2.1 全部子节点) |
 | 人点名的三件调研 | **① Q-22** phi 层有没有不依赖 pybind 的 DLPack 通道(决定 Insight7 内存协议怎么定);**② 数出「跑通 MNIST 训练,Insight7 至少要哪些函数」**(从上游代码里数,不凭感觉 —— 已知 `python/paddle` 全层只用 132 个 `np.*` 符号、真函数约 15 个,见 `research/ecosystem.md` §5.1);**③ Q-23** Array API Standard 是否如记忆所述(要走代理核实)。三件都**不阻塞** `WORKPLAN` 主线 |
 | 全部 ⛔ 阻塞节点 | `WORKPLAN.md` 4.3 distributed —— 无多卡环境(待拍板 P2) |
-| 待人拍板 | 剩余待拍板:P3 / P4 / P6 / P7(改写)—— 见 `process/decisions.md` §3 §4 |
+| 待人拍板 | 剩余待拍板:P3 / P4 / P6 / P7(改写)+ 1.7 的 P9(Penlight 分发)与 luarocks 占位 —— 见 `process/decisions.md` §3 §4 |
 | 上次卡在哪 | — |
 
 ---
@@ -215,6 +215,10 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 
 | 日期 | 变更 |
 |---|---|
+| 2026-10-23 | **✅ G1 闸门通过,M0 全部 17 项必做完成** —— 补完 T-M0-14/15/17/18/19 五项(#14 strided_slice=view、#15 OpProtoHolder 无 pybind 可用、#17 jit::Load 可链接可加载、#18 手工 AttributeMap 喂 run_program_ad_func、#19 SaveTensor/LoadTensor 格式稳定),前 11 项此前已 DONE。产出 `m0-report.md` §0 G1 验收总表。**当前允许 M1 全部工作**(建 `csrc/`/`lua/`、rockspec、CMakeLists)。遗留(不阻塞):Q-24(fc+oneDNN forward bug)、#20/#21(服务 M4 可跳过)。详见 `process/m0-report.md` §0 |
+| 2026-10-23 | **T-M0-19 DONE:SaveTensor/LoadTensor 格式稳定性**(#19 ✅)。`tools/smoke/smoke_save_load.cc` 实测 PASS(exit 0):2x3 float32 往返无损、version=0、重存字节一致(file_size=50)。格式 = uint32 版本 + LoD + TensorDesc proto + 原始数据(`dense_tensor_serialize.cc:69-81`/`dense_tensor_tostream.cc:97-228`);Python 侧同链(D19 成立)。Lua `paddle.save/load`(单张量)直接以它为线格式。详见 `m0-report.md` §20 |
+| 2026-10-23 | **T-M0-18 DONE:手工构造 AttributeMap 喂 `run_program_ad_func`**(#18 ✅)。`tools/smoke/smoke_run_program.cc` 实测 PASS(exit 0):`AttributeMap` 纯 C++ 构造(`type_defs.h:51/73`),按 `RunProgramImpl` 键全量填充(`run_program_impl.cc:449-490`),空 program 触发预期 C++ Traceback、无 pybind 泄漏。P16 静态图运行时参数可纯 C++ 构造。详见 `m0-report.md` §19 |
+| 2026-10-23 | **T-M0-17 DONE:`jit::Load` 可链接可加载**(#17 ✅)。`tools/smoke/smoke_jit_load.cc` 实测:`libfluid_jit.lib` 导出符号、`.pdmodel/.pdiparams/.meta` 全读入、New 引擎启动。发现 ① 链接缺口(GetFeedTargetNames 在 pybind 目录,冒烟自带 shim);② forward 撞上游 fc+oneDNN bug(记 **Q-24**,非无 Python 特有,不阻塞)。详见 `m0-report.md` §18 |
 | 2026-10-23 | **R42:生成器全 Lua 重写,开发期工具链也零 Python**(人拍板)。原 C9"生成器可用 Python"升级为硬约束:用户要求「代码生成全部用 lua 重新复刻,用户的电脑上面不装 python 也可以用 Paddle」。实测 `ops.yaml` 无锚点/多行标量/合并键 → 纯 Lua 子集解析器 `yaml_subset.lua`(~300 行)可行;Paddle 的 Python 生成器降级为行为参考与 CI 对拍。翻转落地:`AGENTS.md` C9、`03-codegen.md` §1/§2/§3.1/§6、`ci.md` §6 ③④/§7、`layout.md`、`overview.md`、`feasibility.md`、`conventions.md`、`WORKPLAN.md` 2.3.1/2.3.2。唯一保留 Python:`tests/parity/` 对拍基准(CI 校验手段,非用户工具链)。详见 `process/decisions.md` R42 |
 | 2026-10-23 | **T-M0-11 DONE:纯 Lua pickle 读真实 `.pdparams`**(#11 ✅)。unpickler 实现在**独立仓库 `E:\code\lua-pickle`**(rock/模块名 `pickle`,双向可逆,依赖全可选 pcall 探测;分层:认识上游 penlight/Insight7、不认识下游 paddle)。`tools/check.lua` 在本机 Lua 5.1.5 上读通 `m0-11-sample.pdparams`(326B, protocol 4)并与 Python `pickle.load` 权威基准逐字节对拍 PASS。关键实现:68-opcode 栈机对照 CPython `Lib/pickle.py`;numpy 还原对照 numpy 2.4.6 实测(`dtype` REDUCE+BUILD 拼 `<f4`、ndarray `_reconstruct`+5 元组 BUILD);**踩坑:Lua 5.1 `#` 对洞表未定义** —— TUPLE2/3 初版 `stack[#]=nil` 收缩栈致后续 REDUCE 索引错位,改 `table.remove` 修复。CI 框架定案 **busted**(Lua 侧)+ **pytest**(开发期 Python 工具)。详见 `m0-report.md` §15,仓库 `lua-pickle/docs/design.md` |
 | 2026-10-22 | **T-M0-10 DONE:堆追踪 vs Lanes 分配器实测**(#10 ✅)。`tools/smoke/lanes_alloc_check.cc` 输出 `LANES ALLOC PASS`:3 个 lane state 的 allocator 全 != counting_alloc(**LuaJIT 下 master 的自定义 allocator 到不了 lane**,`state.c:253-255`);**陷阱:`lua_setallocf` 必须链式转发原分配器,裸 realloc/free 替换 = 0xC0000374 堆损坏**(vcpkg LuaJIT 是 lua51.dll 自有 CRT 堆)。落地:堆追踪做张量字节计数器与 Lua allocator 无关(详见 `process/m0-report.md` §14)。WORKPLAN **1.5 ✅,** 🔵 移至 **1.6**(T-M0-11..19) |
