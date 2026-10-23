@@ -135,7 +135,8 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `plan/api/README.md` | 361 | ✅ **+新增`top.md` 页** |
 | `plan/api/io.md` | 236 | ✅ **新增**(样板)|
 | `plan/api/top.md` | — | ✅ **新增(2026-10-23)**:顶层 `paddle` 命名空间契约,第一批约 80 个核心成员(创建/算子/归约/索引/逻辑/随机/激活/复数),素材 = `inventory.md` §3.1 抽查表;含 §3 index 语义参数标注表与 §6 本模块坑 |
-| `plan/api/<其余 14 个模块>` | — | ⬜ 各模块开工时写 |
+| `plan/api/tensor.md` | — | ✅ **新增(2026-10-23)**:`paddle.Tensor` 类型契约(核心方法/属性/魔法方法/算子方法挂载机制/字符串索引 D14);上游来源 `tensor_patch_methods.py`/`generated_tensor_methods_patch.py`/`variable_index.py` 全部带 file:line |
+| `plan/api/<其余 13 个模块>` | — | ⬜ 各模块开工时写 |
 | `plan/modules/README.md` | 70 | ✅ |
 | `plan/modules/00-build.md` | 115 | ✅ |
 | `plan/modules/01-c-abi.md` | 150 | ✅ |
