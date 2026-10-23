@@ -139,7 +139,8 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `plan/api/dtype-device.md` | — | ✅ **新增(2026-10-23)**:`paddle.dtype`/`paddle.device` 契约(dtype 常量一套枚举、place 值类型、默认 dtype 全局态、finfo/iinfo);与 Insight7 命名对齐(`foundations.md` §3.2/§3.6.1) |
 | `plan/api/linalg.md` | — | ✅ **新增(2026-10-23)**:`paddle.linalg` 子模块契约(分解/范数/转置族);核实 `python/paddle/linalg` 目录不存在、`paddle.linalg` = `tensor/linalg.py` 再导出(`__init__.py:278`);`svd/lstsq/slogdet` 仅在子模块 |
 | `plan/api/autograd.md` | — | ✅ **新增(2026-10-23)**:`paddle.autograd` 契约(backward/grad/no_grad 等);导出 re-export 自 `base/dygraph/base.py`(`__init__.py:15-21`),backward 在 `backward_mode.py:34`;no_grad 上下文语义待 P6 拍板 |
-| `plan/api/<其余 10 个模块>` | — | ⬜ 各模块开工时写 |
+| `plan/api/scope.md` | — | ✅ **新增(2026-10-23)**:`paddle.scope` 契约——**上游无此 API,纯 Lua 设计**(`gc.md` §4 第 6 层,唯一用户可见的 gc 层);逃逸保守策略 + 默认阈值待 P6 实测 |
+| `plan/api/<其余 9 个模块>` | — | ⬜ 各模块开工时写 |
 | `plan/modules/README.md` | 70 | ✅ |
 | `plan/modules/00-build.md` | 115 | ✅ |
 | `plan/modules/01-c-abi.md` | 150 | ✅ |
