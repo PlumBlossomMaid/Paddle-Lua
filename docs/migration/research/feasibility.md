@@ -74,7 +74,9 @@ if(NOT ((NOT WITH_PYTHON) AND ON_INFER))
 但这个组合大概率**从来没人走过**(官方只有 WITH_PYTHON=ON 训练 / ON_INFER=ON 推理两条路),
 **必须实测,这是 M0 的头号任务。**
 
-> 注:构建期仍需 Python(`eager_gen.py` 等生成器)。这没关系 —— 要消灭的是**运行时** Python。
+> ~~注:构建期仍需 Python(`eager_gen.py` 等生成器)。~~ **已被 R42 推翻(2026-10-23):**
+> 我们的生成器全部 Lua 重写,构建期也没有 Python。Paddle 自己的 `eager_gen.py`
+> 已经编进 libpaddle,Python 生成器只作行为对拍参考。
 
 ### 1.3 "壳"到底有多大
 
@@ -141,12 +143,12 @@ Paddle 自己就是靠 yaml + 代码生成器造 Python API 的,我们复用同�
 |---|---|---|
 | `eager_gen.py` | 3918 | 786 个 `*_ad_func` + 反向节点 |
 | **`python_c_gen.py`** | **1103** | **整个 Python 算子绑定层** |
-| `codegen_utils.py` | 664 | 共用工具(可直接 import) |
+| `codegen_utils.py` | 664 | 共用工具(~~可直接 import~~ **R42:只作行为参照,用 Lua 重写等价功能**) |
 | `monkey_patch_gen.py` | 172 | Tensor 方法挂载 |
 
 > **`python_c_gen.py` 只有 1103 行就生成了 786 个算子的完整 Python 绑定。**
-> 对应的 `lua_c_gen.py`(预计 1500-2500 行)就能生成整个 Lua 算子层。
-> **这是整个项目性价比最高的一步。**
+> 对应的 Lua 生成器 `emit_capi.lua`(预计 1500-2500 行)就能生成整个 Lua 算子层。
+> **这是整个项目性价比最高的一步(R42:全 Lua,零 Python)。**
 
 ---
 
@@ -377,7 +379,7 @@ std::vector<Tensor> Layer::forward(const std::vector<Tensor>& inputs);
 
 ### M1 · 算子层自动生成(1-2 个月)
 
-- `lua_c_gen.py`(1.5k-2.5k 行):从 `ops.yaml` + `python_api_info.yaml`
+- Lua 生成器(`emit_capi.lua` + `emit_lua.lua`,1.5k-2.5k 行,R42 全 Lua):从 `ops.yaml` + `python_api_info.yaml`
   生成 786 算子的 C ABI + Lua wrapper
 - 类型转换层(对应 42 个 `CastPyArg2*`)
 - Tensor 84 个方法 + 属性

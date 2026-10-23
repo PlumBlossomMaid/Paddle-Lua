@@ -389,7 +389,8 @@ numpy 再 pickle),而 `paddle.load` 返回的是 `paddle.Tensor`,与纯 Lua 读
 ### 15.4 已定事项
 
 - **CI 框架(2026-10-23 人拍板)**:Lua 侧用 **busted**(spec/ 权威,五版本
-  lua-matrix),Python 侧开发期工具用 **pytest**(只护生成器,不进发布包)。
+  lua-matrix)。生成器已定全 Lua(R42),pytest 仅保留给 `tests/parity/` 对拍基准
+  (CI 校验手段,非用户工具链),不进发布包。
   `tools/check.lua` 保留为手动 smoke 前端。
 - **分层定位**:pickle 认识上游(pl.List / insight.Array,pcall 探测可选),
   不认识下游(不内置 paddle)—— 下游 register 注入(设计 §2.1)。

@@ -15,33 +15,43 @@
 
 **不做:** 不手写任何一个算子绑定。C8 是硬约束 —— **发现有人手写算子绑定,直接回滚**。
 
-**生成器本身用 Python 写。** 这不违反"不需要 Python 运行时":
-生成器是**开发期工具**,产物是纯 C/Lua 源码,最终用户装的包里没有 Python,
-也没有 yaml,也没有生成器。这和 Paddle 自己用 Python 生成 C++ 是同一个道理。
+**生成器本身用 Lua 写(R42,2026-10-23 人拍板)。** 原 C9 只约束"产物不带 Python",
+允许生成器用 Python;用户要求升级:「代码生成全部用 lua 重新复刻,
+用户的电脑上面不装 python 也可以用 Paddle」。所以 `tools/gen/` 是纯 Lua 5.1 子集,
+**开发期工具链也零 Python** —— 生成、yaml 解析、index 语义检查,全在 Lua 侧完成。
+Paddle 自己的 Python 生成器(`python_c_gen.py` / `codegen_utils.py`)**不再参与构建**,
+只留作行为参考与 CI 对拍基准(R42)。
 
 ---
 
 ## 2. 上游有什么可以用
 
-**这是整个项目复用率最高的一块 —— 上游已经有一个功能完全同构的生成器。**
+**整个项目复用率最高的一块 —— 上游已有功能完全同构的生成器,它是我们 Lua 版的「行为字典」。**
 
-| 出处 | 内容 |
-|---|---|
-| `paddle/phi/ops/yaml/ops.yaml` | 前向算子定义(如 `strided_slice` 在第 5443 行) |
-| `paddle/phi/ops/yaml/backward.yaml` | 反向算子定义 |
-| `paddle/fluid/eager/auto_code_generator/generator/python_c_gen.py` | **1103 行,pybind 层生成器 —— 我们的直接蓝本** |
-| `python_c_gen.py:53-73` | `atype2func` 映射表:`"bool" -> "CastPyArg2Boolean"` 等 20 条 |
-| `python_c_gen.py:160` | `PYTHON_C_FUNCTION_TEMPLATE` —— 单个函数的代码模板 |
-| `python_c_gen.py:1020` | `--api_yaml_path` 命令行参数 |
-| `paddle/fluid/eager/auto_code_generator/generator/codegen_utils.py` | 664 行,yaml 解析与类型工具,**可直接复用** |
-| `paddle/fluid/eager/auto_code_generator/generator/eager_gen.py` | 3918 行,生成 `*_ad_func` 本体。**我们不需要,它已经编进 libpaddle 了** |
-| `.../forwards/dygraph_functions.h` | 生成器的产物,我们的调用目标 |
+| 出处 | 内容 | 我们在 Lua 侧怎么用 |
+|---|---|---|
+| `paddle/phi/ops/yaml/ops.yaml` | 前向算子定义(如 `strided_slice` 在第 5443 行) | **输入,由 Lua 解析器直接读** |
+| `paddle/phi/ops/yaml/backward.yaml` | 反向算子定义 | **输入,由 Lua 解析器直接读** |
+| `paddle/fluid/eager/auto_code_generator/generator/python_c_gen.py` | **1103 行,pybind 层生成器** | **只作行为参考**,不 import、不运行。它的每一条逻辑都要在 Lua 里找到对应实现(R42) |
+| `python_c_gen.py:53-73` | `atype2func` 映射表:`"bool" -> "CastPyArg2Boolean"` 等 20 条 | 把 20 条映射**手工翻译**成 Lua 表(静态翻译,只做一次) |
+| `python_c_gen.py:160` | `PYTHON_C_FUNCTION_TEMPLATE` —— 单个函数的代码模板 | 字符串模板在 Lua 里等价改写(`string.gsub` 占位) |
+| `python_c_gen.py:1020` | `--api_yaml_path` 命令行参数 | Lua 侧用 `arg` 表解析等价的 CLI |
+| `paddle/fluid/eager/auto_code_generator/generator/codegen_utils.py` | 664 行,yaml 解析与类型工具 | **语义参照,R42 要求零 Python** —— 用 Lua 5.1 子集实现等价功能(见 §3.1 的 `yaml_subset.lua`) |
+| `paddle/fluid/eager/auto_code_generator/generator/eager_gen.py` | 3918 行,生成 `*_ad_func` 本体。**我们不需要,它已经编进 libpaddle 了** | 不需要 |
+| `.../forwards/dygraph_functions.h` | 生成器的产物,我们的调用目标 | 签名出处(§4 反幻觉规程) |
 
-**关键洞察:我们要写的是 `lua_c_gen.py`,它与 `python_c_gen.py` 是同一个东西的两个后端。**
-输入相同(yaml)、中间表示相同(`codegen_utils.py`)、调用目标相同(`*_ad_func`),
+**关键洞察:我们要写的是 `emit_capi.lua` / `emit_lua.lua`,它们与 `python_c_gen.py` 是同构的
+两个后端。** 输入相同(yaml)、中间表示相同(我们自己用 Lua 解析)、调用目标相同(`*_ad_func`),
 **只有出参入参的转换函数不同**:`CastPyArg2Boolean` -> `CastLuaArg2Boolean`。
 
-这意味着这 3 周里有相当一部分是"照着 1103 行改后端",而不是从零设计。
+这意味着这 3 周里有相当一部分是"照 1103 行的行为把后端翻成 Lua",而不是从零设计。
+**唯一新增的、Python 版没有的组件是 `yaml_subset.lua`**(见 §3.1)—— 上游的 yaml 解析
+藏在 codegen_utils.py 里,我们要用 Lua 重新实现。
+
+**实测(2026-10-23):`ops.yaml` 全文无 YAML 锚点(`&`/`*`)、无多行标量(`|`/`>`)、无合并键(`<<`)。
+** 这份文件只用到了块级列表、块级映射、行内 `args`、注释、标量 —— 一个约 300 行的
+Lua 子集解析器足够,不需要完整的 YAML 实现。**上线前用全部 519+107 个 op 块做解析对拍,
+发现新语法就扩展子集(R42 验收项)。
 
 ---
 
@@ -52,14 +62,19 @@
 ```
 ops.yaml + backward.yaml
         │
-        │  复用 codegen_utils.py 的解析
+        │  yaml_subset.lua(纯 Lua 5.1 子集解析器,~300 行)
         ▼
    中间表示(算子名 / 输入 / 属性 / 输出 / 默认值)
         │
-        ├──► gen_c.py     → csrc/generated/ops_*.c      调用 xxx_ad_func
-        ├──► gen_lua.py   → lua/paddle/_ops/*.lua       1-based 转换 + kwargs 分派
-        └──► gen_doc.py   → docs/api/ops.md             (M2 之后)
+        ├──► emit_capi.lua → csrc/generated/ops_*.c      调用 xxx_ad_func
+        ├──► emit_lua.lua  → lua/paddle/_ops/*.lua       1-based 转换 + kwargs 分派
+        └──► gen_doc.lua   → docs/api/ops.md             (M2 之后)
 ```
+
+**四个 `.lua` 全是纯 Lua 5.1 语法,跑在 `lua` / `luajit` 上,零 Python(C9/R42)。**
+`yaml_subset.lua` 是唯一新增组件 —— 上游的解析藏在 codegen_utils.py 里,
+我们按它的语义用 Lua 重写,输出 IR 形状与 `codegen_utils.py` 对齐,
+这样 emit 逻辑可以和 Python 原版逐条对拍。
 
 ### 3.2 生成的 C 侧长什么样
 
@@ -104,7 +119,7 @@ paddle.sum{ x, axis = 1 }             -- 混合表:数组部分 + 具名键
 
 ### 3.4 哪些算子跳过
 
-`python_c_gen.py:49` 有个 `SkipAPIGeneration(forward_api_name)`,先照抄它的跳过名单,
+`python_c_gen.py:49` 有个 `SkipAPIGeneration(forward_api_name)`,先照它的跳过名单的**行为**翻译成 Lua,
 再加我们自己的:
 
 | 跳过类别 | 理由 |
@@ -163,6 +178,12 @@ MSVC 的 `/bigobj` 是必须的。同时要把生成的 C 文件**按首字母�
 
 ## 6. 未解问题
 
-- `codegen_utils.py` 能否在不改动的前提下被我们 import?
-  若它 import 了 Paddle 的 Python 包,我们就要把需要的部分**复制**到 `tools/codegen/`
-  并注明来源与 commit(这属于开发期工具,不违反 C2)
+- ~~`codegen_utils.py` 能否在不改动的前提下被我们 import?~~ **已被 R42 作废** ——
+  生成器零 Python,不存在 import。改问:**`yaml_subset.lua` 对 ops.yaml 的语法覆盖度**。
+  2026-10-23 已实测:全文无锚点、无多行标量、无合并键(见 §2)。
+  但 `backward.yaml` / `legacy/static_ops.yaml` / `compat.yaml` 尚未逐行扫描 ——
+  **上线前对全部 4 份 yaml 做解析对拍(解析结果 vs Python 原版),发现新语法就扩展子集**。
+  这是 R42 的验收项,不是可以"先 TODO 着"的事 —— 漏一种语法就是一批算子静默生成失败。
+- `inplace: (x -> out)` 这类**行内映射**的解析细节:括号内的 `->` 语义(旧版是 `(x -> out)`,
+  新版可能有多输出 `(x, y -> out1, out2)`)—— 需要在 `yaml_subset.lua` 里按 `codegen_utils.py`
+  的实际解析行为对齐,记一条 OPEN_QUESTION 验证。

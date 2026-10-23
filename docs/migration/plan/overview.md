@@ -321,12 +321,12 @@ Lua 侧对应 `loadfile`/`require` —— **技术上更简单**,但引入了一
 ### 3.1 算子绑定的生成策略
 
 **不手写。** 从 Paddle 的 `ops.yaml` / `backward.yaml` / `python_api_info.yaml`
-生成三份产物(生成器用 Python 写,但**只在开发期跑**,发布产物里没有 Python):
+生成三份产物(生成器用 Lua 写,R42 —— **开发期与运行期都没有 Python**):
 
 ```
-ops.yaml ──► gen_capi.py    ──► paddle_capi_ops.{h,c}   纯 C 声明+实现
-         ──► gen_sol.py     ──► paddle_sol_ops.cpp      sol2 注册
-         ──► gen_luadoc.py  ──► paddle/_ops.lua         参数名/默认值/文档
+ops.yaml ──► emit_capi.lua ──► paddle_capi_ops.{h,c}   纯 C 声明+实现
+         ──► emit_sol.lua  ──► paddle_sol_ops.cpp      sol2 注册
+         ──► emit_luadoc.lua ──► paddle/_ops.lua       参数名/默认值/文档
 ```
 
 第三份很重要:Lua 没有关键字参数,**默认值和参数名必须在 Lua 侧有元数据**,
@@ -391,7 +391,8 @@ ops.yaml ──► gen_capi.py    ──► paddle_capi_ops.{h,c}   纯 C 声明
 而生态里将有 paddle-lua / Insight7 / `argrule` / metrics / ocean 五个消费者。
 完整论证见 `plan/foundations.md` §1.3。
 
-**Python 不在此表中。** 生成器脚本是开发期工具,不是运行期依赖。
+**Python 不在此表中。** 生成器脚本是开发期工具,不是运行期依赖(R42 后生成器本身也是 Lua,
+唯一保留 Python 的是 CI 的 `tests/parity/` 对拍基准 —— 那是校验手段,不是用户工具链)。
 
 ---
 
@@ -862,7 +863,7 @@ paddle-lua/
 │   ├── tensor.lua  autograd.lua  device.lua
 │   ├── nn/  optimizer/  io/  vision/  amp/
 │   └── serialize/       pickle.lua  npy.lua  safetensors.lua
-├── tools/gen/           生成器(开发期 Python,不进发布包)
+├── tools/gen/           生成器(纯 Lua 5.1 子集,不进发布包,R42)
 ├── tests/               busted
 ├── rockspecs/
 └── docs/

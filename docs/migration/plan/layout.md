@@ -69,11 +69,11 @@ paddle-lua/
 │   ├── distributed/            【P17】
 │   └── utils/                  fs.lua(csrc/utils/fs.cc 的 Lua 面)/ download.lua
 │
-├── tools/gen/                  【P3】生成器。**开发期 Python**,不进发布包
-│   ├── parse_yaml.py               读 Paddle 的 ops.yaml
-│   ├── emit_capi.py                -> csrc/capi_gen/
-│   ├── emit_lua.py                 -> lua/paddle/_ops/
-│   └── index_semantics.yaml        哪些参数是 index 语义(1-based 转换表,overview §6.1.1)
+├── tools/gen/                  【P3】生成器。**纯 Lua 5.1 子集**(R42),不进发布包
+│   ├── yaml_subset.lua             读 Paddle 的 ops.yaml(子集解析器,~300 行)
+│   ├── emit_capi.lua               -> csrc/capi_gen/
+│   ├── emit_lua.lua                -> lua/paddle/_ops/
+│   └── index_semantics.lua         哪些参数是 index 语义(1-based 转换表,overview §6.1.1)
 │
 ├── tests/                      busted
 │   ├── unit/                       每个模块一份,跟着模块走
@@ -168,9 +168,9 @@ paddle-lua/
 ### P3 · 代码生成
 
 ```
-1. index_semantics.yaml     ← **先写标注表,再写生成器**
-2. parse_yaml.py
-3. emit_capi.py -> 先只生成 3 个算子(add / matmul / relu)
+1. index_semantics.lua       ← **先写标注表,再写生成器**
+2. yaml_subset.lua
+3. emit_capi.lua -> 先只生成 3 个算子(add / matmul / relu)
 4. 手工 review 这 3 个的产物
 5. 放开全量
 ```
@@ -222,7 +222,7 @@ paddle-lua/
 | `libpaddle` 二进制 | 用户自备 / CI 缓存 | 体积以 GB 计(04-packaging §1) |
 | golden 对拍数据 | CI 生成,`tests/fixtures/` 只放生成脚本 | 二进制进 git 会让仓库迅速膨胀且不可 diff |
 | `ocean-lua` / `metrics-lua` | 独立仓库(M3) | overview §11 的三仓库切分 |
-| Python 运行时 | **不存在于用户端** | 硬约束。`tools/gen/` 的 Python 只在开发期和 CI 期跑 |
+| Python 运行时 | **不存在于用户端** | 硬约束。`tools/gen/` 是纯 Lua(R42),运行期、开发期、CI 期都没有 Python |
 
 ---
 
@@ -234,7 +234,7 @@ paddle-lua/
 
 | 理由 | 说明 |
 |---|---|
-| ① **用户端没有 Python** | 这是项目的第一硬约束。rock 的 tarball 里必须已经有生成产物 —— 用户装的时候不可能现场跑 `tools/gen/*.py` |
+| ① **用户端没有 Python** | 这是项目的第一硬约束。rock 的 tarball 里必须已经有生成产物 —— 用户装的时候不可能现场跑 `tools/gen/*.lua` 之外的任何东西;R42 后生成器本身也是 Lua,用户重生成也不需要 Python |
 | ② 上游 API 变动会在 diff 里显形 | Paddle 升个版本,`git diff` 直接告诉你哪 37 个算子签名变了。不提交的话,这个变化是**隐形**的,直到运行时才炸 |
 | ③ 可审计 1-based 转换 | D13 的转换发生在生成代码里。它进版本库,才能在 PR 里 review "这个 axis 到底转没转" |
 

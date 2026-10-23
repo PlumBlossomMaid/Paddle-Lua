@@ -159,11 +159,11 @@ lua tools/ci/args_no_opts_table.lua                             -> 文档与代�
 grep -rnE "goto |::[a-z]+::|[^/]//[^/]|<close>|<const>"  lua/   -> 失败
 
 # ③ 生成代码不许手改(layout.md §5)
-python tools/gen/emit_capi.py && python tools/gen/emit_lua.py
+lua tools/gen/emit_capi.lua && lua tools/gen/emit_lua.lua
 git diff --exit-code csrc/capi_gen/ lua/paddle/_ops/            -> 非零即失败
 
 # ④ 1-based 标注表必须覆盖全部算子(overview §6.1.1)
-python tools/gen/check_index_semantics.py                       -> 未标注即失败
+lua tools/gen/check_index_semantics.lua                        -> 未标注即失败
 
 # ⑤ 上游零改动(项目级硬约束)
 git -C $PADDLE_ROOT diff --exit-code                            -> 非零即失败
@@ -204,9 +204,13 @@ Paddle 每加一个算子都可能要补标注。**默认放行会让 1-based �
 
 ## 7. 数值对拍与 golden 数据(L3)
 
-**CI 端有 Python,用户端没有。** 这个区分要在文档里反复强调 ——
-`tools/gen/` 和 `tests/parity/` 的 Python 是**开发期依赖**,
-不出现在 rockspec 的 `dependencies` 里,也不出现在用户的安装步骤里。
+**R42 后:`tools/gen/` 零 Python,开发期工具链也没有 Python。**
+用户不装 Python 也能重新生成算子代码(改 yaml、升级 Paddle 重跑生成器)。
+**唯一保留 Python 的是 `tests/parity/` 的对拍基准** —— 那是 CI 的**校验手段**,
+不是用户工具链:CI 装一份官方 Paddle Python 包现跑现比,验证我们编出来的
+libpaddle 数值没错。这个区分要在文档里反复强调 ——
+`tests/parity/` 的 Python 不出现在 rockspec 的 `dependencies` 里,
+也不出现在用户的安装步骤里。
 
 | 项 | 做法 |
 |---|---|
