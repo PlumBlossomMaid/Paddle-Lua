@@ -269,6 +269,10 @@
 | `paddle.from_numpy` (`creation.py:1208`) | 实现体:`return tensor(ndarray)`(`:1230`) | **numpy 特例换 Insight** → Lua `paddle.from_insight{array}`——参数从 `numpy.ndarray` 换 `insight.Array`,底层走 DLPack 桥(Insight7/lua-pickle 已就绪) |
 | `paddle.zeros`/`ones`/`full`/`full_like` | 装饰 `@size_args_decorator`(`creation.py:1807/1621/1378/1380`),内核走 `_C_ops.zeros/ones/full/full_like` | **直接绑定**(已在 DIRECT 桶);`size_args` 装饰器不移植(D33),Lua 侧 `zeros{2,3}` 直接生成绑定 |
 | `paddle.add` (`math.py:723`) | 动态模式一行 `_C_ops.add(x, scaled_y, out=out)`(`:802`);静态模式走 `LayerHelper` + `append_op` | **直接绑定**;`alpha` 参数 → Lua 侧 `add{x,y,alpha}` 生成绑定处理,`out` 暂不做(Q-19) |
+| `paddle.arange` (`creation.py:2206`) | 有真实实现体:`end=None` 折叠 `start`/`end`(`:2265-2266`)+ dtype 推断(`:2268-2276`)+ 动态模式 `_C_ops.arange(start, end, step, dtype, device, out=out)`(`:2321-2328`) | **LEGACY 桶**(底层 op 在 `legacy/static_ops.yaml:55`);dtype 推断与 `end=None` 折叠是纯 Python 逻辑 → Lua 侧重写(用 Lua 型检查替代 `isinstance`),边界仍调生成绑定;`requires_grad` → `stop_gradient` 取反,(C12) |
+| `paddle.matmul` (`linalg.py:24-34`) | **纯 re-export**:`from paddle._C_ops import (... matmul ...)`,本体就是绑定算子 | **LEGACY 桶**(`legacy/static_ops.yaml:669`);Lua 侧 `paddle.matmul{x, y, transpose_x, transpose_y}` 生成绑定,签名走 argrule |
+| `paddle.sum` (`math.py:116`) | **纯 re-export**:`from paddle._C_ops import (... sum ...)`,本体就是绑定算子 | **直接绑定**(`sum` 在 `ops.yaml`,见 DIRECT 桶 §1);Lua 侧 `paddle.sum{x, axis, dtype, keepdim}` 生成绑定(`axis` 标 1-based,§2.2) |
+| `paddle.add_n` (`math.py:1994`) | 动态模式一行 `_C_ops.add_n(inputs)`(`:2052`);静态模式走 `LayerHelper` + `append_op`,对列表逐个 check | **直接绑定 + 一个 Lua 适配**:底层 `add_n` 算子对接(不在顶层 yaml,核实 `_C_ops.add_n` 为 pybind 手工绑定,P3 时评估);`inputs` 参数用 `TensorList` 类型(`api/README.md` §2.1 首个参数为列表规则),Lua 侧 `paddle.add_n{ {a,b,c} }` |
 
 **抽样结论:创建类在 Python 侧是"装饰器 + 一行转发",真实现全在 `_C_ops`/`_to_tensor_non_static` 里。** 名字按命名铁律处理(一般忠实迁移、numpy 特例换 Insight);同一底层可以供多个入口共用。Lua 侧每个导出函数/方法都有一张 `argrule` 规则表,签名与 Python 规范签名逐字对齐(`plan/api/README.md` §2.1);PyTorch 兼容装饰器相关参数(别名、`size_args`、`variadic`)不移植(D35)。
 
