@@ -137,7 +137,8 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `plan/api/top.md` | — | ✅ **新增(2026-10-23)**:顶层 `paddle` 命名空间契约,第一批约 80 个核心成员(创建/算子/归约/索引/逻辑/随机/激活/复数),素材 = `inventory.md` §3.1 抽查表;含 §3 index 语义参数标注表与 §6 本模块坑 |
 | `plan/api/tensor.md` | — | ✅ **新增(2026-10-23)**:`paddle.Tensor` 类型契约(核心方法/属性/魔法方法/算子方法挂载机制/字符串索引 D14);上游来源 `tensor_patch_methods.py`/`generated_tensor_methods_patch.py`/`variable_index.py` 全部带 file:line |
 | `plan/api/dtype-device.md` | — | ✅ **新增(2026-10-23)**:`paddle.dtype`/`paddle.device` 契约(dtype 常量一套枚举、place 值类型、默认 dtype 全局态、finfo/iinfo);与 Insight7 命名对齐(`foundations.md` §3.2/§3.6.1) |
-| `plan/api/<其余 12 个模块>` | — | ⬜ 各模块开工时写 |
+| `plan/api/linalg.md` | — | ✅ **新增(2026-10-23)**:`paddle.linalg` 子模块契约(分解/范数/转置族);核实 `python/paddle/linalg` 目录不存在、`paddle.linalg` = `tensor/linalg.py` 再导出(`__init__.py:278`);`svd/lstsq/slogdet` 仅在子模块 |
+| `plan/api/<其余 11 个模块>` | — | ⬜ 各模块开工时写 |
 | `plan/modules/README.md` | 70 | ✅ |
 | `plan/modules/00-build.md` | 115 | ✅ |
 | `plan/modules/01-c-abi.md` | 150 | ✅ |
