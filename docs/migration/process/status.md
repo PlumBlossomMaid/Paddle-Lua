@@ -150,6 +150,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | `plan/api/utils.md` | — | ✅ **新增(2026-10-23)**:`paddle.utils` 契约(download/dlpack/deprecated/run_check/require_version/try_import + **新增 fs**);**纠正 `api/README.md` 旧说法**(上游确有此模块,`utils/__init__.py:13-30`);`decorator_utils` 整层不移植(D35) |
 | `plan/api/distributed.md` | — | ✅ **新增(2026-10-23)**:`paddle.distributed` 契约级文档(集合通信/parallel 环境/数据并行形态;⛔ 无环境,实现与验收挂起);rank 语义是 C4 唯一冲突候选,P17 拍板 |
 | `plan/api/<其余 0 个模块>` | — | ⬜ 全部完成(除 amp 未排期无文档) |
+| `plan/api/inventory.md` | 883 | ✅ **抽查表扩容(2026-10-24)**:§3.1 从 14 批(约 110 行)扩到 **34 批 / 268 行 `paddle.*` 成员**(第十五~三十四批,提交 8b1ea3a→3c3b6ea)。PYTHON 桶 328 个中核心成员**已全部覆盖**(创建/算子/归约/索引/逻辑/随机/激活/复数/三角/位运算/统计/线性代数/linalg 子模块/全局态/工具);剩余约 60 个 = in-place `_` 变体(随生成器批量覆盖)+ dtype 常量(dtype-device.md 已覆盖)+ 少量内部函数(标注放放),无独立抽查价值。**主线①核心抽查完成** |
 | `plan/modules/README.md` | 70 | ✅ |
 | `plan/modules/00-build.md` | 115 | ✅ |
 | `plan/modules/01-c-abi.md` | 150 | ✅ |
@@ -230,6 +231,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 
 | 日期 | 变更 |
 |---|---|
+| 2026-10-24 | **主线① API 迁移标注核心抽查完成** —— `inventory.md` §3.1 从 14 批扩到 **34 批 / 268 行 `paddle.*` 成员**(提交 8b1ea3a→3c3b6ea),PYTHON 桶核心成员全部覆盖(创建/算子/归约/索引/逻辑/随机/激活/复数/三角/位运算/统计/linalg 子模块/全局态/工具),每个成员带上游 `file:line` + 三态去向 + C4 标注;剩余为 in-place 变体/常量,随生成器覆盖。主线②(M0 验证)此前已全部完成并开 G1(59e12ff)。**下一步待用户定:开 M1(建 csrc/ lua/ 骨架)/ 继续抽查剩余成员 / 其他** |
 | 2026-10-23 | **✅ G1 闸门通过,M0 全部 17 项必做完成** —— 补完 T-M0-14/15/17/18/19 五项(#14 strided_slice=view、#15 OpProtoHolder 无 pybind 可用、#17 jit::Load 可链接可加载、#18 手工 AttributeMap 喂 run_program_ad_func、#19 SaveTensor/LoadTensor 格式稳定),前 11 项此前已 DONE。产出 `m0-report.md` §0 G1 验收总表。**当前允许 M1 全部工作**(建 `csrc/`/`lua/`、rockspec、CMakeLists)。遗留(不阻塞):Q-24(fc+oneDNN forward bug)、#20/#21(服务 M4 可跳过)。详见 `process/m0-report.md` §0 |
 | 2026-10-23 | **T-M0-19 DONE:SaveTensor/LoadTensor 格式稳定性**(#19 ✅)。`tools/smoke/smoke_save_load.cc` 实测 PASS(exit 0):2x3 float32 往返无损、version=0、重存字节一致(file_size=50)。格式 = uint32 版本 + LoD + TensorDesc proto + 原始数据(`dense_tensor_serialize.cc:69-81`/`dense_tensor_tostream.cc:97-228`);Python 侧同链(D19 成立)。Lua `paddle.save/load`(单张量)直接以它为线格式。详见 `m0-report.md` §20 |
 | 2026-10-23 | **T-M0-18 DONE:手工构造 AttributeMap 喂 `run_program_ad_func`**(#18 ✅)。`tools/smoke/smoke_run_program.cc` 实测 PASS(exit 0):`AttributeMap` 纯 C++ 构造(`type_defs.h:51/73`),按 `RunProgramImpl` 键全量填充(`run_program_impl.cc:449-490`),空 program 触发预期 C++ Traceback、无 pybind 泄漏。P16 静态图运行时参数可纯 C++ 构造。详见 `m0-report.md` §19 |
