@@ -21,7 +21,7 @@
 |---|---|---|---|
 | `paddle`(顶层) | P5 | `top.md` ✅ | Tensor 构造、算子、`paddle.to_tensor`、懒加载装配。第一批约 80 个核心成员契约已定(2026-10-23) |
 | `paddle.Tensor`(类型) | P5 | `tensor.md` ✅ | 方法、元方法、字符串索引。核心方法/属性/魔法方法契约已定,算子方法由 P3 生成器批量挂载(2026-10-23) |
-| `paddle.dtype` / `paddle.device` | P5 | `dtype-device.md` | 与 Insight7 命名对齐(foundations §3.2) |
+| `paddle.dtype` / `paddle.device` | P5 | `dtype-device.md` ✅ | 与 Insight7 命名对齐(foundations §3.2)。dtype 常量一套枚举、place 值类型、默认 dtype 全局态已定(2026-10-23) |
 | `paddle.autograd` | P6 | `autograd.md` | `backward` / `no_grad` / `grad` |
 | `paddle.scope` | P6/P14 | `scope.md` | 显存作用域,gc.md 九层里唯一用户可见的一层 |
 | `paddle.linalg` | P5 | `linalg.md` | 绝大部分是生成的算子的重导出 |
