@@ -277,6 +277,8 @@
 | `paddle.stack` (`manipulation.py:2170`) | 动态模式 `_C_ops.stack(x, axis, out=out)`(`:2327-2328`);静态模式走 DENSE_TENSOR_ARRAY 特判 | **直接绑定**(DIRECT 桶);`axis` 标 1-based;同名别名 `tensors`/`dim` 不移植(D35) |
 | `paddle.transpose` (`manipulation.py:636`) | 动态模式 `_C_ops.transpose(x, perm)`(`:697`);静态模式 check 后 append_op | **直接绑定**(DIRECT 桶);参数名 `perm`(Paddle 原生,非 PyTorch `dims`),Lua 侧 `paddle.transpose{x, perm}` |
 | `paddle.reshape` (`manipulation.py:5513/5517/5521`) | **三重签名**:`reshape(x, shape)` + `reshape(input, *shape)`(变长)+ 实体 `@reshape_decorator`;动态模式 `_C_ops.reshape(x, new_shape)`(`:5648-5649`),`new_shape == x.shape` 时直接返回 x | **直接绑定 + 一个 Lua 适配**:变长签名 `reshape(2,3)` 是 `decorator_utils` 兼容糖(D35 不移植)——Lua 侧只有 `reshape{x, shape}`;`shape` 用 `IntList`(`api/README.md` §2.1.2);返回值与 Python 一样**共享内存**(docstring `:5524-5527` 明说 "output Tensor will share data with origin Tensor") |
+| `paddle.squeeze` (`manipulation.py:3393`) | 动态模式 `_C_ops.squeeze(input, axes)`(`:3491/3502`,两个分支:axis 为 list 与 Tensor 各一);`axis=None` 时 squeeze 全部 size-1 维 | **直接绑定**(DIRECT 桶);`axis` 标 1-based(可传 list);**共享内存**(docstring `:3396-3398` "output Tensor will share data with origin Tensor")——与 reshape 同族,view 语义 |
+| `paddle.unsqueeze` (`manipulation.py:4038`) | 动态模式 `_C_ops.unsqueeze(input, axes)`(`:4116/4127`);axis 可为 int/list/Tensor,负数 `axis+R+1` | **直接绑定**(DIRECT 桶);`axis` 标 1-based;**共享内存**(docstring `:4043-4045`);⚠️ 别名 `input`/`dim`(`:4047-4049`)D35 不移植,Lua 侧只有 `x`/`axis` |
 
 **抽样结论:创建类在 Python 侧是"装饰器 + 一行转发",真实现全在 `_C_ops`/`_to_tensor_non_static` 里。** 名字按命名铁律处理(一般忠实迁移、numpy 特例换 Insight);同一底层可以供多个入口共用。Lua 侧每个导出函数/方法都有一张 `argrule` 规则表,签名与 Python 规范签名逐字对齐(`plan/api/README.md` §2.1);PyTorch 兼容装饰器相关参数(别名、`size_args`、`variadic`)不移植(D35)。
 
