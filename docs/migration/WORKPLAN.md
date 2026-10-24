@@ -136,8 +136,8 @@
  |    |    +-- [✅] 2.2.4 slice.cc
  |    +-- [⬜] 2.3 算子代码生成              -> plan/modules/03-codegen.md
  |    |    +-- [✅] 2.3.1 index_semantics.lua  ★ 必须先于生成器
- |    |    +-- [🔵] 2.3.2 yaml_subset.lua
- |    |    +-- [⬜] 2.3.3 三算子试生成 + 人工 review
+ |    |    +-- [✅] 2.3.2 yaml_subset.lua     ★ 4 份 yaml 对拍全绿(529/396/109/548 块)
+ |    |    +-- [🔵] 2.3.3 三算子试生成 + 人工 review
  |    |    +-- [⬜] 2.3.4 全量生成 + regen-diff CI
  |    +-- [⬜] 2.4 构建与打包                -> plan/modules/04-packaging.md
  |    +-- [⬜] 2.5 paddle.Tensor             -> plan/modules/05-tensor.md

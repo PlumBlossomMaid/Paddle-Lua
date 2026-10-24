@@ -179,11 +179,23 @@ MSVC 的 `/bigobj` 是必须的。同时要把生成的 C 文件**按首字母�
 ## 6. 未解问题
 
 - ~~`codegen_utils.py` 能否在不改动的前提下被我们 import?~~ **已被 R42 作废** ——
-  生成器零 Python,不存在 import。改问:**`yaml_subset.lua` 对 ops.yaml 的语法覆盖度**。
-  2026-10-23 已实测:全文无锚点、无多行标量、无合并键(见 §2)。
-  但 `backward.yaml` / `legacy/static_ops.yaml` / `compat.yaml` 尚未逐行扫描 ——
-  **上线前对全部 4 份 yaml 做解析对拍(解析结果 vs Python 原版),发现新语法就扩展子集**。
-  这是 R42 的验收项,不是可以"先 TODO 着"的事 —— 漏一种语法就是一批算子静默生成失败。
-- `inplace: (x -> out)` 这类**行内映射**的解析细节:括号内的 `->` 语义(旧版是 `(x -> out)`,
-  新版可能有多输出 `(x, y -> out1, out2)`)—— 需要在 `yaml_subset.lua` 里按 `codegen_utils.py`
-  的实际解析行为对齐,记一条 OPEN_QUESTION 验证。
+  生成器零 Python,不存在 import。改问:**`yaml_subset.lua` 对 4 份 yaml 的语法覆盖度**。
+  **✅ 已闭环(2026-10-24,2.3.2)**:`tools/gen/yaml_subset.lua` 写完即做全量对拍
+  —— `ops.yaml` 529 / `backward.yaml` 396 / `legacy/static_ops.yaml` 109 /
+  `op_compat.yaml` 548 个块,**IR 逐块与 Python 原版(PyYAML + codegen_utils.py 语义)一致,
+  四份全绿**。对拍中发现并支持的语法:
+  - **多行 plain scalar 折叠**(ops.yaml:75 的 `args :` 跨行):续行按单空格折回
+  - **`output :` 空值**(静态图算子,如 `comm_init_all` / `p_send`):returns = 空列表
+  - **嵌套块**(`infer_meta :` / `kernel :` 下的 4 空格键值):按缩进跳过,
+    2 空格字段行恢复采集(nesting 按层级分派,不是"一进嵌套就吞到尾")
+  - **花括号默认值**(`IntArray axis={0}`):split_args 的逗号切分用
+    `,(?![^{]*\})` 语义模拟(Lua 5.1 pattern 无负向先行,手写扫描)
+  - **`- op :` / `- backward_op :` 两种块头**:kind 分别为 forward / backward_op
+  - 上游字段全集已固化:ops.yaml 14 种(args/output/infer_meta/kernel/inplace/
+    interfaces/traits/backward/optional/data_transform/intermediate/invoke/
+    no_need_buffer/view)+ backward.yaml 的 forward/composite 行内签名
+
+- `inplace: (x -> out)` 这类**行内映射**:✅ **已验证(2.3.2 对拍覆盖)** ——
+  上游 `ParseYamlInplaceInfo:477` 行为 = 按逗号切分 → 去首尾括号 → 按 `->` 切左右,
+  多输出形式(`(x -> out0), (y -> out2)` 已在 ops.yaml 真实出现,如 `adagrad_:94`)
+  已按同语义实现并通过对拍。

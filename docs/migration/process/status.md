@@ -25,12 +25,12 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | | |
 |---|---|
 | 阶段 | **M1(已开闸)** —— 先搭 `csrc/` C ABI 中间层 + sol2 绑定 + MNIST 收尾 |
-| 工程树位置 | `WORKPLAN.md` 节点 **2.3 算子代码生成 2.3.2 yaml_subset.lua**(见 `WORKPLAN.md` 🔵) |
-| 下一个动作 | 2.3.2:`tools/gen/yaml_subset.lua`(纯 Lua 5.1 子集 YAML 解析器,产出 IR 与上游 `codegen_utils.py` 对齐;ops.yaml 无锚点/多行/合并键,~300 行足够) |
+| 工程树位置 | `WORKPLAN.md` 节点 **2.3 算子代码生成 2.3.3 三算子试生成**(见 `WORKPLAN.md` 🔵) |
+| 下一个动作 | 2.3.3:`emit_capi.lua` + `emit_lua.lua` 最小骨架,对 add/matmul/relu 三算子试生成 C ABI 包装 + Lua 侧签名,人工 review 后进 git;加载 `index_semantics.lua` 标注做 1-based 转换 |
 | 人点名的三件调研 | **① Q-22** phi 层有没有不依赖 pybind 的 DLPack 通道(决定 Insight7 内存协议怎么定);**② 数出「跑通 MNIST 训练,Insight7 至少要哪些函数」**(从上游代码里数,不凭感觉 —— 已知 `python/paddle` 全层只用 132 个 `np.*` 符号、真函数约 15 个,见 `research/ecosystem.md` §5.1);**③ Q-23** Array API Standard 是否如记忆所述(要走代理核实)。三件都**不阻塞** `WORKPLAN` 主线 |
 | 全部 ⛔ 阻塞节点 | `WORKPLAN.md` 4.3 distributed —— 无多卡环境(待拍板 P2) |
 | 待人拍板 | 剩余待拍板:P3 / P4 / P6 / P7(改写)+ 1.7 的 P9(Penlight 分发)与 luarocks 占位 —— 见 `process/decisions.md` §3 §4 |
-| 上次卡在哪 | **2.3.1 index_semantics.lua 完成(2026-10-24,068b2ff/9f1b368)**:D13 标注表首批落地(验证自 ops.yaml:346-5867 的 12 个算子),`require_annotated` 强制未标注报错(conventions §5.2)。顺手补齐 **T-M1-01 lint_51.lua**(用 5.1 编译器当权威语法检查器,conventions §1.4),2.3 起每个 Lua 产物 DoD 的第一道门已有。sol2 链接经验已固化:421 库去重 rsp(lua51 头在前 + vcpkg sol 在后)、嵌入者不静态链 Paddle、PD_GUARD 入口清错槽 |
+| 上次卡在哪 | **2.3.2 yaml_subset.lua 完成(2026-10-24)**:纯 Lua 5.1 子集 YAML 解析器(对齐 codegen_utils.py 的 ParseYamlArgs:321/ParseYamlReturns:365/ParseYamlInplaceInfo:477/ParseYamlCompositeInfo:490/ParseYamlForwardFromBackward:425),**4 份 yaml 全量对拍 vs Python 原版全绿**:ops.yaml 529 / backward.yaml 396 / legacy/static_ops.yaml 109 / op_compat.yaml 548 块,IR 逐块一致(03-codegen.md §6 的 R42 验收项完成)。语法覆盖实测:无锚点/多行块标量/合并键,但 **args/forward/output 有多行 plain scalar 折叠**(如 ops.yaml:75)与 `output :` 空值(静态图算子,如 comm_init_all)——均已支持。坑:**Lua 5.1 pattern 无 `(group)?` 可选捕获**(`((const )?\S+)` 整体匹配失败,手工模拟);空表 JSON 序列化须为 `[]` 非 `{}`;CLI 必须 `arg[0]` 门控 + `return M`(require 时 Lua 会传模块名作 vararg,误把 "yaml_subset" 当文件)。生成器模块形态已验(require 可用) |
 
 ---
 
