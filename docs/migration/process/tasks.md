@@ -123,7 +123,7 @@ egr::Backward({y}, {}, false);
 | T-M1-03 | `class.lua` extend/super 类系统 | `plan/overview.md` §6.1 | 3d |
 | T-M1-04 | `_wrap.lua` 三模式调用(移植 Insight7) | D15 | 1d |
 | T-M1-05 | C ABI 中间层骨架(生命周期/错误/dtype/place) | D2 | 5d | ✅ **DONE(2026-10-24)**:paddle_c.h(2.1.1)+ status.cc(2.1.2)+ tensor.cc(2.1.3)+ autograd.cc(2.1.4)+ 纯 C 迷你训练循环(2.1.5)+ **device.cc / jit.cc(2.1.6)**全部实现并实测 **MINI_TRAIN PASS + DEVICE_SMOKE PASS**(e069c9c→18ce534)。三处链接坑已解:① @rsp 必须 link.exe 直调 + 当前目录裸 `@capi_libs.rsp`(cl 转交 LNK1181);② 上游 **/MT + 30 宏**(build.ninja:2028/120),缺 PHI_INNER 致 LNK2019 dllimport;③ `Tensor(const Place&)`/`(Place,shape)` 是幽灵构造(tensor.h:121/135 只声明不实现)→ 换 `paddle::experimental::empty`(api.h:384)。2.1.6 新增坑:DeviceManager 不管理 CPU(count 硬返 1);jit::Load 对坏路径不抛异常返回空 Layer;jit 链接缺口 shim(GetFeedTarget/GetFetchTarget)必要。验收:梯度==手算、坏参数→PD_INVALID_ARG、双线程错误槽隔离,32 项全过。详见 status.md §2 |
-| T-M1-06 | sol2 `usertype<Tensor>` + `__lanesclone` 槽位(D24) | D1/D8 | 4d |
+| T-M1-06 | sol2 `usertype<Tensor>` + `__lanesclone` 槽位(D24) | D1/D8 | 4d | ✅ **DONE(2026-10-24)**:`csrc/sol/tensor_binding.cc` LuaTensor usertype(ndim/numel/dtype/shape/is_contiguous)+ `__lanesclone` 槽位已预留(aab6526),`paddle_core.tensor{dims}` 工厂 + `paddle_core.init()`(幂等,收进 C ABI `pd_init_once`)。SOL_SMOKE PASS。坑:① PD_GUARD 入口清错误槽——`pd::check()` 必须紧跟失败调用,中间不能插 `pd_place_free`(会清槽);② 嵌入 EXE 静态链 Paddle 又 require 同样静态链的 dll → gflags 双注册(`dygraph_debug`,flags_native.cc:309),嵌入者永不静态链 Paddle;③ sol2 编译 include 顺序:Lua 5.1 头在前、vcpkg include(仅取 sol)在后,否则按 Lua 5.5 头生成 5.1 没有的 API 致 LNK2019 |
 | T-M1-07 | `slice.lua` + `lua_spec_to_cpp`(移植 Insight7) | D14 | 2d |
 | T-M1-08 | 算子生成器原型(yaml → C ABI + sol2 + `_ops.lua`) | C8 | 10d |
 | T-M1-09 | `index_semantics` 标注表 + 未标注即报错的 CI | §8.2 | 3d |

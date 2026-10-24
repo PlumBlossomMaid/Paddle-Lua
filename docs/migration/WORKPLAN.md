@@ -129,11 +129,11 @@
  |    |    +-- [✅] 2.1.4 autograd.cc
  |    |    +-- [✅] 2.1.5 纯 C 迷你训练循环      ★ 不许跳过
  |    |    +-- [✅] 2.1.6 device.cc / jit.cc
- |    +-- [⬜] 2.2 sol2 绑定层               -> plan/modules/02-binding.md
- |    |    +-- [⬜] 2.2.1 module.cc + error.cc
- |    |    +-- [⬜] 2.2.2 tensor_binding.cc
- |    |    +-- [⬜] 2.2.3 require 冒烟通过     ★ P2 的真里程碑
- |    |    +-- [⬜] 2.2.4 slice.cc
+ |    +-- [✅] 2.2 sol2 绑定层               -> plan/modules/02-binding.md
+ |    |    +-- [✅] 2.2.1 module.cc + error.cc
+ |    |    +-- [✅] 2.2.2 tensor_binding.cc
+ |    |    +-- [✅] 2.2.3 require 冒烟通过     ★ P2 的真里程碑(sol_smoke)
+ |    |    +-- [🔵] 2.2.4 slice.cc
  |    +-- [⬜] 2.3 算子代码生成              -> plan/modules/03-codegen.md
  |    |    +-- [⬜] 2.3.1 index_semantics.lua  ★ 必须先于生成器
  |    |    +-- [⬜] 2.3.2 yaml_subset.lua
