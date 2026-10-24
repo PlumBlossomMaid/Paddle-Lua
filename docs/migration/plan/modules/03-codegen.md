@@ -138,6 +138,10 @@ paddle.sum{ x, axis = 1 }             -- 混合表:数组部分 + 具名键
 | 需要 `pir::Value` 参数的 | 静态图专用,P15 再处理 |
 | `sparse_*` / `strings_*` | 有独立 yaml,不在 v1 范围 |
 | 分布式相关(`c_allreduce_*` 等) | P17 单独处理 |
+| 图学习/树模型/分布式训练器算子(`graph_khop_sampler`/`graph_sample_neighbors`/`weighted_sample_neighbors`/`reindex_graph`/`dgc`/`tdm_sampler`) | `row`/`colptr` 是 0-based CSC 结构偏移(前缀和,`colptr[0]==0`),节点重编号必须跨输入输出保持一致,不是 index_semantics 的「逐参数 ±1」能表达的;图学习模块后续单独设计。P17 |
+
+> **注意**:skip 名单是生成器的单一事实来源,集中在 `tools/gen/skip_rules.lua`,
+> `emit_capi.lua` / `emit_lua.lua` / 覆盖统计工具共用,禁止在别处重复判断。
 
 ### 3.5 生成器必须可重入
 

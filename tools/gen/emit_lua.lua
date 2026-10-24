@@ -34,6 +34,7 @@ package.path = "tools/gen/?.lua;" .. package.path
 
 local yaml = require "yaml_subset"
 local index_sem = require "index_semantics"
+local skip_rules = require "skip_rules"
 
 -- Lua default literal for a yaml default-value string. Handles the types
 -- present in the trial set; anything unknown errors loudly.
@@ -228,16 +229,17 @@ local ok, ops = pcall(function()
     local blocks = yaml.parse_file(p)
     for _, b in ipairs(blocks) do
       if b.kind == "forward" then
-        if string.sub(b.name, -1) ~= "_" then   -- skip in-place variants
-          if #whitelist == 0 or want[b.name] then
-            index_sem.require_annotated(b.name, "emit_lua (" .. p .. ")")
-            local ok2, ir = pcall(yaml.block_ir, b)
-            if not ok2 then
-              error("emit_lua: block_ir failed for '" .. b.name .. "': "
-                    .. tostring(ir))
-            end
-            all[#all + 1] = ir
+        local why = skip_rules.skip_reason(b.name)
+        if why then
+          io.stderr:write("  skip " .. b.name .. " (" .. why .. ")\n")
+        elseif #whitelist == 0 or want[b.name] then
+          index_sem.require_annotated(b.name, "emit_lua (" .. p .. ")")
+          local ok2, ir = pcall(yaml.block_ir, b)
+          if not ok2 then
+            error("emit_lua: block_ir failed for '" .. b.name .. "': "
+                  .. tostring(ir))
           end
+          all[#all + 1] = ir
         end
       end
     end

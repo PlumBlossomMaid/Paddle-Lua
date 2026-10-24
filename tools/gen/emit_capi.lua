@@ -34,6 +34,7 @@ package.path = "tools/gen/?.lua;" .. package.path
 
 local yaml = require "yaml_subset"
 local index_sem = require "index_semantics"
+local skip_rules = require "skip_rules"
 
 -- C ABI parameter C type for a C++ type from yaml_types_mapping
 -- (yaml_subset.lua YAML_TYPES). Only the types present in the 2.3.3 trial
@@ -61,21 +62,11 @@ local function is_bool(cpp_type)
 end
 
 -- Skip rules (03-codegen.md sec.3.4): in-place '_'-suffixed variants,
--- sparse/strings (separate yaml, out of v1 scope), distributed c_allreduce.
+-- sparse/strings (separate yaml, out of v1 scope), distributed c_allreduce,
+-- graph-learning / tree / distributed-trainer edge ops. Single source of
+-- truth is tools/gen/skip_rules.lua.
 local function is_skipped(op_name)
-  if string.sub(op_name, -1) == "_" then
-    return "in-place variant (trailing _)"
-  end
-  if string.sub(op_name, 1, 7) == "sparse_" then
-    return "sparse ops (separate yaml, v1 scope excludes)"
-  end
-  if string.sub(op_name, 1, 8) == "strings_" then
-    return "strings ops (separate yaml, v1 scope excludes)"
-  end
-  if string.sub(op_name, 1, 10) == "c_allreduce" then
-    return "distributed collective (P17)"
-  end
-  return nil
+  return skip_rules.skip_reason(op_name)
 end
 
 -- Build the op list from yaml IR, applying skip + index-semantics gates.
