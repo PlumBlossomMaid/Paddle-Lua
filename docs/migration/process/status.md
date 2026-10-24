@@ -25,12 +25,12 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | | |
 |---|---|
 | 阶段 | **M1(已开闸)** —— 先搭 `csrc/` C ABI 中间层 + sol2 绑定 + MNIST 收尾 |
-| 工程树位置 | `WORKPLAN.md` 节点 **2.3 算子代码生成 2.3.1 index_semantics.lua**(见 `WORKPLAN.md` 🔵) |
-| 下一个动作 | 2.3.1:`tools/gen/index_semantics.lua` 标注表(哪些参数是 index 语义、做 1-based 转换),★ 必须先于生成器 |
+| 工程树位置 | `WORKPLAN.md` 节点 **2.3 算子代码生成 2.3.2 yaml_subset.lua**(见 `WORKPLAN.md` 🔵) |
+| 下一个动作 | 2.3.2:`tools/gen/yaml_subset.lua`(纯 Lua 5.1 子集 YAML 解析器,产出 IR 与上游 `codegen_utils.py` 对齐;ops.yaml 无锚点/多行/合并键,~300 行足够) |
 | 人点名的三件调研 | **① Q-22** phi 层有没有不依赖 pybind 的 DLPack 通道(决定 Insight7 内存协议怎么定);**② 数出「跑通 MNIST 训练,Insight7 至少要哪些函数」**(从上游代码里数,不凭感觉 —— 已知 `python/paddle` 全层只用 132 个 `np.*` 符号、真函数约 15 个,见 `research/ecosystem.md` §5.1);**③ Q-23** Array API Standard 是否如记忆所述(要走代理核实)。三件都**不阻塞** `WORKPLAN` 主线 |
 | 全部 ⛔ 阻塞节点 | `WORKPLAN.md` 4.3 distributed —— 无多卡环境(待拍板 P2) |
 | 待人拍板 | 剩余待拍板:P3 / P4 / P6 / P7(改写)+ 1.7 的 P9(Penlight 分发)与 luarocks 占位 —— 见 `process/decisions.md` §3 §4 |
-| 上次卡在哪 | **2.2 全部完成(2026-10-24,b8a953e/aab6526/fbaeaee)**:sol2 绑定层 4 节点全绿(SOL_SMOKE PASS,require 里程碑达成)。已有:`paddle_core` 可 require(version/device_count/place_kind_name/init)、LuaTensor usertype(shape/dtype/ndim/numel/is_contiguous + __lanesclone 槽位)、`tensor{dims}` 工厂、`slice_spec` 字符串索引转换(D14)。坑已记:① PD_GUARD 入口清错误槽 → `pd::check()` 紧跟失败调用;② 嵌入者永不静态链 Paddle(gflags 双注册 flags_native.cc:309),init 收进 C ABI `pd_init_once`;③ sol2 编译 include 顺序 Lua 5.1 头在前;④ rsp 去重 421 |
+| 上次卡在哪 | **2.3.1 index_semantics.lua 完成(2026-10-24,068b2ff/9f1b368)**:D13 标注表首批落地(验证自 ops.yaml:346-5867 的 12 个算子),`require_annotated` 强制未标注报错(conventions §5.2)。顺手补齐 **T-M1-01 lint_51.lua**(用 5.1 编译器当权威语法检查器,conventions §1.4),2.3 起每个 Lua 产物 DoD 的第一道门已有。sol2 链接经验已固化:421 库去重 rsp(lua51 头在前 + vcpkg sol 在后)、嵌入者不静态链 Paddle、PD_GUARD 入口清错槽 |
 
 ---
 
