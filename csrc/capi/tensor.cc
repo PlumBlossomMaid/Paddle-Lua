@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "paddle/phi/api/include/api.h"
 #include "paddle/phi/api/include/tensor.h"
 #include "paddle/phi/common/data_type.h"
 #include "paddle/phi/common/place.h"
@@ -185,9 +186,11 @@ pd_tensor pd_tensor_new_empty(pd_place place) {
     pd_set_error(PD_INVALID_ARG, "place is null");
     return nullptr;
   }
-  // tensor.h:121 -- Tensor(const Place&) allocates a shell on that place;
-  // storage is allocated lazily by Paddle on first mutate.
-  paddle::Tensor t(reinterpret_cast<pd_place_t*>(place)->value);
+  // tensor.h:121 declares Tensor(const Place&) but upstream NEVER implements
+  // it (paddle/phi/api/lib/tensor.cc has only 4 ctors; phi.dll exports
+  // none) -- calling it is a link error. Default ctor (tensor.h:98) gives
+  // the empty shell this API promises; place binds at first allocation.
+  paddle::Tensor t;
   return reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(t)});
   PD_GUARD_END(nullptr);
 }
@@ -209,9 +212,12 @@ pd_tensor pd_tensor_from_host_buffer(pd_place place,
     return nullptr;
   }
   std::vector<int64_t> shape(dims, dims + ndim);
-  // tensor.h:135 -- deprecated ctor but the {place, shape} route into
-  // Paddle allocation is exactly what we want for CPU/GPU alike.
-  paddle::Tensor t(reinterpret_cast<pd_place_t*>(place)->value, shape);
+  // tensor.h:135 declares Tensor(const Place&, shape) but upstream NEVER
+  // implements it (same ghost-ctor issue as tensor.h:121) -- use the
+  // exported factory instead (api.h:384).
+  paddle::Tensor t = paddle::experimental::empty(
+      shape, static_cast<phi::DataType>(dtype),
+      reinterpret_cast<pd_place_t*>(place)->value);
   void* dst = copy_into_by_dtype(&t, static_cast<pd_dtype>(dtype), data);
   if (dst == nullptr) {
     return nullptr;
