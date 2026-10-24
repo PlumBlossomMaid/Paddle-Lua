@@ -88,6 +88,7 @@ void register_tensor(lua_State* L, int module_index) {
       [](void* dst, const LuaTensor& src) { new (dst) LuaTensor(src); });
 
   push_tensor_factory(mod);
+  register_slice(mod);   // slice.cc: core.slice_spec (D14 string transform)
 }
 
 }  // namespace pd

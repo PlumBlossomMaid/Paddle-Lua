@@ -121,6 +121,17 @@ int main() {
                "assert(t:numel() == 1, 'stale error must be cleared')"),
         "stale error slot cleared by successful call");
 
+  // 2.2.4: lua_spec_to_cpp string transform (D14). Pure text: 1-based
+  // start/stop -> 0-based, negative pass through, step untouched.
+  CHECK(run_ok(L,
+               "local s = paddle_core.slice_spec\n"
+               "assert(s('1:3') == '0:2', 'start/stop -1')\n"
+               "assert(s('1:5:2') == '0:4:2', 'step untouched')\n"
+               "assert(s('2,1:-1') == '1,0:-1', 'multi-dim + negative')\n"
+               "assert(s('::-1') == '::-1', 'reverse')\n"
+               "assert(s('::2') == '::2', 'positive step pass-through')"),
+        "slice_spec: 1-based start/stop -> 0-based, step untouched");
+
   lua_close(L);
 
   if (failures == 0) {

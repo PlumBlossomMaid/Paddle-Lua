@@ -40,6 +40,10 @@ inline void check() {
  * 2.2.2). Called at the end of luaopen_paddle_core. */
 void register_tensor(lua_State* L, int module_index);
 
+/* Register core.slice_spec (lua spec -> 0-based string, D14) into a sol
+ * table (slice.cc, 2.2.4). Pure string transform for P5 consumption. */
+void register_slice(sol::table& mod);
+
 }  // namespace pd
 
 #endif  // PADDLE_LUA_SOL_COMMON_H
