@@ -192,6 +192,65 @@ pd_status  pd_tensor_set_stop_gradient(pd_tensor t, int stop);
 /* Get grad (NULL if none). Caller does NOT own it -- retain() to keep. */
 pd_tensor  pd_tensor_grad(const pd_tensor t);
 
+/* ------------------------------------------------------------------ */
+/* Group 5: device / stream (6 fns, 01-c-abi.md sec.3.3; impl 2.1.6)  */
+/* ------------------------------------------------------------------ */
+
+/* Number of devices of the given kind (pd_place_kind). Error => -1.
+ * Source: paddle/phi/backends/device_manager.h:221 GetDeviceCount. */
+int        pd_device_count(int kind);
+
+/* Current device index of the given kind, or -1 on error.
+ * Source: paddle/phi/backends/gpu/gpu_info.h:58 GetCurrentDeviceId. */
+int        pd_device_current(int kind);
+
+/* Make `index` of the given kind the current device. Returns PD_OK.
+ * Source: paddle/phi/backends/gpu/gpu_info.h:72 SetDeviceId. */
+pd_status  pd_device_set_current(int kind, int index);
+
+/* Block until all work on the given place (kind,index) has finished.
+ * Source: paddle/phi/core/device_context.h:184 DeviceContext::Wait(). */
+pd_status  pd_device_sync(int kind, int index);
+
+/* Allocated bytes of the kind's memory stats; -1 => unavailable. */
+int64_t    pd_device_allocated_bytes(int kind);
+
+/* Pointer to a NUL-terminated device type name for a pd_place_kind
+ * (e.g. "CPU", "GPU", "XPU"; "?" if unknown). Never NULL. */
+const char* pd_place_kind_name(int kind);
+
+/* ------------------------------------------------------------------ */
+/* Group 6: jit layers (6 fns, 08-jit-infer.md sec.3.2; impl 2.1.6)   */
+/* ------------------------------------------------------------------ */
+
+/* Opaque handle to a loaded jit::Layer (layer.h:44). */
+typedef struct pd_layer_s*  pd_layer;
+
+/* Load a jit-saved program (prefix/dir path). Returns handle or NULL on
+ * error (status set). Source: paddle/fluid/jit/serializer.h:78. */
+pd_layer   pd_jit_layer_load(const char* path, pd_place place);
+
+/* Release a loaded layer. NULL-safe. */
+void       pd_jit_layer_free(pd_layer layer);
+
+/* Forward inputs (tensors array, ntensors count) through the layer.
+ * Outputs are written to out array (capacity nout); returns output count.
+ * Source: paddle/fluid/jit/layer.h:57. Inputs/outputs borrow; caller owns. */
+int        pd_jit_layer_forward(pd_layer layer,
+                                const pd_tensor* inputs, int ntensors,
+                                pd_tensor* out, int nout);
+
+/* Move the layer to a new place (layer.h:63 to()). Returns PD_OK. */
+pd_status  pd_jit_layer_to(pd_layer layer, pd_place place);
+
+/* Function names of the layer (layer.h:73 FunctionNames()).
+ * Writes names into buf (capacity nb); returns count. */
+int        pd_jit_layer_function_names(pd_layer layer,
+                                       char* buf, size_t nbuf, size_t* len);
+
+/* Clone the layer (layer.h:78 Clone() with null stream). */
+pd_layer   pd_jit_layer_clone(pd_layer layer);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif

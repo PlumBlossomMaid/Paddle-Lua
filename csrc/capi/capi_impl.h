@@ -29,6 +29,7 @@ extern "C" {
 //   phi::Place is a plain value. See 01-c-abi.md sec.4.
 #include "paddle/phi/api/include/tensor.h"
 #include "paddle/phi/common/place.h"
+#include "paddle/fluid/jit/layer.h"
 
 struct pd_place_t {
   phi::Place value;
@@ -36,6 +37,10 @@ struct pd_place_t {
 
 struct pd_tensor_t {
   paddle::Tensor value;
+};
+
+struct pd_layer_t {
+  paddle::jit::Layer value;
 };
 
 /* Internal: store status+message into the thread-local slot.
