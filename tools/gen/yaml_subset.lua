@@ -369,6 +369,16 @@ local function block_ir(b)
   if f.optional then
     ir.optional = f.optional
   end
+  -- `intermediate:` lists output names that are scratch/state tensors the
+  -- dygraph API does NOT return (they exist to avoid reallocation during
+  -- training). The *_ad_func's tuple contains only the non-intermediate
+  -- returns (verified: lstm yaml has 4 outputs, batch_gate/batch_cell_pre_act
+  -- are intermediate, lstm_ad_func returns std::tuple<Tensor, Tensor> --
+  -- dygraph_functions.h). Kept as the raw comma-separated string; consumers
+  -- split it.
+  if f.intermediate then
+    ir.intermediate = f.intermediate
+  end
   return ir
 end
 

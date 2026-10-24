@@ -190,6 +190,25 @@ ad_func 形参分别是 `paddle::optional<paddle::Tensor>&`、
 编译过但语义是错的** —— 编译验证必须覆盖 `optional<vector<Tensor>>` 这种
 不能隐式转换的形态(如 bicubic_interp 的 `size_tensor`),否则会漏。
 
+**⑥ `intermediate:` 标记的输出不进 `*_ad_func` 返回 tuple。** 编译验证
+(2026-10-24,墙 #3)抓到的坑:yaml 的 `output:` 列出全部输出(如 lstm 的
+`hidden/cell/batch_gate/batch_cell_pre_act` 共 4 个),但 `intermediate:
+batch_gate, batch_cell_pre_act` 标记的是训练期 scratch 张量,**dygraph API
+不返回它们** —— `lstm_ad_func` 实际返回 `std::tuple<Tensor, Tensor>`
+(`dygraph_functions.h`),按 yaml 输出数做 `std::get<N>` 会编译失败
+(tuple index out of bounds)。**多输出判断与计数一律用「有效输出」=
+yaml returns 减去 intermediate**(emit_capi `effective_returns`,
+yaml_subset `ir.intermediate`)。24 个算子带 intermediate(普查:attention_lstm
+6 出→2 有效、dropout 2 出→1 有效、group_norm 3 出→1 有效、lstm 4 出→2 有效等)。
+
+**⑦ 输出含 `std::vector<Tensor>` 的多输出算子需两阶段 ABI。** 117 个多输出
+算子中 113 个是纯 Tensor tuple;仅 4 个(coalesce_tensor / distribute_fpn_proposals
+/ einsum / rnn)的 tuple 含 `std::vector<Tensor>` 元素 —— 元素个数运行时才知,
+单 Tensor 输出数组 C ABI(墙 #3 的 `int64_t pd_op_x(pd_tensor* outs, int64_t nout,
+...)` 形态,与 `pd_jit_layer_forward` 先例一致)表达不了,已进 skip_rules
+(两阶段查询 ABI 另行设计;重开前核实 Python 侧暴露面 —— 如 `paddle.einsum`
+只返回 `out`,vector 输出是反向期 scratch)。
+
 ---
 
 ## 5. 验收

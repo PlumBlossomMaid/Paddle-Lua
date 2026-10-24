@@ -265,7 +265,42 @@ local function signature(ir)
          table.concat(preludes, "\n")
 end
 
--- Emit one wrapper body for the op.
+-- True iff every output is a plain Tensor (a multi-output *_ad_func returns
+-- std::tuple<Tensor, ...> for such ops; the C ABI is an out-array, matching
+-- the pd_jit_layer_forward precedent in paddle_c.h). Outputs of shape
+-- std::vector<Tensor> (einsum/rnn/coalesce_tensor/distribute_fpn_proposals)
+-- carry a runtime length -- the tuple element is a vector, not a Tensor --
+-- and need a two-phase query ABI, designed separately (wall #3 extension).
+local function all_tensor_outputs(rs)
+  for _, r in ipairs(rs) do
+    if r.type ~= "Tensor" then return false end
+  end
+  return true
+end
+
+-- Effective returns: yaml `output:` with the `intermediate:` names removed.
+-- Upstream *_ad_func tuple contains ONLY the non-intermediate outputs
+-- (verified: lstm yaml declares 4 outputs, intermediate batch_gate/
+-- batch_cell_pre_act, lstm_ad_func returns std::tuple<Tensor, Tensor> --
+-- dygraph_functions.h). Counts, std::get indices and multi/single dispatch
+-- must all use this filtered list, not the raw yaml returns.
+local function effective_returns(ir)
+  local inter = {}
+  if ir.intermediate then
+    for w in string.gmatch(ir.intermediate, "[^,%s]+") do
+      inter[w] = true
+    end
+  end
+  local eff = {}
+  for _, r in ipairs(ir.returns or {}) do
+    if not inter[r.name] then
+      eff[#eff + 1] = r
+    end
+  end
+  return eff
+end
+
+-- Emit one single-output wrapper body for the op.
 local function emit_op(ir, out)
   -- op name -> C function name: pd_op_<name>
   local fn = "pd_op_" .. ir.op
@@ -287,6 +322,46 @@ local function emit_op(ir, out)
   out[#out + 1] = ""
 end
 
+-- Emit one multi-output wrapper body. C ABI shape (design 01-c-abi.md
+-- sec.3.1 ownership + paddle_c.h pd_jit_layer_forward precedent):
+--   int64_t pd_op_x(pd_tensor* outs, int64_t nout, <params>...)
+--     ret: number of outputs written
+--     outs[i]: new handle, caller owns each (must pd_tensor_free)
+--     nout < actual count: writes min(nout, count) and returns count
+--       (caller resizes and retries -- query-then-allocate)
+-- The yaml count is a compile-time lower bound for every Tensor output; only
+-- vector<Tensor> outputs (rejected in emit_all) have a runtime length.
+-- Output count = effective_returns (intermediate outputs are not returned
+-- by the ad_func tuple; e.g. lstm yaml declares 4, tuple has 2).
+local function emit_op_multi(ir, out)
+  local fn = "pd_op_" .. ir.op
+  local params, callargs, preludes = signature(ir)
+  local eff = effective_returns(ir)
+  local n = #eff
+  out[#out + 1] = string.format(
+    "/* %s (yaml block line %d, %d outputs) */", ir.op, ir.line, n)
+  out[#out + 1] = string.format(
+    "int64_t %s(pd_tensor* outs, int64_t nout%s%s) {", fn,
+    (params ~= "" and ", " or ""), params)
+  out[#out + 1] = "  PD_GUARD_BEGIN;"
+  if preludes ~= "" then
+    out[#out + 1] = preludes   -- already indented, ends with newline
+  end
+  out[#out + 1] = "  auto r = " .. ir.op .. "_ad_func("
+  out[#out + 1] = "      " .. callargs .. ");"
+  -- unpack the tuple element-by-element; std::get<N> is the safe C++17 form
+  -- (structured bindings on a tuple of references would over-complicate).
+  for i = 1, n do
+    out[#out + 1] = string.format(
+      "  if (nout >= %d) outs[%d] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<%d>(r))});",
+      i, i - 1, i - 1)
+  end
+  out[#out + 1] = string.format("  return %d;", n)
+  out[#out + 1] = "  PD_GUARD_END(0);"
+  out[#out + 1] = "}"
+  out[#out + 1] = ""
+end
+
 -- Deterministic header + bucket emission.
 local function emit_all(ops, outdir, sha)
   local buckets = {}   -- letter -> array of op names
@@ -294,12 +369,17 @@ local function emit_all(ops, outdir, sha)
     -- multi-output ops: the *_ad_func returns a std::tuple; wrapping them
     -- as a single paddle::Tensor would silently produce uncompilable code
     -- (2.3.3 discipline: refuse to emit rather than emit something wrong).
-    -- Multi-output return shape is 2.3.4 wall #3.
-    local rpos = ir.returns or {}
-    if #rpos > 1 then
-      error("emit_capi: op '" .. ir.op .. "' has " .. #rpos
-            .. " outputs -- multi-output wrappers not implemented yet "
-            .. "(wall #3); refuse to emit")
+    -- Pure-Tensor tuples are handled by emit_op_multi (wall #3); tuples
+    -- containing std::vector<Tensor> keep refusing (two-phase ABI design is
+    -- a separate extension). Count uses effective_returns: `intermediate:`
+    -- outputs never appear in the ad_func tuple (lstm: 4 yaml outputs, 2
+    -- in the tuple).
+    local eff = effective_returns(ir)
+    if #eff > 1 and not all_tensor_outputs(eff) then
+      error("emit_capi: op '" .. ir.op .. "' has "
+            .. #eff .. " returned outputs with a std::vector<Tensor> element -- "
+            .. "runtime-length outputs need a two-phase ABI, not implemented "
+            .. "yet (wall #3 extension); refuse to emit")
     end
     local letter = string.sub(ir.op, 1, 1)
     buckets[letter] = buckets[letter] or {}
@@ -318,8 +398,14 @@ local function emit_all(ops, outdir, sha)
   header[#header + 1] = ""
   for _, ir in ipairs(ops) do
     local params = signature(ir)
-    header[#header + 1] = string.format(
-      "pd_tensor pd_op_%s(%s);", ir.op, params)
+    if #effective_returns(ir) > 1 then
+      header[#header + 1] = string.format(
+        "int64_t pd_op_%s(pd_tensor* outs, int64_t nout%s%s);", ir.op,
+        (params ~= "" and ", " or ""), params)
+    else
+      header[#header + 1] = string.format(
+        "pd_tensor pd_op_%s(%s);", ir.op, params)
+    end
   end
   header[#header + 1] = ""
   header[#header + 1] = "#endif  /* PADDLE_LUA_CAPI_GEN_H */"
@@ -340,7 +426,11 @@ local function emit_all(ops, outdir, sha)
     cc[#cc + 1] = "#include \"paddle/fluid/eager/api/generated/eager_generated/forwards/dygraph_functions.h\""
     cc[#cc + 1] = ""
     for _, ir in ipairs(buckets[letter]) do
-      emit_op(ir, cc)
+      if #(ir.returns or {}) > 1 then
+        emit_op_multi(ir, cc)
+      else
+        emit_op(ir, cc)
+      end
     end
     local f = "ops_" .. letter .. ".cc"
     local fh, err = io.open(outdir .. "/" .. f, "w")

@@ -20,6 +20,16 @@
 --                      state (k / gather_buff), P17.
 --   tdm_sampler        tree-based deep model sampler: travel/layer encode
 --                      tree structure, not plain indices; out of v1 scope.
+--   coalesce_tensor / distribute_fpn_proposals / einsum / rnn:
+--                      runtime-length outputs -- the *_ad_func returns a
+--                      std::tuple containing std::vector<Tensor> (element
+--                      count only known at runtime, dygraph_functions.h
+--                      coalesce_tensor_ADFUNC / rnn:907). The single-Tensor
+--                      out-array C ABI (wall #3 emit_op_multi) cannot
+--                      express them; a two-phase query ABI is a later
+--                      extension. Verify the Python-side exposure before
+--                      re-enabling: paddle.einsum returns only `out`, the
+--                      vector outputs are grad-time scratch.
 
 local M = {}
 
@@ -44,6 +54,12 @@ function M.skip_reason(op_name)
   or op_name == "dgc"
   or op_name == "tdm_sampler" then
     return "graph-learning / tree / distributed trainer edge op (P17)"
+  end
+  if op_name == "coalesce_tensor"
+  or op_name == "distribute_fpn_proposals"
+  or op_name == "einsum"
+  or op_name == "rnn" then
+    return "runtime-length output (std::vector<Tensor> in ad_func tuple) -- two-phase ABI (later)"
   end
   return nil
 end
