@@ -175,6 +175,21 @@ MSVC 的 `/bigobj` 是必须的。同时要把生成的 C 文件**按首字母�
 带了输出复用参数。生成器要能识别并**先跳过它**(传 `paddle::none`),
 而不是错误地把它当成必填输入。
 
+**⑤ 输入形态有 4 种,不是只有 `Tensor`。** 编译验证(2026-10-24,墙 #2)抓到的
+真实缺口——`signature()` 把所有输入一律生成 `pd_tensor` 传 `->value`,但 yaml
+输入的 C++ 类型经过 `yaml_types_mapping` 后有 4 种(`ops.yaml` 普查):`Tensor`(921)、
+`Tensor?`(160)、`std::vector<Tensor>`(37)、`std::vector<Tensor>?`(20)。后三种的
+ad_func 形参分别是 `paddle::optional<paddle::Tensor>&`、
+`const std::vector<paddle::Tensor>&`、`paddle::optional<std::vector<paddle::Tensor>>&`
+(证据:`dygraph_functions.h:131` bicubic_interp)。C ABI 表示(01-c-abi.md §4 数组传
+(ptr,n) 的推广):`Tensor?` → `pd_tensor`,`NULL` = 无,调用点
+`<name> ? paddle::make_optional(->value) : paddle::none`;`std::vector<Tensor>` →
+`(const pd_tensor* p, int64_t n)` + prelude 循环构造 vector;
+`std::vector<Tensor>?` → 同上,NULL = 无。**坑:`optional<Tensor>` 能从 `Tensor`
+隐式构造(optional.h:482 非 explicit),所以「漏掉 optional 处理」的生成代码照样
+编译过但语义是错的** —— 编译验证必须覆盖 `optional<vector<Tensor>>` 这种
+不能隐式转换的形态(如 bicubic_interp 的 `size_tensor`),否则会漏。
+
 ---
 
 ## 5. 验收

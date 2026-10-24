@@ -36,8 +36,52 @@ local yaml = require "yaml_subset"
 local index_sem = require "index_semantics"
 local skip_rules = require "skip_rules"
 
--- Lua default literal for a yaml default-value string. Handles the types
--- present in the trial set; anything unknown errors loudly.
+-- yaml `{1, 2}` literal -> Lua table literal "{ 1, 2 }" (array attrs:
+-- IntArray / std::vector<T>; C ABI side is (ptr, n), Lua side is a table).
+local function lua_array_literal(default_str)
+  -- `{}` -> empty table; non-empty `{1, 2}` -> "{ 1, 2 }"
+  local inner = string.gsub(default_str, "[{}]", " ")
+  local items = {}
+  for piece in string.gmatch(inner, "[^,]+") do
+    local p = string.gsub(piece, "^%s*(.-)%s*$", "%1")  -- trim (gsub multi-return: parens)
+    if p ~= "" then
+      -- gsub returns (s, count); parens force single value or tonumber gets
+      -- a bogus base arg (Lua 5.1 multi-return pitfall)
+      local v = tonumber((string.gsub(p, "f$", "")))
+      assert(v, "emit_lua: bad array default '" .. default_str .. "'")
+      items[#items + 1] = string.format("%.17g", v)
+    end
+  end
+  return "{ " .. table.concat(items, ", ") .. " }"
+end
+
+-- phi::DataType default -> paddle_core.PD_DTYPE_* constant (paddle_c.h
+-- pd_dtype enum, values 1:1 with phi::DataType per paddle_c.h:58).
+local DATA_TYPE_DEFAULTS = {
+  ["phi::DataType::UNDEFINED"] = "paddle_core.PD_DTYPE_UNDEFINED",
+  ["phi::DataType::BOOL"] = "paddle_core.PD_DTYPE_BOOL",
+  ["phi::DataType::UINT8"] = "paddle_core.PD_DTYPE_UINT8",
+  ["phi::DataType::INT8"] = "paddle_core.PD_DTYPE_INT8",
+  ["phi::DataType::UINT16"] = "paddle_core.PD_DTYPE_UINT16",
+  ["phi::DataType::INT16"] = "paddle_core.PD_DTYPE_INT16",
+  ["phi::DataType::UINT32"] = "paddle_core.PD_DTYPE_UINT32",
+  ["phi::DataType::INT32"] = "paddle_core.PD_DTYPE_INT32",
+  ["phi::DataType::UINT64"] = "paddle_core.PD_DTYPE_UINT64",
+  ["phi::DataType::INT64"] = "paddle_core.PD_DTYPE_INT64",
+  ["phi::DataType::FLOAT32"] = "paddle_core.PD_DTYPE_FLOAT32",
+  ["phi::DataType::FLOAT64"] = "paddle_core.PD_DTYPE_FLOAT64",
+  ["phi::DataType::COMPLEX64"] = "paddle_core.PD_DTYPE_COMPLEX64",
+  ["phi::DataType::COMPLEX128"] = "paddle_core.PD_DTYPE_COMPLEX128",
+  ["phi::DataType::PSTRING"] = "paddle_core.PD_DTYPE_PSTRING",
+  ["phi::DataType::FLOAT16"] = "paddle_core.PD_DTYPE_FLOAT16",
+  ["phi::DataType::BFLOAT16"] = "paddle_core.PD_DTYPE_BFLOAT16",
+  ["phi::DataType::FLOAT8_E4M3FN"] = "paddle_core.PD_DTYPE_FLOAT8_E4M3FN",
+  ["phi::DataType::FLOAT8_E5M2"] = "paddle_core.PD_DTYPE_FLOAT8_E5M2",
+}
+
+-- Lua default literal for a yaml default-value string. Handles every type
+-- present in the 4-yaml forward set (surveyed 2026-10-24, 130 distinct
+-- combos); anything unknown errors loudly.
 local function lua_default_literal(cpp_type, default_str)
   if default_str == nil then
     return nil
@@ -46,14 +90,37 @@ local function lua_default_literal(cpp_type, default_str)
     if default_str == "true" then return "true" end
     if default_str == "false" then return "false" end
   elseif cpp_type == "float" or cpp_type == "double" then
-    -- yaml floats may carry an f suffix (0.9f) or exponent (1.0e-6f);
-    -- strip the f, Lua reads the exponent fine.
+    -- yaml floats may carry an f suffix (0.9f) or a constant expression
+    -- (1.0f/3, 1.6732632423543772848170429916717): strip the f, keep the
+    -- expression (Lua evaluates division fine). Lua reads the exponent fine.
     local v = string.gsub(default_str, "f$", "")
     if tonumber(v) then return v end
+    if string.find(v, "/") then return v end   -- 1.0/3, 1.0/8
   elseif cpp_type == "int" or cpp_type == "int64_t" then
     if tonumber(default_str) then return default_str end
+    if string.find(default_str, "<<") then      -- (2 << 12) - 1 -> 2^12 - 1
+      return string.gsub(default_str, "<<", "^")
+    end
+    local v = string.gsub(default_str, "L$", "")  -- 0L -> 0
+    if tonumber(v) then return v end
+  elseif cpp_type == "paddle::experimental::Scalar" then
+    local v = string.gsub(default_str, "f$", "")
+    if tonumber(v) then return v end
   elseif cpp_type == "std::string" then
     return string.format("%q", default_str)
+  elseif cpp_type == "paddle::experimental::IntArray"
+  or cpp_type == "std::vector<int64_t>"
+  or cpp_type == "std::vector<int>"
+  or cpp_type == "std::vector<float>"
+  or cpp_type == "std::vector<double>" then
+    return lua_array_literal(default_str)
+  elseif cpp_type == "phi::DataType" then
+    local c = DATA_TYPE_DEFAULTS[default_str]
+    if c then return c end
+  elseif cpp_type == "paddle::Place" then
+    -- default place is CPU (paddle_c.h pd_place_new(PD_PLACE_CPU, 0));
+    -- `{}` and `CPUPlace()` both mean that
+    return "paddle_core.pd_place_new(paddle_core.PD_PLACE_CPU, 0)"
   end
   error("emit_lua: cannot translate default '" .. tostring(default_str)
         .. "' for type '" .. cpp_type .. "' (add a case, don't guess)")

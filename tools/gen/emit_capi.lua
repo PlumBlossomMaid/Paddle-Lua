@@ -37,22 +37,76 @@ local index_sem = require "index_semantics"
 local skip_rules = require "skip_rules"
 
 -- C ABI parameter C type for a C++ type from yaml_types_mapping
--- (yaml_subset.lua YAML_TYPES). Only the types present in the 2.3.3 trial
--- set are wired; anything else errors loudly instead of emitting garbage.
+-- (yaml_subset.lua YAML_TYPES). Scalar-ish types map to a single C
+-- parameter; array-like types expand to TWO C parameters `(const T* data,
+-- int64_t n)` per 01-c-abi.md sec.4 item 4 ("structure-free ABI: pass
+-- shape as (dims, ndim), never define pd_shape") and are constructed
+-- back to the C++ container at the call site. dtype -> pd_dtype enum
+-- (01-c-abi.md sec.3.4, paddle_c.h), place -> pd_place handle
+-- (paddle_c.h). Scalar -> double: Lua numbers are doubles only; upstream
+-- kernels consume a Scalar via scalar.to<T>() and never branch on its
+-- internal dtype (paddle/fluid/pybind/eager_utils.cc:2541 constructs per
+-- Python type, phi kernels read with to<T>), so double is behaviourally
+-- equivalent (decision 2026-10-24, see process/decisions.md).
+--
+-- Returns a table describing ONE attr param:
+--   { params = {decl...},   -- C declarations with <name> placeholder
+--     call   = {expr...},   -- call-site argument expressions
+--     prelude = {...}}      -- extra statements before the call (rare)
 local function capi_type(cpp_type)
-  local t = {
-    ["Tensor"] = "pd_tensor",
-    ["bool"] = "int",                    -- ABI has no C99 bool
-    ["int"] = "int",
-    ["int64_t"] = "int64_t",
-    ["float"] = "float",
-    ["double"] = "double",
-    ["std::string"] = "const char*",
+  local scalar = {
+    ["Tensor"]    = { "pd_tensor <name>" , "reinterpret_cast<pd_tensor_t*>(<name>)->value /* Tensor */" },
+    ["bool"]      = { "int <name>"       , "<name> != 0 /* bool */" },
+    ["int"]       = { "int <name>"       , "<name> /* int */" },
+    ["int64_t"]   = { "int64_t <name>"   , "<name> /* int64_t */" },
+    ["float"]     = { "float <name>"     , "<name> /* float */" },
+    ["double"]    = { "double <name>"    , "<name> /* double */" },
+    ["std::string"] = { "const char* <name>", "<name> /* std::string */" },
+    ["phi::DataType"] = { "pd_dtype <name>", "static_cast<phi::DataType>(<name>) /* phi::DataType */" },
+    ["paddle::Place"] = { "pd_place <name>", "reinterpret_cast<pd_place_t*>(<name>)->value /* paddle::Place */" },
+    ["paddle::experimental::Scalar"] =
+      { "double <name>", "paddle::experimental::Scalar(<name>) /* paddle::experimental::Scalar */" },
   }
-  local c = t[cpp_type]
-  assert(c, "emit_capi: no C ABI type for '" .. cpp_type
+  local s = scalar[cpp_type]
+  if s then
+    return { params = { s[1] }, call = { s[2] } }
+  end
+  local array = {
+    --   elem C type      call-site expression (constructor shape differs:
+    --   IntArray takes (ptr, n), std::vector takes (first, last) iterators)
+    ["paddle::experimental::IntArray"] =
+      { "const int64_t*", "paddle::experimental::IntArray(<name>, <name>_n)" },
+    ["std::vector<int64_t>"] =
+      { "const int64_t*", "std::vector<int64_t>(<name>, <name> + <name>_n)" },
+    ["std::vector<int>"]     =
+      { "const int*",     "std::vector<int>(<name>, <name> + <name>_n)" },
+    ["std::vector<float>"]   =
+      { "const float*",   "std::vector<float>(<name>, <name> + <name>_n)" },
+    ["std::vector<double>"]  =
+      { "const double*",  "std::vector<double>(<name>, <name> + <name>_n)" },
+  }
+  local a = array[cpp_type]
+  if a then
+    return {
+      params = { a[1] .. " <name>", "int64_t <name>_n" },
+      call   = { a[2] .. " /* " .. cpp_type .. " */" },
+    }
+  end
+  if cpp_type == "std::vector<phi::Scalar>" then
+    -- elementwise double -> phi::Scalar; only op is set_value (build a
+    -- temp vector in a prelude, then pass it).
+    return {
+      params = { "const double* <name>", "int64_t <name>_n" },
+      prelude = {
+        "  std::vector<phi::Scalar> <name>_tmp;",
+        "  <name>_tmp.reserve(<name>_n);",
+        "  for (int64_t i = 0; i < <name>_n; ++i) <name>_tmp.emplace_back(<name>[i]);",
+      },
+      call = { "<name>_tmp /* std::vector<phi::Scalar> */" },
+    }
+  end
+  assert(false, "emit_capi: no C ABI type for '" .. cpp_type
           .. "' (add to capi_type table in emit_capi.lua; don't guess)")
-  return c
 end
 
 -- True if this C++ type needs `!= 0` at the ad_func call site (C99-int
@@ -109,38 +163,121 @@ local function collect_ops(paths, whitelist)
   return ops
 end
 
--- C arguments list for a wrapper: inputs as pd_tensor, attrs as their C
--- ABI scalar type; returns the parameter list (with commas) and the call
--- argument list (with commas).
+-- yaml `optional:` names -> set (a Tensor listed there is Tensor?;
+-- dygraph_functions.h:131 proves ad_func takes paddle::optional for them).
+local function optional_set(ir)
+  local opt = {}
+  if ir.optional then
+    for n in string.gmatch(ir.optional, "[^,%s]+") do
+      opt[n] = true
+    end
+  end
+  return opt
+end
+
+-- C arguments list for a wrapper: inputs as pd_tensor (four shapes:
+-- Tensor -> pd_tensor, Tensor? -> pd_tensor with NULL = none, and
+-- std::vector<Tensor>[-?] -> (const pd_tensor* p, int64_t n) pair per
+-- 01-c-abi.md sec.4 item 4), attrs expanded via capi_type (one scalar C
+-- param, or (ptr, n) for array-like / extra prelude statements).
+-- Returns (params, callargs, preludes) as strings.
 local function signature(ir)
-  local params, callargs = {}, {}
+  local params, callargs, preludes = {}, {}, {}
+  local opt = optional_set(ir)
+  local function add_abi(abi, name)
+    for _, decl in ipairs(abi.params or {}) do
+      params[#params + 1] = string.gsub(decl, "<name>", name)
+    end
+    for _, pre in ipairs(abi.prelude or {}) do
+      preludes[#preludes + 1] = string.gsub(pre, "<name>", name)
+    end
+    for _, c in ipairs(abi.call or {}) do
+      callargs[#callargs + 1] = string.gsub(c, "<name>", name)
+    end
+  end
   for _, in_ in ipairs(ir.inputs or {}) do
-    params[#params + 1] = "pd_tensor " .. in_.name
-    callargs[#callargs + 1] = "reinterpret_cast<pd_tensor_t*>("
-      .. in_.name .. ")->value /* " .. in_.type .. " */"
+    local name = in_.name
+    if in_.type == "Tensor" then
+      if opt[name] then
+        add_abi({
+          params = { "pd_tensor <name>" },
+          call = { "<name> ? paddle::make_optional("
+            .. "reinterpret_cast<pd_tensor_t*>(<name>)->value) : paddle::none"
+            .. " /* Tensor? */" },
+        }, name)
+      else
+        add_abi({
+          params = { "pd_tensor <name>" },
+          call = { "reinterpret_cast<pd_tensor_t*>(<name>)->value /* Tensor */" },
+        }, name)
+      end
+    elseif in_.type == "std::vector<Tensor>" then
+      if opt[name] then
+        add_abi({
+          params = { "const pd_tensor* <name>", "int64_t <name>_n" },
+          prelude = {
+            "  std::vector<paddle::Tensor> <name>_tmp;",
+            "  if (<name>) {",
+            "    <name>_tmp.reserve(<name>_n);",
+            "    for (int64_t i = 0; i < <name>_n; ++i)",
+            "      <name>_tmp.emplace_back("
+              .. "reinterpret_cast<pd_tensor_t*>(<name>[i])->value);",
+            "  }",
+          },
+          call = { "<name> ? paddle::make_optional(<name>_tmp) : paddle::none"
+            .. " /* std::vector<Tensor>? */" },
+        }, name)
+      else
+        add_abi({
+          params = { "const pd_tensor* <name>", "int64_t <name>_n" },
+          prelude = {
+            "  std::vector<paddle::Tensor> <name>_tmp;",
+            "  <name>_tmp.reserve(<name>_n);",
+            "  for (int64_t i = 0; i < <name>_n; ++i)",
+            "    <name>_tmp.emplace_back("
+              .. "reinterpret_cast<pd_tensor_t*>(<name>[i])->value);",
+          },
+          call = { "<name>_tmp /* std::vector<Tensor> */" },
+        }, name)
+      end
+    else
+      error("emit_capi: unsupported input type '" .. in_.type .. "' for '"
+            .. ir.op .. "." .. name .. "'")
+    end
   end
   for _, attr in ipairs(ir.attrs or {}) do
-    local c = capi_type(attr.type)
-    params[#params + 1] = c .. " " .. attr.name
-    local arg = attr.name
-    if is_bool(attr.type) then
-      arg = arg .. " != 0"
+    local abi = capi_type(attr.type)
+    local name = attr.name
+    for _, decl in ipairs(abi.params) do
+      local d = string.gsub(decl, "<name>", name)
+      params[#params + 1] = d
     end
-    callargs[#callargs + 1] = arg .. " /* " .. attr.type .. " */"
+    for _, pre in ipairs(abi.prelude or {}) do
+      local p = string.gsub(pre, "<name>", name)
+      preludes[#preludes + 1] = p
+    end
+    for _, c in ipairs(abi.call) do
+      local e = string.gsub(c, "<name>", name)
+      callargs[#callargs + 1] = e
+    end
   end
-  return table.concat(params, ", "), table.concat(callargs, ", ")
+  return table.concat(params, ", "), table.concat(callargs, ", "),
+         table.concat(preludes, "\n")
 end
 
 -- Emit one wrapper body for the op.
 local function emit_op(ir, out)
   -- op name -> C function name: pd_op_<name>
   local fn = "pd_op_" .. ir.op
-  local params, callargs = signature(ir)
+  local params, callargs, preludes = signature(ir)
   out[#out + 1] = string.format(
     "/* %s (yaml block line %d) */", ir.op, ir.line)
   out[#out + 1] = string.format(
     "pd_tensor %s(%s) {", fn, params)
   out[#out + 1] = "  PD_GUARD_BEGIN;"
+  if preludes ~= "" then
+    out[#out + 1] = preludes   -- already indented, ends with newline
+  end
   out[#out + 1] = "  paddle::Tensor out = " .. ir.op .. "_ad_func("
   out[#out + 1] = "      " .. callargs .. ");"
   out[#out + 1] = "  return reinterpret_cast<pd_tensor>("
@@ -154,6 +291,16 @@ end
 local function emit_all(ops, outdir, sha)
   local buckets = {}   -- letter -> array of op names
   for _, ir in ipairs(ops) do
+    -- multi-output ops: the *_ad_func returns a std::tuple; wrapping them
+    -- as a single paddle::Tensor would silently produce uncompilable code
+    -- (2.3.3 discipline: refuse to emit rather than emit something wrong).
+    -- Multi-output return shape is 2.3.4 wall #3.
+    local rpos = ir.returns or {}
+    if #rpos > 1 then
+      error("emit_capi: op '" .. ir.op .. "' has " .. #rpos
+            .. " outputs -- multi-output wrappers not implemented yet "
+            .. "(wall #3); refuse to emit")
+    end
     local letter = string.sub(ir.op, 1, 1)
     buckets[letter] = buckets[letter] or {}
     buckets[letter][#buckets[letter] + 1] = ir

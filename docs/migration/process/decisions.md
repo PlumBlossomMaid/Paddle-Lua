@@ -228,6 +228,27 @@ argcheck 的思路是:把「遍历规则表、逐个查类型」这件解释式�
   (`foundations.md` §4.8)
 - **生成的 2000+ 算子不调 `_args`** —— 构建期展开,但**共用同一份 schema 与错误信息格式**(C11)
 
+### 2.12 为什么 Scalar 类 attr 在 C ABI 层用 `double` 表示(墙 #2,2026-10-24)
+
+**决策:Lua(唯一 double)传 double 给生成算子;调用点 `paddle::experimental::Scalar(double)`。
+不引入 pd_scalar 结构体、不做 int/float 分派。**
+
+依据(全部从上游源码读到):
+1. **Python 侧按类型分派**:`paddle/fluid/pybind/eager_utils.cc:2541` `CastPyArg2Scalar`
+   对 int → `Scalar(int64_t)`、float → `Scalar(double)`、bool → `Scalar(bool)`、
+   Tensor → `Scalar(Tensor)`。
+2. **phi kernel 消费不看内部 dtype**:kernel 统一 `scalar.to<T>()` 取值
+   (`arg_min_max_kernel.cc:165`、`arange_kernel.cc:64-66`),不分支 internal dtype,
+   所以「Scalar 里存的是 int64 还是 double」对计算结果无影响。
+3. **ScalarBase 支持 double**:`paddle/phi/common/scalar.h:31` variant 含
+   int/float/double/bool/complex/字符串,double 是合法存储类型。
+
+因此 Lua 传 double 与 Python 传 int/float 结果等价——这是「编造接口」与「有出处的等价替换」的边界:
+编造的是「Lua 侧有个 int 和 double 的区分」,等价的是「double 进 Scalar,消费端统一 to<T>()」。
+
+**翻案条件**:若某 kernel 出现 `if (scalar.dtype() == ...)` 分支(消费端查内部类型),
+本决策作废,需回到按类型分派。目前 533 算子普查无此类 kernel。
+
 ---
 
 ## 3. 待拍板(需要人决定,智能体不要自行决定)
