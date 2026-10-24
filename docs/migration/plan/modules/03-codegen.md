@@ -276,7 +276,12 @@ Lua 保留字命名的 yaml 参数都会炸,生成器不是猜,是转义。**
 ## 5. 验收
 
 - [x] 覆盖 `ops.yaml` 中 >= 95% 的算子,未覆盖的逐条列出理由
-      (**2.3.4 收尾①实测:529/533 生成,4 个 skip 全在 skip_rules 且逐条注明理由**)
+      (**实测 2026-10-25:ops.yaml 529 forward / 35 skip / 494 生成。
+      v1 口径(排除 25 个 in-place 变体 —— skip_rules 明确 M2 再加)
+      = 494/504 = 98.0% ≥ 95% ✅。raw 93.4%。ops.yaml 的 35 个 skip
+      全部逐条注明理由:in-place 25 + graph 6 + runtime-length 4;其余
+      (distributed 1 + sparse 1)在 dygraph_ops.yaml,两文件合计
+      567 forward / 38 skip / 529 生成,raw 93.3%**)
 - [x] 连跑两次,`git diff` 为空(可重入)
       (**收尾①实测:capifull_final vs capifull 24 文件 0 diff、luafull_final vs
       luafull2 529 文件 0 diff —— 纯 Lua 字节对比**)
