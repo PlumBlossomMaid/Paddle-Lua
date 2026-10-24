@@ -122,7 +122,7 @@ egr::Backward({y}, {}, false);
 | T-M1-02 | vendor Penlight 受限子集(11 文件)+ 校验其在 5.1–5.4/LJ 上可加载 | `plan/foundations.md` §1.2 | 1d |
 | T-M1-03 | `class.lua` extend/super 类系统 | `plan/overview.md` §6.1 | 3d |
 | T-M1-04 | `_wrap.lua` 三模式调用(移植 Insight7) | D15 | 1d |
-| T-M1-05 | C ABI 中间层骨架(生命周期/错误/dtype/place) | D2 | 5d |
+| T-M1-05 | C ABI 中间层骨架(生命周期/错误/dtype/place) | D2 | 5d | ✅ **DONE(2026-10-24)**:paddle_c.h(2.1.1)+ status.cc(2.1.2)+ tensor.cc(2.1.3)+ autograd.cc(2.1.4)+ 纯 C 迷你训练循环(2.1.5)全部实现并实测 **MINI_TRAIN PASS**(e069c9c)。三处链接坑已解:① @rsp 必须 link.exe 直调 + 当前目录裸 `@capi_libs.rsp`(cl 转交 LNK1181);② 上游 **/MT + 30 宏**(build.ninja:2028/120),缺 PHI_INNER 致 LNK2019 dllimport;③ `Tensor(const Place&)`/`(Place,shape)` 是幽灵构造(tensor.h:121/135 只声明不实现)→ 换 `paddle::experimental::empty`(api.h:384)。验收:梯度==手算、坏参数→PD_INVALID_ARG、双线程错误槽隔离,19 项全过。详见 status.md §2 |
 | T-M1-06 | sol2 `usertype<Tensor>` + `__lanesclone` 槽位(D24) | D1/D8 | 4d |
 | T-M1-07 | `slice.lua` + `lua_spec_to_cpp`(移植 Insight7) | D14 | 2d |
 | T-M1-08 | 算子生成器原型(yaml → C ABI + sol2 + `_ops.lua`) | C8 | 10d |

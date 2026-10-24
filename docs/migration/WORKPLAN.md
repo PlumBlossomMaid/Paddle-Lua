@@ -122,13 +122,13 @@
  |         ⚠️ 但**必须在 2.5(P5)之前可用** —— 它决定所有公开 API 的签名形状
  |
  +-- [🔵] 2. M1 MVP:MNIST 能训练            前置:1  ✅ G1 已开(2026-10-23)
- |    +-- [⬜] 2.1 C ABI 中间层              -> plan/modules/01-c-abi.md
- |    |    +-- [⬜] 2.1.1 paddle_c.h 接口定义
- |    |    +-- [⬜] 2.1.2 status.cc 异常边界     ★ 早做,见 layout.md §3
- |    |    +-- [⬜] 2.1.3 tensor.cc
- |    |    +-- [⬜] 2.1.4 autograd.cc
- |    |    +-- [⬜] 2.1.5 纯 C 迷你训练循环      ★ 不许跳过
- |    |    +-- [⬜] 2.1.6 device.cc / jit.cc
+ |    +-- [✅] 2.1 C ABI 中间层              -> plan/modules/01-c-abi.md
+ |    |    +-- [✅] 2.1.1 paddle_c.h 接口定义
+ |    |    +-- [✅] 2.1.2 status.cc 异常边界     ★ 早做,见 layout.md §3
+ |    |    +-- [✅] 2.1.3 tensor.cc
+ |    |    +-- [✅] 2.1.4 autograd.cc
+ |    |    +-- [✅] 2.1.5 纯 C 迷你训练循环      ★ 不许跳过
+ |    |    +-- [🔵] 2.1.6 device.cc / jit.cc
  |    +-- [⬜] 2.2 sol2 绑定层               -> plan/modules/02-binding.md
  |    |    +-- [⬜] 2.2.1 module.cc + error.cc
  |    |    +-- [⬜] 2.2.2 tensor_binding.cc
