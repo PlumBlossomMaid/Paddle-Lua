@@ -53,6 +53,16 @@ Paddle 自己的 Python 生成器(`python_c_gen.py` / `codegen_utils.py`)**不�
 Lua 子集解析器足够,不需要完整的 YAML 实现。**上线前用全部 519+107 个 op 块做解析对拍,
 发现新语法就扩展子集(R42 验收项)。
 
+**⚠️ 生成器输入清单(2026-10-24 实测修正):`add` / `matmul` 不在 `ops.yaml` 里!**
+上游 3.5 把基础算术算子挪进了 `inconsistent/dygraph_ops.yaml`(38 块,`add` 在 :4、
+`matmul` 在 :248)。`ops.yaml` 只有 529 块,不含 `add`/`matmul`/`multiply` 这类
+基础算子。**上游生成器的真实输入是 9 份 yaml**(`build-nopy/build.ninja:31039` 实测):
+`ops.yaml` + `inconsistent/dygraph_ops.yaml` + `sparse_ops.yaml` + `fused_ops.yaml` +
+`strings_ops.yaml` + `backward.yaml` + `inconsistent/dygraph_backward.yaml` +
+`sparse_backward.yaml` + `fused_backward.yaml`。我们的 `yaml_subset.lua` 已对
+`inconsistent/dygraph_ops.yaml` 验证可解析(38 块)。**2.3.4 全量生成时输入必须含
+`inconsistent/dygraph_ops.yaml`,否则基础算子静默缺失。**
+
 ---
 
 ## 3. 设计

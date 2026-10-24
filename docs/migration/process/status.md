@@ -25,12 +25,12 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | | |
 |---|---|
 | 阶段 | **M1(已开闸)** —— 先搭 `csrc/` C ABI 中间层 + sol2 绑定 + MNIST 收尾 |
-| 工程树位置 | `WORKPLAN.md` 节点 **2.3 算子代码生成 2.3.3 三算子试生成**(见 `WORKPLAN.md` 🔵) |
-| 下一个动作 | 2.3.3:`emit_capi.lua` + `emit_lua.lua` 最小骨架,对 add/matmul/relu 三算子试生成 C ABI 包装 + Lua 侧签名,人工 review 后进 git;加载 `index_semantics.lua` 标注做 1-based 转换 |
+| 工程树位置 | `WORKPLAN.md` 节点 **2.3 算子代码生成 2.3.4 全量生成 + regen-diff CI**(见 `WORKPLAN.md` 🔵) |
+| 下一个动作 | 2.3.4:去掉 `--ops` 白名单做全量生成(会撞 `index_semantics.require_annotated` → 逐批读 yaml 补标注;emit 遇多输出/有 index 语义算子会报错 → 扩展 emit);建 regen-diff CI(`ci.md` §6③) |
 | 人点名的三件调研 | **① Q-22** phi 层有没有不依赖 pybind 的 DLPack 通道(决定 Insight7 内存协议怎么定);**② 数出「跑通 MNIST 训练,Insight7 至少要哪些函数」**(从上游代码里数,不凭感觉 —— 已知 `python/paddle` 全层只用 132 个 `np.*` 符号、真函数约 15 个,见 `research/ecosystem.md` §5.1);**③ Q-23** Array API Standard 是否如记忆所述(要走代理核实)。三件都**不阻塞** `WORKPLAN` 主线 |
 | 全部 ⛔ 阻塞节点 | `WORKPLAN.md` 4.3 distributed —— 无多卡环境(待拍板 P2) |
 | 待人拍板 | 剩余待拍板:P3 / P4 / P6 / P7(改写)+ 1.7 的 P9(Penlight 分发)与 luarocks 占位 —— 见 `process/decisions.md` §3 §4 |
-| 上次卡在哪 | **2.3.2 yaml_subset.lua 完成(2026-10-24)**:纯 Lua 5.1 子集 YAML 解析器(对齐 codegen_utils.py 的 ParseYamlArgs:321/ParseYamlReturns:365/ParseYamlInplaceInfo:477/ParseYamlCompositeInfo:490/ParseYamlForwardFromBackward:425),**4 份 yaml 全量对拍 vs Python 原版全绿**:ops.yaml 529 / backward.yaml 396 / legacy/static_ops.yaml 109 / op_compat.yaml 548 块,IR 逐块一致(03-codegen.md §6 的 R42 验收项完成)。语法覆盖实测:无锚点/多行块标量/合并键,但 **args/forward/output 有多行 plain scalar 折叠**(如 ops.yaml:75)与 `output :` 空值(静态图算子,如 comm_init_all)——均已支持。坑:**Lua 5.1 pattern 无 `(group)?` 可选捕获**(`((const )?\S+)` 整体匹配失败,手工模拟);空表 JSON 序列化须为 `[]` 非 `{}`;CLI 必须 `arg[0]` 门控 + `return M`(require 时 Lua 会传模块名作 vararg,误把 "yaml_subset" 当文件)。生成器模块形态已验(require 可用) |
+| 上次卡在哪 | **2.3.3 三算子试生成完成(2026-10-24)**:`emit_capi.lua` + `emit_lua.lua` 端到端跑通,add/matmul/relu 生成产物落位(`csrc/capi_gen/ops_{a,m,r}.cc` + `ops_gen.h`、`lua/paddle/_ops/{add,matmul,relu}.lua`),lint 全绿 + 可重入(暂存后重跑 diff 空)。**关键发现:add/matmul 不在 ops.yaml(529 块)里,在 `inconsistent/dygraph_ops.yaml`(38 块)**——上游 3.5 把基础算术算子挪进 inconsistent 目录,生成器输入必须含它(build.ninja:31039 的 9 份 yaml 清单为证)。坑:**Lua 5.1 的 `select(i, ...)` 序号不能复用共享计数器**(具名分支填满后位置分支从 N+1 开始,全错);**`t.x or t[i]` 会吞显式 false**(bool 属性),必须显式判 nil;生成的注释用英文(项目约定);`.gitattributes` 标 `csrc/capi_gen/` 与 `lua/paddle/_ops/` 为 linguist-generated。emit 对 index 语义算子、多输出算子**拒绝生成而非猜**(require_annotated + 显式报错),1-based 转换留给 2.3.4 扩展 |
 
 ---
 

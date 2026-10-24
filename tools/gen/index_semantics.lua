@@ -65,13 +65,33 @@ M.returns_index = {
   topk = { 2 },      -- second output (indices)
 }
 
+-- op -> true
+-- Operators whose args/outputs were READ and found to carry NO index
+-- semantics at all. The generator must still see the operator in this
+-- table before emitting it (conventions.md sec.5.2: never default an
+-- unannotated operator through); `no_index` is the explicit "I checked,
+-- nothing to convert" annotation. An operator is only allowed to skip
+-- conversion if a human has read its yaml and put it HERE (or in
+-- takes_index / returns_index).
+--
+-- Verified 2026-10-24 (2.3.3 trial generation):
+--   add    : inconsistent/dygraph_ops.yaml:4   (Tensor x, Tensor y) -> Tensor(out)
+--   matmul : inconsistent/dygraph_ops.yaml:248 (Tensor x, Tensor y,
+--            bool transpose_x=false, bool transpose_y=false) -> Tensor
+--   relu   : ops.yaml:4626                     (Tensor x) -> Tensor(out)
+M.no_index = {
+  add = true,
+  matmul = true,
+  relu = true,
+}
+
 -- ---------------------------------------------------------------------------
 -- Query API for the generator
 -- ---------------------------------------------------------------------------
 
 -- Returns true if the operator is known to the table at all.
 function M.has(op)
-  return M.takes_index[op] ~= nil or M.returns_index[op] ~= nil
+  return M.takes_index[op] ~= nil or M.returns_index[op] ~= nil or M.no_index[op] == true
 end
 
 -- Params of `op` that are 1-based indices (empty table if none annotated).

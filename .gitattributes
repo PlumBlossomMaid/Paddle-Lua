@@ -2,3 +2,7 @@
 *.md  text eol=lf diff=markdown
 *.png binary
 *.jpg binary
+
+# Generated code: hide from PR diffs by default (layout.md "linguist-generated")
+csrc/capi_gen/ linguist-generated
+lua/paddle/_ops/ linguist-generated
