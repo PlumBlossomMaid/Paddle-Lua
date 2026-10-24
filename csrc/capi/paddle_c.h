@@ -79,31 +79,42 @@ typedef enum {
 } pd_dtype;
 
 /* ------------------------------------------------------------------ */
+/* Handles (01-c-abi.md sec.3.1)                                      */
+/* ------------------------------------------------------------------ */
+
+/* pd_tensor wraps a heap paddle::Tensor* (see tensor.cc).
+ * pd_place wraps a heap phi::Place* (see device.cc, 2.1.6).
+ *
+ * Typedefs come BEFORE the place/lifetime declarations below: the C ABI
+ * functions reference these handle types, and C needs them declared first. */
+
+typedef struct pd_tensor_s*  pd_tensor;
+typedef struct pd_place_s*   pd_place;
+
+/* ------------------------------------------------------------------ */
 /* place / device (01-c-abi.md sec.3.4)                              */
 /* ------------------------------------------------------------------ */
 
 /* No pd_place struct in the ABI (sec.4). A place is the pair
- * (device kind, device index); CPU always uses index 0. */
+ * (device kind, device index); CPU always uses index 0.
+ *
+ * Kinds mirror paddle/phi/common/place.h AllocationType (place.h:32-43):
+ *   UNDEFINED=0, CPU=1, GPU=2(CUDA), GPUPINNED=3, XPU=4, XPUPINNED=5,
+ *   IPU=7, CUSTOM=9. MLU/NPU are NOT in upstream's enum, so they are not
+ * represented here either. */
 typedef enum {
   PD_PLACE_CPU = 0,
   PD_PLACE_CUDA,
   PD_PLACE_CUDAPINNED,
   PD_PLACE_XPU,
+  PD_PLACE_XPUPINNED,
   PD_PLACE_IPU,
-  PD_PLACE_MLU,
-  PD_PLACE_NPU,
   PD_PLACE_CUSTOM
 } pd_place_kind;
 
-/* ------------------------------------------------------------------ */
-/* Handles (01-c-abi.md sec.3.1)                                      */
-/* ------------------------------------------------------------------ */
-
-/* pd_tensor wraps a heap paddle::Tensor* (see tensor.cc).
- * pd_place wraps a heap phi::Place* (see device.cc, 2.1.6). */
-
-typedef struct pd_tensor_s*  pd_tensor;
-typedef struct pd_place_s*   pd_place;
+/* Creates a place handle. Caller owns it; must call pd_place_free. */
+pd_place   pd_place_new(pd_place_kind kind, int index);
+void       pd_place_free(pd_place p);
 
 /* ------------------------------------------------------------------ */
 /* Group 1: lifetime (6 fns, 01-c-abi.md sec.3.3)                     */
@@ -126,9 +137,11 @@ void       pd_tensor_free(pd_tensor t);
 /* Deep copy (dst device = place; blocking=0 => caller syncs device). */
 pd_tensor  pd_tensor_clone(const pd_tensor t, pd_place place, int blocking);
 
-/* Refcount +1 (for returning the same tensor to Lua more than once;
- * pairs with _free). */
-void       pd_tensor_retain(pd_tensor t);
+/* New shell handle SHARING the same underlying storage (paddle::Tensor is
+ * value-semantics: its copy ctor shares the TensorBase, sec.4 note 1).
+ * Use it to hand the same tensor to Lua more than once; the caller owns the
+ * returned handle and must free it. This is NOT a deep copy. */
+pd_tensor  pd_tensor_retain(const pd_tensor t);
 
 /* ------------------------------------------------------------------ */
 /* Group 2: metadata (10 fns)                                         */

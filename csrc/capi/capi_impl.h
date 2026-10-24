@@ -51,4 +51,12 @@ void pd_set_error(pd_status st, const char* msg);
     return (on_err);                                     \
   }
 
+/* For void-returning exported functions. */
+#define PD_GUARD_END_VOID                               \
+  } catch (const std::exception& e) {                   \
+    pd_set_error(PD_ERROR, e.what());                   \
+  } catch (...) {                                       \
+    pd_set_error(PD_ERROR, "unknown C++ exception");    \
+  }
+
 #endif  /* PADDLE_LUA_CAPI_IMPL_H */
