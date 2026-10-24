@@ -254,6 +254,23 @@ dropout / gru / logsumexp 等)—— 此时 C ABI 必须走单输出形态。墙
 guarded 算子(多输出名单里的)在 .cc 被错误分发到 out-array 形态导致编译失败。
 修复:`.cc` 分发统一改用 `#effective_returns(ir) > 1`。
 
+**⑪ yaml 参数名可能是 Lua 关键字。** 全量 lint(2026-10-25,529 wrapper)抓出:
+`arange` / `range_v2` 的输入参数名就是 `end`(ops.yaml),生成的 wrapper
+直接写 `end = v` / `t.end` / `end = select(...)` 全是语法错误 ——
+Lua 5.1 编译器报 `<name> expected near 'end'`。修复:emit_lua 定义
+`LUA_KEYWORDS` 表 + `lua_ident(name)`(关键字 → 局部名 `end_`)+
+`lua_field(name)`(具名表访问 → `t["end"]`,字符串键永远合法)。
+位置调用不受影响(`paddle.arange(0, 10, 1)` 照常)。**同类坑:任何以
+Lua 保留字命名的 yaml 参数都会炸,生成器不是猜,是转义。**
+
+**⑫ 浮点默认值的中缀 `f` 剥不干净。** `lua_default_literal` 原来只做
+`string.gsub(default_str, "f$", "")` —— `0.9f` 能剥,但 `rrelu` 的
+`lower = 1.0f/8`、`upper = 1.0f/3`(yaml)剥不掉中缀 `f`,生成
+`if lower == nil then lower = 1.0f/8 end` → 5.1 报 `malformed number`。
+修复:按数字 token 剥 `(%d)%.?%d*[eE]?[+-]?%d*[fF]?` 的尾缀 `f`,保留表达式
+(`1.0/8` 由 Lua 求值)。**教训:默认值翻译不能只处理"形如数字"的最常见
+形态,要按 token 处理任意 C++ 常量表达式。**
+
 ---
 
 ## 5. 验收

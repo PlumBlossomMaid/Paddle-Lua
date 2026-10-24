@@ -38,6 +38,31 @@ local yaml = require "yaml_subset"
 local index_sem = require "index_semantics"
 local skip_rules = require "skip_rules"
 
+-- Lua 5.1 reserved words. A yaml param may legally be named `end`
+-- (arange, range_v2: ops.yaml), which Lua cannot use as an identifier
+-- or as a `.` field name. The generated wrapper renames such params to
+-- `<name>_` for the local variable and reads the named table via
+-- t["<name>"] -- string keys are always legal. Positional calls are
+-- unaffected (arange(0, 10, 1) still works).
+local LUA_KEYWORDS = {
+  ["and"] = true, ["break"] = true, ["do"] = true, ["else"] = true,
+  ["elseif"] = true, ["end"] = true, ["false"] = true, ["for"] = true,
+  ["function"] = true, ["if"] = true, ["in"] = true, ["local"] = true,
+  ["nil"] = true, ["not"] = true, ["or"] = true, ["repeat"] = true,
+  ["return"] = true, ["then"] = true, ["true"] = true, ["until"] = true,
+  ["while"] = true,
+}
+-- local identifier for a yaml param name (keyword -> `end_`)
+local function lua_ident(name)
+  if LUA_KEYWORDS[name] then return name .. "_" end
+  return name
+end
+-- named-table field access for a yaml param name (keyword -> t["end"])
+local function lua_field(name)
+  if LUA_KEYWORDS[name] then return "[\"" .. name .. "\"]" end
+  return "." .. name
+end
+
 -- yaml `{1, 2}` literal -> Lua table literal "{ 1, 2 }" (array attrs:
 -- IntArray / std::vector<T>; C ABI side is (ptr, n), Lua side is a table).
 local function lua_array_literal(default_str)
@@ -95,7 +120,13 @@ local function lua_default_literal(cpp_type, default_str)
     -- yaml floats may carry an f suffix (0.9f) or a constant expression
     -- (1.0f/3, 1.6732632423543772848170429916717): strip the f, keep the
     -- expression (Lua evaluates division fine). Lua reads the exponent fine.
-    local v = string.gsub(default_str, "f$", "")
+    -- NOTE: strip the `f` from ANY numeric token, not just a trailing one
+    -- (1.0f/8 -> 1.0/8; f$ alone would leave the mid-token f and emit a
+    -- malformed number). Surveyed 2026-10-25: rrelu lower/upper are the
+    -- only non-skipped ops with a mid-expression f.
+    local v = string.gsub(default_str, "(%d)%.?%d*[eE]?[+-]?%d*[fF]?", function(m)
+      return string.gsub(m, "[fF]$", "")
+    end)
     if tonumber(v) then return v end
     if string.find(v, "/") then return v end   -- 1.0/3, 1.0/8
   elseif cpp_type == "int" or cpp_type == "int64_t" then
@@ -106,7 +137,9 @@ local function lua_default_literal(cpp_type, default_str)
     local v = string.gsub(default_str, "L$", "")  -- 0L -> 0
     if tonumber(v) then return v end
   elseif cpp_type == "paddle::experimental::Scalar" then
-    local v = string.gsub(default_str, "f$", "")
+    local v = string.gsub(default_str, "(%d)%.?%d*[eE]?[+-]?%d*[fF]?", function(m)
+      return string.gsub(m, "[fF]$", "")
+    end)
     if tonumber(v) then return v end
   elseif cpp_type == "std::string" then
     return string.format("%q", default_str)
@@ -155,7 +188,7 @@ local function shift_axis_default(cpp_type, default_str)
 end
 
 -- Emit one wrapper module file body.
-local function emit_wrapper(ir)
+local function emit_wrapper(ir, sha)
   local op = ir.op
   local params, callargs = {}, {}
   -- index params of this op (1-based names)
@@ -185,14 +218,14 @@ local function emit_wrapper(ir)
   lines[#lines + 1] = "  if n == 1 and type(select(1, ...)) == \"table\" then"
   lines[#lines + 1] = "    local t = select(1, ...)"
   for i, name in ipairs(order) do
-    lines[#lines + 1] = "    local v = t." .. name
+    lines[#lines + 1] = "    local v = t" .. lua_field(name)
     lines[#lines + 1] = "    if v == nil then v = t[" .. i .. "] end"
-    lines[#lines + 1] = "    " .. name .. " = v"
+    lines[#lines + 1] = "    " .. lua_ident(name) .. " = v"
   end
   lines[#lines + 1] = "  else"
   for i, name in ipairs(order) do
     lines[#lines + 1] = string.format(
-      "    %s = select(%d, ...)", name, i)
+      "    %s = select(%d, ...)", lua_ident(name), i)
   end
   lines[#lines + 1] = "  end"
 
@@ -206,7 +239,8 @@ local function emit_wrapper(ir)
     end
     if lit then
       lines[#lines + 1] = string.format(
-        "  if %s == nil then %s = %s end", a.name, a.name, lit)
+        "  if %s == nil then %s = %s end",
+        lua_ident(a.name), lua_ident(a.name), lit)
     end
   end
 
@@ -219,11 +253,12 @@ local function emit_wrapper(ir)
   -- Runs AFTER defaults so the shifted default literals convert back to
   -- the yaml (0-based) value.
   for _, a in ipairs(ir.attrs or {}) do
-    local name = a.name
-    if take_idx[name] then
+    local name = lua_ident(a.name)
+    local yaml_name = a.name
+    if take_idx[yaml_name] then
       lines[#lines + 1] = string.format(
         "  if %s ~= nil then %s = %s - 1 end", name, name, name)
-    elseif name == "axis" or name == "dim" then
+    elseif yaml_name == "axis" or yaml_name == "dim" then
       if is_scalar_attr(a.type) then
         lines[#lines + 1] = string.format(
           "  if %s ~= nil and %s > 0 then %s = %s - 1 end",
@@ -243,14 +278,15 @@ local function emit_wrapper(ir)
   end
 
   -- build the call: inputs -> pd_tensor locals (already resolved), attrs
-  -- with bool -> 1/0
+  -- with bool -> 1/0. Uses lua_ident: a keyword yaml param (arange `end`)
+  -- is held in a `end_` local and passed under that name.
   for _, in_ in ipairs(ir.inputs or {}) do
-    callargs[#callargs + 1] = in_.name
+    callargs[#callargs + 1] = lua_ident(in_.name)
   end
   for _, a in ipairs(ir.attrs or {}) do
-    local v = a.name
+    local v = lua_ident(a.name)
     if a.type == "bool" then
-      v = "(" .. a.name .. " and 1 or 0)"
+      v = "(" .. lua_ident(a.name) .. " and 1 or 0)"
     end
     callargs[#callargs + 1] = v
   end
@@ -269,7 +305,7 @@ local function emit_wrapper(ir)
 
   local body = {}
   body[#body + 1] = "-- GENERATED BY tools/gen/emit_lua.lua"
-  body[#body + 1] = "-- FROM  paddle/phi/ops/yaml/{ops,backward,...}.yaml @ sha"
+  body[#body + 1] = "-- FROM  paddle/phi/ops/yaml/{ops,backward,...}.yaml @ " .. sha
   body[#body + 1] = "-- DO NOT EDIT"
   body[#body + 1] = ""
   body[#body + 1] = "local paddle_core = require \"paddle_core\""
@@ -364,7 +400,7 @@ end
 
 io.stdout:write("emit_lua: " .. #ops .. " ops, output -> " .. outdir .. "\n")
 for _, ir in ipairs(ops) do
-  local ok3, body = pcall(emit_wrapper, ir)
+  local ok3, body = pcall(emit_wrapper, ir, sha)
   if not ok3 then
     io.stderr:write("emit_lua FAIL op " .. ir.op .. ": " .. tostring(body) .. "\n")
     os.exit(1)
