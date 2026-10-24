@@ -59,8 +59,13 @@ void pd_set_error(pd_status st, const char* msg);
  *   }
  *
  * `on_err` MUST be an expression, e.g. `PD_ERROR` or `NULL`.
+ *
+ * Entry clears the slot (paddle_c.h contract: pd_last_status() is "valid
+ * until the next pd_* call") so a successful call resets a stale error
+ * from an earlier failure -- pd::check() in the sol layer depends on this.
  */
 #define PD_GUARD_BEGIN                                   \
+  pd_set_error(PD_OK, "");                               \
   try {
 
 #define PD_GUARD_END(on_err)                             \

@@ -219,6 +219,14 @@ int64_t    pd_device_allocated_bytes(int kind);
  * (e.g. "CPU", "GPU", "XPU"; "?" if unknown). Never NULL. */
 const char* pd_place_kind_name(int kind);
 
+/* One-time eager runtime init (idempotent). MUST be called before any pd_*
+ * call that reaches the phi kernel factory (pd_tensor_from_host_buffer,
+ * ops). Without it the kernel factory throws. Only the C ABI layer links
+ * Paddle (02-binding.md sec.2), so every process embedding paddle_core
+ * goes through this -- never static-link Paddle in the embedder itself
+ * (duplicate gflags registration, flags_native.cc:309). */
+pd_status  pd_init_once(void);
+
 /* ------------------------------------------------------------------ */
 /* Group 6: jit layers (6 fns, 08-jit-infer.md sec.3.2; impl 2.1.6)   */
 /* ------------------------------------------------------------------ */

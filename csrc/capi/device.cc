@@ -10,12 +10,17 @@
 //   paddle/phi/core/device_context.h:184       DeviceContext::Wait()
 //   paddle/phi/core/memory/stats.h:143         DeviceMemoryStatCurrentValue
 //   paddle/phi/core/memory/stats.h:150         HostMemoryStatCurrentValue
+//   paddle/fluid/platform/init.h:443           InitMemoryMethod / InitDevices
+//   paddle/fluid/eager/api/utils/global_utils.h  egr::Controller
 //
 // CPU-only build (WITH_GPU=OFF): GPU/XPU branches are #ifdef'd out below
 // so this file links everywhere. Revisit when a GPU build lands.
 
 #include <cstring>
+#include <mutex>
 
+#include "paddle/fluid/eager/api/utils/global_utils.h"
+#include "paddle/fluid/platform/init.h"
 #include "paddle/phi/backends/context_pool.h"
 #include "paddle/phi/backends/device_manager.h"
 #include "paddle/phi/core/device_context.h"
@@ -24,6 +29,26 @@
 #include "capi_impl.h"
 
 extern "C" {
+
+pd_status pd_init_once(void) {
+  PD_GUARD_BEGIN;
+  // Idempotent eager init. MUST run before any pd_* call that reaches the
+  // phi kernel factory (e.g. pd_tensor_from_host_buffer -> empty), otherwise
+  // the kernel factory throws (m0-report sec.4.2). Only the C ABI layer is
+  // allowed to link Paddle (02-binding.md sec.2); the sol layer / smoke EXEs
+  // call this through the Lua module instead of statically linking Paddle
+  // themselves -- this also avoids duplicate gflags registration
+  // (flags_native.cc:309) when paddle_core.dll is loaded into a process
+  // that would otherwise link the same static libs.
+  static std::once_flag init_flag;
+  std::call_once(init_flag, [] {
+    paddle::framework::InitMemoryMethod();  // init.h:443
+    paddle::framework::InitDevices();
+    egr::Controller::Instance().SetExpectedPlace(phi::CPUPlace());
+  });
+  return PD_OK;
+  PD_GUARD_END(PD_ERROR);
+}
 
 int pd_device_count(int kind) {
   PD_GUARD_BEGIN;

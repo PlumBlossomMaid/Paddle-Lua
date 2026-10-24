@@ -78,6 +78,14 @@ int main() {
     return 1;
   }
 
+  // Eager runtime init through the C ABI (pd_init_once), NOT by statically
+  // linking Paddle into this EXE: paddle_core.dll already links the static
+  // libs, and a second copy would re-register every gflags flag
+  // (flags_native.cc:309) -- the exact failure this smoke used to hit.
+  CHECK(run_ok(L,
+               "assert(paddle_core.init() == true, 'paddle_core.init()')"),
+        "paddle_core.init() idempotent eager init");
+
   CHECK(run_ok(L,
                "assert(type(paddle_core) == 'table', 'module is a table')\n"
                "assert(paddle_core.version() == '0.1.0', 'version')\n"
@@ -91,6 +99,27 @@ int main() {
                "assert(not ok, 'bad kind must raise')\n"
                "assert(type(err) == 'string' and #err > 0, 'err is string')"),
         "device_count(999) raises a Lua error (not a crash)");
+
+  // 2.2.2: LuaTensor usertype -- factory, shape/dtype/ndim/numel.
+  CHECK(run_ok(L,
+               "local t = paddle_core.tensor{2, 3}\n"
+               "print('DBG ndim=', t:ndim(), 'numel=', t:numel())\n"
+               "print('DBG shape=', t:shape())\n"
+               "assert(paddle_core.tensor ~= nil, 'tensor factory exists')\n"
+               "assert(t:ndim() == 2, 'ndim == 2')\n"
+               "assert(t:numel() == 6, 'numel == 6')\n"
+               "assert(t:shape()[1] == 2 and t:shape()[2] == 3, 'shape {2,3}')\n"
+               "assert(t:is_contiguous() == 1, 'contiguous')\n"
+               "assert(t:dtype() == 10, 'dtype == FLOAT32 (pd_dtype 10)')"),
+        "tensor{2,3}: ndim/numel/shape/is_contiguous/dtype");
+
+  // Stale-error regression (PD_GUARD_BEGIN now clears the slot): a success
+  // after a failure must NOT inherit the previous error.
+  CHECK(run_ok(L,
+               "pcall(paddle_core.device_count, 999)  -- leaves INVALID_ARG\n"
+               "local t = paddle_core.tensor{1}\n"
+               "assert(t:numel() == 1, 'stale error must be cleared')"),
+        "stale error slot cleared by successful call");
 
   lua_close(L);
 

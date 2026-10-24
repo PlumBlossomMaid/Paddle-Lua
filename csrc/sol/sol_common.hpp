@@ -35,6 +35,11 @@ inline void check() {
   }
 }
 
+/* Register the LuaTensor usertype + tensor factory into the module table
+ * that sits at stack index `module_index` (defined in tensor_binding.cc,
+ * 2.2.2). Called at the end of luaopen_paddle_core. */
+void register_tensor(lua_State* L, int module_index);
+
 }  // namespace pd
 
 #endif  // PADDLE_LUA_SOL_COMMON_H

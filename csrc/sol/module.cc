@@ -38,6 +38,16 @@ int l_device_count(lua_State* L) {
   return 1;
 }
 
+/* Eager runtime init (idempotent, device.cc pd_init_once). MUST be called
+ * before any tensor{} / op touches the phi kernel factory. Only the C ABI
+ * layer links Paddle (02-binding.md sec.2); the Lua embedder never does. */
+int l_init(lua_State* L) {
+  pd_status st = pd_init_once();
+  pd::check();                     // non-PD_OK -> Lua error
+  lua_pushboolean(L, st == PD_OK);
+  return 1;
+}
+
 /* Place-kind name string, pure table lookup, never errors. */
 int l_place_kind_name(lua_State* L) {
   int kind = static_cast<int>(luaL_checkinteger(L, 1));
@@ -47,6 +57,7 @@ int l_place_kind_name(lua_State* L) {
 
 const luaL_Reg kModuleFns[] = {
     {"version", l_version},
+    {"init", l_init},
     {"device_count", l_device_count},
     {"place_kind_name", l_place_kind_name},
     {nullptr, nullptr},
@@ -64,5 +75,11 @@ extern "C" int luaopen_paddle_core(lua_State* L) {
     lua_pushcfunction(L, fn->func);
     lua_setfield(L, -2, fn->name);
   }
+  // tensor_binding.cc: LuaTensor usertype + tensor{} factory (2.2.2).
+  // NB: the module table is NOT at index 1 -- require() pushes the module
+  // name onto the stack before calling luaopen, so index 1 is the string
+  // "paddle_core". The table we just built sits on top: pass -1 (relative
+  // to the current top), not an absolute index.
+  pd::register_tensor(L, -1);
   return 1;
 }
