@@ -128,7 +128,7 @@
  |    |    +-- [✅] 2.1.3 tensor.cc
  |    |    +-- [✅] 2.1.4 autograd.cc
  |    |    +-- [✅] 2.1.5 纯 C 迷你训练循环      ★ 不许跳过
- |    |    +-- [🔵] 2.1.6 device.cc / jit.cc
+ |    |    +-- [✅] 2.1.6 device.cc / jit.cc
  |    +-- [⬜] 2.2 sol2 绑定层               -> plan/modules/02-binding.md
  |    |    +-- [⬜] 2.2.1 module.cc + error.cc
  |    |    +-- [⬜] 2.2.2 tensor_binding.cc

@@ -25,12 +25,12 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | | |
 |---|---|
 | 阶段 | **M1(已开闸)** —— 先搭 `csrc/` C ABI 中间层 + sol2 绑定 + MNIST 收尾 |
-| 工程树位置 | `WORKPLAN.md` 节点 **2.1.6 device.cc / jit.cc**(见 `WORKPLAN.md` 🔵) |
-| 下一个动作 | 2.1.6:`csrc/capi/device.cc`(设备数/当前设备/同步/显存统计)+ `jit.cc`(按 layout.md §3 P1) |
+| 工程树位置 | `WORKPLAN.md` 节点 **2.2 sol2 绑定层 2.2.1 module.cc + error.cc**(见 `WORKPLAN.md` 🔵) |
+| 下一个动作 | 2.2.1:`csrc/sol/module.cc`(luaopen)+ `error.cc`(status → lua_error)(见 `plan/modules/02-binding.md`) |
 | 人点名的三件调研 | **① Q-22** phi 层有没有不依赖 pybind 的 DLPack 通道(决定 Insight7 内存协议怎么定);**② 数出「跑通 MNIST 训练,Insight7 至少要哪些函数」**(从上游代码里数,不凭感觉 —— 已知 `python/paddle` 全层只用 132 个 `np.*` 符号、真函数约 15 个,见 `research/ecosystem.md` §5.1);**③ Q-23** Array API Standard 是否如记忆所述(要走代理核实)。三件都**不阻塞** `WORKPLAN` 主线 |
 | 全部 ⛔ 阻塞节点 | `WORKPLAN.md` 4.3 distributed —— 无多卡环境(待拍板 P2) |
 | 待人拍板 | 剩余待拍板:P3 / P4 / P6 / P7(改写)+ 1.7 的 P9(Penlight 分发)与 luarocks 占位 —— 见 `process/decisions.md` §3 §4 |
-| 上次卡在哪 | **2.1.5 链接已全部打通**(2026-10-24,e069c9c):① @rsp 展开必须 link.exe 直调 + 当前目录裸 `@capi_libs.rsp`(cl 转交会 LNK1181);② 上游编译是 **/MT + 30 宏**(build.ninja:2028 DEFINES、build.ninja:120 FLAGS),缺 PHI_INNER 会把 `paddle::Tensor` 声明成 dllimport 致 LNK2019;③ **幽灵构造**:`Tensor(const Place&)`/`Tensor(const Place&, shape)`(tensor.h:121/135)上游只声明从不实现(phi.dll 不导出),已换 `paddle::experimental::empty`(api.h:384);④ 前向必须用 eager `*_ad_func`(建 autograd 图),`paddle::experimental::multiply` 不建图 → 梯度为 null。MINI_TRAIN PASS 19 项全过 |
+| 上次卡在哪 | **2.1 全部完成(2026-10-24,18ce534)**:C ABI 中间层 6 节点全绿(MINI_TRAIN PASS + DEVICE_SMOKE PASS)。链接配方固化:link.exe 直调 + 当前目录裸 `@capi_libs.rsp` + /LIBPATH + /FORCE:MULTIPLE;编译 = 上游 /MT + 30 DEFINES(含 PHI_INNER,缺则 paddle::Tensor 变 dllimport 致 LNK2019)+ /std:c++17。已踩坑:`Tensor(Place)`/`Tensor(Place,shape)` 是上游幽灵构造(tensor.h:121/135 只声明不实现)→换 `paddle::experimental::empty`(api.h:384);`DeviceManager` 不管理 CPU(count 硬返回 1);jit::Load 对坏路径不抛异常返回空 Layer;jit 链接缺口 shim(GetFeedTarget/GetFetchTarget)必要 |
 
 ---
 
