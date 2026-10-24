@@ -35,7 +35,10 @@ int pd_device_count(int kind) {
       // turn every query into an error.
       return 1;
     default:
-      return -1;  // not representable in this build
+      // -1 means "error" per 01-c-abi.md group 5; set the status so the
+      // sol2 layer's pd::check() turns it into a Lua error.
+      pd_set_error(PD_INVALID_ARG, "pd_device_count: unsupported kind");
+      return -1;
   }
   PD_GUARD_END(-1);
 }
