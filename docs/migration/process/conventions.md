@@ -146,15 +146,27 @@ Lua 惯例(如 `tostring`)只在语言层面(元方法)使用。
 
 ### 5.1 转换表
 
-| 类别 | Lua 侧 | → C++ |
-|---|---|---|
-| 正 `axis`/`dim` | `n` | `n-1` |
-| 负 `axis`/`dim` | `-1` | **`-1` 不变** |
-| 切片区间 | `{i, j}` 闭 | `[i-1, j)` |
-| 字符串切片 | `"1:3"` | `"0:2"`(移植 `lua_spec_to_cpp`) |
-| 吃 index 的 tensor | — | 整体 `-1` |
-| 吐 index 的 tensor | — | 整体 `+1` |
-| label / token id | 1..C | 0..C-1 |
+| 类别 | Lua 侧 | → C++ | 落点 |
+|---|---|---|---|
+| 正 `axis`/`dim` | `n` | `n-1` | **Lua wrapper(生成代码)** |
+| 负 `axis`/`dim` | `-1` | **`-1` 不变** | —(不转换) |
+| 切片区间 | `{i, j}` 闭 | `[i-1, j)` | Lua 手写层(`lua_spec_to_cpp`) |
+| 字符串切片 | `"1:3"` | `"0:2"`(移植 `lua_spec_to_cpp`) | Lua 手写层 |
+| 吃 index 的 tensor | — | 整体 `-1` | **C ABI 生成层**(`pd_idx_minus1`) |
+| 吐 index 的 tensor | — | 整体 `+1` | **C ABI 生成层**(`pd_idx_plus1`) |
+| label / token id | 1..C | 0..C-1 | 各调用点 |
+
+**转换落点(2026-10-25 定案,`plan/modules/03-codegen.md` §3.3 坑⑧):**
+
+> Lua 5.1 没有张量算术,所以 Tensor 的 ±1 必须在 C++ 侧做 —— **C ABI 生成层**
+> (`emit_capi.lua`)为生成代码生成两个 static helper
+> `pd_idx_minus1/plus1(t)` = `subtract/add(t, full_like(t, Scalar(1), t.dtype(), t.place()))`
+> (`paddle/phi/api/include/api.h:1412/1316/514`,full_like 跟随 dtype/place,GPU 安全)。
+> **标量** `axis`/`dim` 与标量 takes_index attr 在 **Lua wrapper 层**(`emit_lua.lua`)
+> 做纯 Lua 算术(`if v > 0 then v = v - 1 end`,数组逐元素);yaml 默认值是 C++ 侧
+> 0-based,生成时平移成 1-based 字面量(`shift_axis_default`,v>=0 → v+1),wrapper 内
+> 的减一回正恰好还原 —— 默认值、显式值走同一条转换,不会漂移。
+> **用户永远看到 1-based,转换边界在生成代码里,不散落在用户代码中。**
 
 ### 5.2 index 语义标注表
 

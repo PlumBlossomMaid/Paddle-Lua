@@ -13,11 +13,13 @@
 --     sec.2.1: "构建期展开,运行时不调 argrule"). Each wrapper therefore
 --     carries its OWN expanded argument mapping -- generated from the
 --     argrule-style rule schema -- and calls the C ABI op directly.
---   - 1-based conversion (C4/D13) lives ONLY in the generated wrapper:
---     index-semantics params get `- 1`, index-semantics outputs get `+ 1`,
---     per tools/gen/index_semantics.lua. Operators with index semantics
---     are NOT supported by this emit yet -- they error loudly (never
---     silently emit a wrapper without the conversion, conventions sec.5.2).
+--   - 1-based conversion (C4/D13): Tensor index semantics are converted
+--     in the C ABI layer (emit_capi, pd_idx_minus1/plus1); scalar
+--     axis/dim attrs and scalar takes_index attrs (index_select_strided
+--     index) get their -1 conversion HERE, in the generated wrapper, per
+--     tools/gen/index_semantics.lua + conventions.md sec.5.1. The wrapper
+--     therefore never sees a bare Tensor it must subtract from -- it only
+--     rewrites numbers, which Lua 5.1 can do.
 --   - attrs with defaults ride as explicit arguments; the wrapper fills
 --     defaults from the yaml (single source of truth, 03-codegen.md sec.4
 --     item 3).
@@ -126,9 +128,30 @@ local function lua_default_literal(cpp_type, default_str)
         .. "' for type '" .. cpp_type .. "' (add a case, don't guess)")
 end
 
--- True if the op has index semantics (either direction).
-local function has_index_semantics(op)
-  return #index_sem.index_params(op) > 0 or #index_sem.index_outputs(op) > 0
+-- True if the C++ attr type is a plain scalar (axis/dim style 1-based).
+-- Array types (IntArray / std::vector<T>) get per-element conversion.
+local function is_scalar_attr(cpp_type)
+  return cpp_type == "int" or cpp_type == "int64_t"
+    or cpp_type == "float" or cpp_type == "double"
+    or cpp_type == "paddle::experimental::Scalar"
+end
+
+-- yaml axis/dim defaults are C++-side (0-based, first dim = 0). The Lua
+-- wrapper is 1-based, so a non-negative default must be shifted +1
+-- (axis=0 -> Lua default 1, axis=1 -> 2); negative defaults (-1 = last
+-- dim) stay as-is (conventions.md sec.5.1). Only the named axis/dim
+-- attrs are shifted -- never a general attr.
+local function shift_axis_default(cpp_type, default_str)
+  if not default_str then return nil end
+  if not is_scalar_attr(cpp_type) then return nil end   -- arrays: {} unchanged
+  local v = tonumber(default_str)
+  if not v then
+    error("emit_lua: axis/dim default '" .. tostring(default_str)
+          .. "' is not a plain number -- cannot shift to 1-based "
+          .. "(add a case, don't guess)")
+  end
+  if v >= 0 then return tostring(v + 1) end
+  return tostring(v)
 end
 
 -- Emit one wrapper module file body.
@@ -139,10 +162,6 @@ local function emit_wrapper(ir)
   local take_idx = {}
   for _, p in ipairs(index_sem.index_params(op)) do
     take_idx[p] = true
-  end
-  local ret_idx = {}
-  for _, pos in ipairs(index_sem.index_outputs(op)) do
-    ret_idx[pos] = true
   end
 
   -- parameter handling: named/mixed table OR positional.
@@ -177,21 +196,49 @@ local function emit_wrapper(ir)
   end
   lines[#lines + 1] = "  end"
 
-  -- apply yaml defaults for attrs (nil -> default)
+  -- apply yaml defaults for attrs (nil -> default). axis/dim defaults are
+  -- shifted to 1-based Lua literals (shift_axis_default); every other attr
+  -- keeps the yaml value verbatim (it IS the C++-side value).
   for _, a in ipairs(ir.attrs or {}) do
     local lit = lua_default_literal(a.type, a.default)
+    if lit and (a.name == "axis" or a.name == "dim") then
+      lit = shift_axis_default(a.type, a.default) or lit
+    end
     if lit then
       lines[#lines + 1] = string.format(
         "  if %s == nil then %s = %s end", a.name, a.name, lit)
     end
   end
 
-  -- 1-based conversion for index params (skip -- none in this emit)
-  for _, name in ipairs(order) do
+  -- 1-based conversion (conventions.md sec.5.1), emitted in the wrapper:
+  --  * axis/dim attrs: positive value n -> n-1, negative stays (e.g. -1 =
+  --    last dim). Scalar and array (IntArray / std::vector<T>) forms.
+  --  * takes_index params that are scalar ATTRS (index_select_strided
+  --    index:int64_t): value - 1. Tensor takes_index params are converted
+  --    in the C ABI layer (emit_capi), never here.
+  -- Runs AFTER defaults so the shifted default literals convert back to
+  -- the yaml (0-based) value.
+  for _, a in ipairs(ir.attrs or {}) do
+    local name = a.name
     if take_idx[name] then
-      error("emit_lua: op '" .. op .. "' has takes_index param '" .. name
-            .. "' -- index conversion not implemented in this emit yet; "
-            .. "refuse to emit silently wrong wrapper")
+      lines[#lines + 1] = string.format(
+        "  if %s ~= nil then %s = %s - 1 end", name, name, name)
+    elseif name == "axis" or name == "dim" then
+      if is_scalar_attr(a.type) then
+        lines[#lines + 1] = string.format(
+          "  if %s ~= nil and %s > 0 then %s = %s - 1 end",
+          name, name, name, name)
+      else
+        lines[#lines + 1] = string.format("  if %s ~= nil then", name)
+        lines[#lines + 1] = "    if type(" .. name .. ") == \"table\" then"
+        lines[#lines + 1] = "      for i, v in ipairs(" .. name .. ") do"
+        lines[#lines + 1] = "        if v > 0 then " .. name .. "[i] = v - 1 end"
+        lines[#lines + 1] = "      end"
+        lines[#lines + 1] = "    elseif " .. name .. " > 0 then"
+        lines[#lines + 1] = "      " .. name .. " = " .. name .. " - 1"
+        lines[#lines + 1] = "    end"
+        lines[#lines + 1] = "  end"
+      end
     end
   end
 
@@ -209,16 +256,6 @@ local function emit_wrapper(ir)
   end
   local call = "  return paddle_core.pd_op_" .. op .. "("
     .. table.concat(callargs, ", ") .. ")"
-
-  -- output 1-based conversion: none in this emit; error if present
-  local rpos = ir.returns or {}
-  for pos = 1, #rpos do
-    if ret_idx[pos] then
-      error("emit_lua: op '" .. op .. "' returns index at position " .. pos
-            .. " -- output conversion not implemented in this emit yet; "
-            .. "refuse to emit silently wrong wrapper")
-    end
-  end
 
   -- multi-output ops (wall #3): the C ABI function returns int64_t count
   -- and fills a caller-allocated pd_tensor outs array (emit_capi

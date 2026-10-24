@@ -160,7 +160,6 @@ M.returns_index = {
   prune_gate_by_capacity = { 1 }, -- out_gate_idx (ops.yaml:4402)
   randperm = { 1 },              -- permutation (ops.yaml:4516)
   restrict_nonzero = { 1 },      -- coordinates (ops.yaml:4701)
-  sequence_pool = { 2 },         -- max_index (ops.yaml:4985)
   shuffle_batch = { 2 },         -- shuffle_idx (ops.yaml:5082)
   top_p_sampling = { 2, 4 },     -- ids, topk_ids (ops.yaml:5634)
   tril_indices = { 1 },          -- coordinates (ops.yaml:5712)
@@ -530,6 +529,12 @@ M.no_index = {
   selu = true,
   sequence_conv = true,
   sequence_mask = true,
+  -- sequence_pool: its only index-valued output (max_index) is
+  -- `intermediate:` -- never in the ad_func tuple (sequence_pool_ad_func
+  -- returns a single Tensor, dygraph_functions.h) so the user never sees
+  -- it and +1 conversion is meaningless (annotated returns_index={2} in
+  -- 2.3.4 setup, removed 2026-10-25 as dead -- never silently skipped).
+  sequence_pool = true,
   set = true,
   set_value = true,
   set_value_with_tensor = true,

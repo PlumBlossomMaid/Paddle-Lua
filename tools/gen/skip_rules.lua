@@ -30,6 +30,12 @@
 --                      extension. Verify the Python-side exposure before
 --                      re-enabling: paddle.einsum returns only `out`, the
 --                      vector outputs are grad-time scratch.
+--   NOTE: a SINGLE std::vector<Tensor> output (split/unstack/unbind/
+--   broadcast_tensors/meshgrid/ap_facade ...) does NOT go here -- it is
+--   handled by emit_capi emit_op_vec using the exact same out-array C ABI
+--   (return count, caller allocates, refill). Only a vector INSIDE a
+--   tuple (>=2 outputs where one is a vector) needs the two-phase query
+--   design and belongs in the skip list above.
 
 local M = {}
 
