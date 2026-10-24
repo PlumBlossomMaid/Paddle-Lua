@@ -21,6 +21,23 @@ extern "C" {
 #include "paddle_c.h"
 }
 
+// Real shapes behind the opaque handles. Shared by every .cc in capi/ so
+// that tensor.cc, autograd.cc, device.cc all reinterpret_cast to the SAME
+// struct -- two private copies with identical layout would be an
+// implementation smell and an easy future trap.
+//   paddle::Tensor is value-semantics (copy ctor shares TensorBase);
+//   phi::Place is a plain value. See 01-c-abi.md sec.4.
+#include "paddle/phi/api/include/tensor.h"
+#include "paddle/phi/common/place.h"
+
+struct pd_place_t {
+  phi::Place value;
+};
+
+struct pd_tensor_t {
+  paddle::Tensor value;
+};
+
 /* Internal: store status+message into the thread-local slot.
  * Declared here, defined in status.cc. */
 void pd_set_error(pd_status st, const char* msg);

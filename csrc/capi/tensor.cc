@@ -54,15 +54,6 @@ PD_STATIC_ASSERT_DTYPE(PD_DTYPE_FLOAT8_E4M3FN, phi::DataType::FLOAT8_E4M3FN);
 PD_STATIC_ASSERT_DTYPE(PD_DTYPE_FLOAT8_E5M2, phi::DataType::FLOAT8_E5M2);
 #undef PD_STATIC_ASSERT_DTYPE
 
-// The real shapes behind the opaque handles.
-struct pd_place_t {
-  phi::Place value;
-};
-
-struct pd_tensor_t {
-  paddle::Tensor value;
-};
-
 // pd_place_kind -> phi::AllocationType (place.h:32-43).
 phi::AllocationType to_allocation_type(pd_place_kind kind) {
   switch (kind) {
