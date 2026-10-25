@@ -151,8 +151,8 @@
  |    +-- [🔵] 2.9 paddle.nn ★最大一块       -> plan/modules/09-nn.md
  |    |    +-- [✅] 2.9.0 API 设计                -> plan/api/{nn,nn-functional,nn-initializer}.md  ★三文档已齐(2026-10-23):nn.md 基类/容器/核心层 + index 语义、nn-functional.md 37 激活/pool/norm、nn-initializer.md 可调用对象;核对通过(2026-10-25)
  |    |    +-- [✅] 2.9.1 Layer 基类 + 它的测试   ★ 2026-10-25:nn/layer.lua(FIELDS 私有键 + _create/_class_init 钩子 + __index/__newindex 自动注册 + order 书 + pre-order DFS 迭代器 + state_dict 键名与 Python 逐字符一致)+ nn/init.lua + 顶层 lazy 挂 nn;NN_LAYER_SMOKE PASS(15 节:三层继承/order 替换保持位置/nil 摘除/state_dict 键名/set_state_dict/train-eval 递归/print 不崩/200 层不栈溢/class.cast 禁用/List 返回/forward/cpu);三个迭代器 bug 实测修复(named_* stack 重建死循环、pre-order 跳过 b、training 落 FIELDS 顶层读不到——改走 plain 槽)
- |    |    +-- [🔵] 2.9.2 Linear 打通闭环
- |    |    +-- [⬜] 2.9.3 functional
+ |    |    +-- [✅] 2.9.2 Linear 打通闭环   ★ 2026-10-25:nn/layers/linear.lua + 挂载 + **构造函数与正式 API 一律 argrule 包装(用户指示,D31)**:Linear._init、Layer.create_parameter/add_parameter/add_sublayer 全部规则表化(self 规则 + 表内位置/具名/位置三形态,argrule 装于本机 luarocks);NN_LINEAR_SMOKE PASS(注册/state_dict 键名/forward 数值 y=xW+b/no-bias matmul 分支/backward 梯度)+ 全部 10 smoke 回归全绿 + lint 全绿。踩坑:argrule 的 `default=nil` 不算 optional(要 `opt=true`);表内位置不能留洞(`{2,3,nil,false}` 数组部分在 nil 截断——用混合表 `{2,3,bias_attr=false}`)
+ |    |    +-- [🔵] 2.9.3 functional
  |    |    +-- [⬜] 2.9.4 其余 39 层
  |    |    +-- [⬜] 2.9.5 容器(Sequential/LayerList/LayerDict)
  |    +-- [⬜] 2.10 paddle.optimizer         -> plan/modules/10-optimizer.md

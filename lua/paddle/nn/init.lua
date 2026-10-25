@@ -7,12 +7,17 @@
 -- require "paddle" does not pull nn; first access to paddle.nn does.
 
 local layer = require "paddle.nn.layer"
+local linear = require "paddle.nn.layers.linear"
 
 local M = {}
 
 -- Layer base class (2.9.1). Subclasses: class(paddle.nn.Layer) then
 -- assign fields -- auto-registration takes over (09-nn.md sec.3.2).
 M.Layer = layer.Layer
+
+-- First real layer (2.9.2): proves auto-registration + create_parameter
+-- + forward end to end (api/nn.md sec.2.3).
+M.Linear = linear
 
 -- 2.9.1 internals exposed for tests/CI greps (rawset discipline).
 M._FIELDS = layer.FIELDS

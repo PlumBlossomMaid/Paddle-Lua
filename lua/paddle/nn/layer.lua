@@ -22,6 +22,8 @@
 
 local class = require "pl.class"
 local List = require "pl.List"
+local argrule = require "argrule"
+local rule = require "argrule.rule"
 local paddle_core = require "paddle_core"
 
 -- Shared LuaTensor usertype metatable (tensor.lua augments the same one).
@@ -58,6 +60,18 @@ local function is_layer(v)
   if mt == nil or type(mt.is_a) ~= "function" then return false end
   return v:is_a(Layer)
 end
+
+-- ---------------------------------------------------------------------
+-- argrule type contracts for the public Layer methods below (用户
+-- 2026-10-25: 几乎所有正式 API 用 argrule,不手写解析器)。shape-style
+-- params are IntList (api/README.md sec.2.1.2: 容器 + 整数)。Tensor/Layer
+-- matched structurally via the local predicates above (argrule accepts a
+-- function as a predicate contract).
+-- ---------------------------------------------------------------------
+
+local IntList = argrule.List { argrule.number }
+local TensorContract = argrule.alias { function(v) return is_tensor(v) end }
+local LayerContract = argrule.alias { function(v) return is_layer(v) end }
 
 -- ---------------------------------------------------------------------
 -- order book: insertion order of registered names (Python dict is
@@ -531,24 +545,27 @@ end
 -- explicit registration APIs (09-nn.md sec.3.2 "add_sublayer /
 -- add_parameter 仍然保留"): zero-cost compat for migrated Python code
 -- that calls them. Both just route through the __newindex dispatcher.
+-- argrule-wrapped (用户 2026-10-25: 正式 API 不手写解析器).
 -- ---------------------------------------------------------------------
 
-function Layer:add_parameter(name, tensor)
-  if not is_tensor(tensor) then
-    error("paddle.nn: add_parameter() expects a Tensor", 2)
-  end
+Layer.add_parameter = rule {
+  { name = "self", type = Layer },
+  { name = "name", type = argrule.string },
+  { name = "tensor", type = TensorContract },
+}(function(self, name, tensor)
   PARAMETER_REGISTRY[tensor] = true
   self[name] = tensor
   return tensor
-end
+end)
 
-function Layer:add_sublayer(name, sublayer)
-  if not is_layer(sublayer) then
-    error("paddle.nn: add_sublayer() expects a Layer", 2)
-  end
+Layer.add_sublayer = rule {
+  { name = "self", type = Layer },
+  { name = "name", type = argrule.string },
+  { name = "sublayer", type = LayerContract },
+}(function(self, name, sublayer)
   self[name] = sublayer
   return sublayer
-end
+end)
 
 -- ---------------------------------------------------------------------
 -- create_parameter (layers.py:1160). v1: shape + dtype + optional
@@ -556,35 +573,30 @@ end
 -- Default fill is Constant(0) for now -- the upstream Xavier/Constant
 -- default (layers.py:1193-1217) arrives with 2.9.3 initializers.
 -- Registered as a parameter (trainable, appears in state_dict).
+-- argrule-wrapped: shape is IntList (api/README.md sec.2.1.2),
+-- callable as create_parameter{shape={...}, dtype=...} (table) or
+-- create_parameter(shape, dtype) (positional) -- both normalize.
 -- ---------------------------------------------------------------------
 
 local CPU_PLACE_CACHE
 
-function Layer:create_parameter(t)
-  if type(t) ~= "table" then
-    error("paddle.nn: create_parameter expects a table {shape, dtype=, "
-          .. "default_initializer=}", 2)
-  end
-  local shape = t.shape or t[1]
-  if type(shape) ~= "table" then
-    error("paddle.nn: create_parameter: shape must be a table of ints", 2)
-  end
-  local dtype = t.dtype or paddle_core.PD_DTYPE_FLOAT32
+Layer.create_parameter = rule {
+  { name = "self", type = Layer },
+  { name = "shape", type = IntList },
+  { name = "dtype", type = argrule.any, opt = true },
+  { name = "default_initializer", type = argrule.Callable, opt = true },
+}(function(self, shape, dtype, default_initializer)
+  if dtype == nil then dtype = paddle_core.PD_DTYPE_FLOAT32 end
   if CPU_PLACE_CACHE == nil then
     CPU_PLACE_CACHE = paddle_core.pd_place_new(paddle_core.PD_PLACE_CPU, 0)
   end
   local v = paddle_core.pd_op_full(shape, 0.0, dtype, CPU_PLACE_CACHE)
   v:set_stop_gradient(false)
-  local init = t.default_initializer
-  if init ~= nil then
-    if type(init) ~= "table" or type(init.__call) ~= "function" then
-      error("paddle.nn: default_initializer must be callable (nn.initializer "
-            .. "object)", 2)
-    end
-    init(v)
+  if default_initializer ~= nil then
+    default_initializer(v)
   end
   PARAMETER_REGISTRY[v] = true
   return v
-end
+end)
 
 return { Layer = Layer, FIELDS = FIELDS, PARAMETER_REGISTRY = PARAMETER_REGISTRY }
