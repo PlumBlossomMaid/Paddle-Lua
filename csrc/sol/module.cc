@@ -65,7 +65,21 @@ const luaL_Reg kModuleFns[] = {
 
 }  // namespace
 
-extern "C" int luaopen_paddle_core(lua_State* L) {
+// The DLL entry point MUST be dllexport: MSVC does not export symbols from
+// a DLL unless marked __declspec(dllexport) (or listed in a .def). A plain
+// `extern "C"` gives C linkage but NO export -- require() then loads the
+// module and fails GetProcAddress("luaopen_paddle_core") with
+// ERROR_PROC_NOT_FOUND/127 (caught 2026-10-25; the 2.2.3 sol smoke never
+// hit this because it embedded Lua statically instead of loading a DLL).
+// Non-Windows linkers export all symbols by default, so the guard is
+// Windows-only.
+#if defined(_WIN32)
+#define PD_LUAOPEN_EXPORT __declspec(dllexport)
+#else
+#define PD_LUAOPEN_EXPORT
+#endif
+
+extern "C" PD_LUAOPEN_EXPORT int luaopen_paddle_core(lua_State* L) {
   // Plain Lua C API: build the module table by hand (tiny), no reason to
   // drag sol::state in for three functions. Later TUs bring the usertypes.
   // NB: NOT luaL_setfuncs -- that is Lua 5.2+; 5.1 has no such API and the

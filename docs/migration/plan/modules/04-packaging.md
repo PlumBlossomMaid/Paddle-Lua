@@ -108,6 +108,23 @@ luarocks 本身是按 Lua 版本隔离安装的,所以 rockspec 只需要写一�
 必须靠 `PATH` 或 `SetDllDirectory`。这会成为最常见的用户问题,
 **文档里要有一节专门讲它**,而不是让用户去 issue 里问。
 
+**2026-10-25 实测补充(本机 `require "paddle_core"` 排障)**:
+`paddle_core.dll` 的运行时依赖链是 `lua51.dll`(LuaJIT)+ `phi.dll` + `common.dll` +
+`mkldnn.dll` + `libiomp5md.dll`(`dumpbin /DEPENDENTS` 逐级核实;后两者是
+`phi.dll` 的传递依赖,在 `third_party/install/{onednn,mklml}` 下)。Windows
+加载器按「EXE 目录 → System32 → CWD → PATH」找依赖,**不会**自动找
+`paddle_core.dll` 所在目录(除非 `LOAD_WITH_ALTERED_SEARCH_PATH`)。两个实测
+教训:
+- 从仓库根跑冒烟时,`phi.dll` 被 PATH 里 **Python `site-packages\paddle\libs\`
+  的副本**(另一版本)截胡 → `pd_init_once` 里 `InitDevices()` 内
+  `0xC0000005` 段错误(用 `dumpbin /IMPORTS` vs `/EXPORTS` 交叉核对 + 逐调用
+  探针定位)。**症状是「require 成功、version() 正常、init() 崩」**,极易误判
+  为绑定层 bug。
+- 解法:把 Paddle 各 runtime DLL 目录(`paddle\phi` `paddle\common`
+  `third_party\install\onednn\bin` `third_party\install\mklml\lib` + LuaJIT
+  的 `tools\luajit`)**置于 PATH 前面**,或与 `paddle_core.dll` 同目录。
+  `tools/smoke/require_smoke.lua` 头部注释记录了完整运行配方。
+
 **② CUDA 版本必须与 `libpaddle` 一致。** 我们链的是同一个 CUDA runtime。
 构建时应该**主动检测并在不一致时拒绝构建**,而不是让用户在运行时撞到诡异的崩溃。
 

@@ -22,6 +22,9 @@ lua_modules/
 .DS_Store
 Thumbs.db
 
+# Qwen Code 会话目录(agent 工作区,不入库)
+.qwen/
+
 # 生成的算子绑定(P3 产出)
 # 注意:**这两个目录是进版本库的**,理由见 plan/layout.md §5
 #       (用户端没有 Python,rock 里必须自带生成产物)
