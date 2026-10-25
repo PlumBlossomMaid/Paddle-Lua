@@ -25,7 +25,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | | |
 |---|---|
 | 阶段 | **M1(已开闸)** —— 先搭 `csrc/` C ABI 中间层 + sol2 绑定 + MNIST 收尾 |
-| 工程树位置 | `WORKPLAN.md` 节点 **2.5 paddle.Tensor**(见 `WORKPLAN.md` 🔵,2.4 已完成 ✅) |
+| 工程树位置 | `WORKPLAN.md` 节点 **2.6 自动微分与生命周期**(见 `WORKPLAN.md` 🔵,2.5 已完成 ✅) |
 | 下一个动作 | **2.5 第二步 tensor.lua 完成(2026-10-25)**:`lua/paddle/tensor.lua`(共享 sol2 usertype 元表的 **Lua 侧增强**——探针确认 `getmetatable(t)` 是普通 table、`__index` 是查表、`__tostring`/`__add` 未挂,无需改 C++ 注册 __Index)。**关键实现与踩坑**:① **`__index` 分派顺序:Lua 方法 → sol2 方法 → 属性 → 切片**(02-binding §3.5,属性方法必须优先于切片);② **字符串切片是半开区间**(`"1:3"` = 第 1、2 行;"::-1" 负步长保持 `-dim-1` sentinel 交给 kernel `normalize_interval` 权威处理,不许 Lua 侧提前 clamp,实测否则压成空);③ 为 `item()`/打印补了 3 个 C++ 绑定(`place_kind_index`/`item`/`to_host_bytes`,全复用现有 C ABI);④ **上游索引链真相**:`__getitem__`(tensor_patch_methods.py:1045)→ `pre_deal_index`(:1033)→ `_getitem_dygraph`(**真实定义在 C++ eager_method.cc:1699**,api/tensor.md 行号引用是幻觉,已修);⑤ 算术运算符 `__add/__sub/__mul/__div/__unm` 走生成算子,`__eq` 刻意不绑(05-tensor.md 坑②)。**TENSOR_SMOKE PASS + REQUIRE/DTYPE_DEVICE 冒烟无回归 + lint 全绿**。**下一步**:layout.md P5 顺序最后一块 `slice.lua`(T-M1-07 已标 DONE:转换在 C++ slice.cc `core.slice_spec`,消费在 tensor.lua `spec_to_strided`),随后 2.5 验收对拍 → 2.6 autograd。 |
 | 人点名的三件调研 | **① Q-22** phi 层有没有不依赖 pybind 的 DLPack 通道(决定 Insight7 内存协议怎么定);**② 数出「跑通 MNIST 训练,Insight7 至少要哪些函数」**(从上游代码里数,不凭感觉 —— 已知 `python/paddle` 全层只用 132 个 `np.*` 符号、真函数约 15 个,见 `research/ecosystem.md` §5.1);**③ Q-23** Array API Standard 是否如记忆所述(要走代理核实)。三件都**不阻塞** `WORKPLAN` 主线 |
 | 全部 ⛔ 阻塞节点 | `WORKPLAN.md` 4.3 distributed —— 无多卡环境(待拍板 P2) |

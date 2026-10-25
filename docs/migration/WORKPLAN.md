@@ -140,9 +140,9 @@
  |    |    +-- [✅] 2.3.3 三算子试生成 + 人工 review ★ 首个端到端产物(add/matmul/relu)
  |    |    +-- [✅] 2.3.4 全量生成 + regen-diff CI  ★ 529 ops 全量落库 + regen_diff.lua 门
  |    +-- [✅] 2.4 构建与打包                -> plan/modules/04-packaging.md
- |    +-- [🔵] 2.5 paddle.Tensor             -> plan/modules/05-tensor.md
+ |    +-- [✅] 2.5 paddle.Tensor             -> plan/modules/05-tensor.md
  |    |    +-- [✅] 2.5.0 API 设计                -> plan/api/{top,tensor,dtype-device}.md ★先接口后实现
- |    +-- [⬜] 2.6 自动微分与生命周期        -> plan/modules/06-autograd.md
+ |    +-- [🔵] 2.6 自动微分与生命周期        -> plan/modules/06-autograd.md
  |    |    +-- [⬜] 2.6.0 API 设计                -> plan/api/{autograd,scope}.md
  |    +-- [⬜] 2.7 序列化                    -> plan/modules/07-serialization.md
  |    +-- [⬜] 2.8 jit::Layer 推理 ★可先交付 -> plan/modules/08-jit-infer.md
