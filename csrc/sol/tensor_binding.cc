@@ -48,6 +48,79 @@ void push_tensor_factory(sol::table& mod) {
       });
 }
 
+/* ---- 2.6 module-level autograd entries (paddle.autograd.* backend) --
+ * Accept Lua arrays of LuaTensor; validate and forward to the C ABI.
+ * Keep LuaTensor unwrap + pd::check() in exactly this order (the error
+ * slot is cleared by ANY intermediate pd_* call). */
+void register_autograd_fns(sol::table& mod) {
+  auto as_tensor_vec = [](sol::table tbl) -> std::vector<pd_tensor> {
+    std::vector<pd_tensor> vec;
+    for (auto& kv : tbl) {
+      LuaTensor& t = kv.second.as<LuaTensor&>();
+      vec.push_back(t.h);
+    }
+    return vec;
+  };
+
+  /* core.backward{tensors, grad_tensors=nil, retain_graph=false} */
+  mod.set_function(
+      "backward",
+      [as_tensor_vec](sol::table tensors, sol::optional<sol::table> gts,
+                      sol::optional<bool> retain_graph) {
+        std::vector<pd_tensor> tvec = as_tensor_vec(tensors);
+        std::vector<pd_tensor> gvec;
+        if (gts) gvec = as_tensor_vec(*gts);
+        pd_status st = pd_backward(tvec.data(), static_cast<int>(tvec.size()),
+                                   gvec.empty() ? nullptr : gvec.data(),
+                                   static_cast<int>(gvec.size()),
+                                   retain_graph.value_or(false) ? 1 : 0);
+        pd::check();
+        return 0;
+      });
+
+  /* core.grad{outputs, inputs, grad_outputs=nil, retain_graph=false,
+   * create_graph=false, only_inputs=true, allow_unused=false} -> table
+   * of gradient tensors (nil slot where a input has no grad). */
+  mod.set_function(
+      "grad",
+      [as_tensor_vec](sol::this_state L, sol::table outputs,
+                      sol::table inputs, sol::optional<sol::table> gts,
+                      sol::optional<bool> retain_graph,
+                      sol::optional<bool> create_graph,
+                      sol::optional<bool> only_inputs,
+                      sol::optional<bool> allow_unused) -> sol::object {
+        std::vector<pd_tensor> tvec = as_tensor_vec(outputs);
+        std::vector<pd_tensor> ivec = as_tensor_vec(inputs);
+        std::vector<pd_tensor> gvec;
+        if (gts) gvec = as_tensor_vec(*gts);
+        std::vector<pd_tensor> out_grads(ivec.size(), nullptr);
+        pd_status st = pd_grad(
+            tvec.data(), static_cast<int>(tvec.size()),
+            ivec.data(), static_cast<int>(ivec.size()),
+            gvec.empty() ? nullptr : gvec.data(), static_cast<int>(gvec.size()),
+            retain_graph.value_or(false) ? 1 : 0,
+            create_graph.value_or(false) ? 1 : 0,
+            only_inputs.value_or(true) ? 1 : 0,
+            allow_unused.value_or(false) ? 1 : 0,
+            out_grads.data(), static_cast<int>(out_grads.size()));
+        pd::check();
+        sol::table out(L, sol::create);
+        for (size_t i = 0; i < out_grads.size(); ++i) {
+          if (out_grads[i] != nullptr) {
+            out[i + 1] = LuaTensor(out_grads[i]);   // ownership transfer
+          } else {
+            out[i + 1] = sol::nil;
+          }
+        }
+        return out;
+      });
+
+  /* core.has_grad() / core.set_has_grad(bool) — no_grad/is_grad_enabled
+   * backend (imperative.cc:641-642 binds these same Controller calls). */
+  mod.set_function("has_grad", []() { return pd_has_grad() != 0; });
+  mod.set_function("set_has_grad", [](bool v) { pd_set_has_grad(v ? 1 : 0); });
+}
+
 /* Register the LuaTensor usertype + factory into the module table (which
  * sits at stack index `module_index`, as created by luaopen_paddle_core).
  * Extra methods arrive in slices (2.2.4) and the Lua API layer (P5). */
@@ -148,12 +221,44 @@ void register_tensor(lua_State* L, int module_index) {
         pd::check();
         return std::string(buf.data(), buf.size());
       },
+      /* ---- 2.6 autograd group (paddle_c.h Group 4) -----------------
+       * Same underlying egr::Backward / egr::Grad as paddle.autograd.*
+       * (api/autograd.md sec.2 note: Tensor:backward and
+       * paddle.autograd.backward MUST share one bottom layer, else
+       * retain-graph / accumulation semantics diverge). */
+      "backward",
+      [](const LuaTensor& t, sol::optional<bool> retain_graph) {
+        pd_tensor arr[1] = {t.h};
+        pd_status st = pd_backward(arr, 1, nullptr, 0,
+                                   retain_graph.value_or(false) ? 1 : 0);
+        pd::check();
+        return 0;
+      },
+      /* x:grad() -> LuaTensor | nil (pd_tensor_grad returns a NEW shell
+       * the caller owns; sol2 takes ownership into the usertype). */
+      "grad",
+      [](sol::this_state L, const LuaTensor& t) -> sol::object {
+        pd_tensor g = pd_tensor_grad(t.h);
+        if (g == nullptr) {
+          return sol::make_object(L, sol::nil);
+        }
+        return sol::make_object(L, LuaTensor(g));
+      },
+      "stop_gradient",
+      [](const LuaTensor& t) { return pd_tensor_get_stop_gradient(t.h) != 0; },
+      "set_stop_gradient",
+      [](const LuaTensor& t, bool v) {
+        pd_status st = pd_tensor_set_stop_gradient(t.h, v ? 1 : 0);
+        pd::check();
+        return 0;
+      },
       /* reserved now for P13 (02-binding.md sec.3.2) */
       "__lanesclone",
       [](void* dst, const LuaTensor& src) { new (dst) LuaTensor(src); });
 
   push_tensor_factory(mod);
-  register_slice(mod);   // slice.cc: core.slice_spec (D14 string transform)
+  register_slice(mod);          // slice.cc: core.slice_spec (D14 string transform)
+  register_autograd_fns(mod);   // 2.6: core.backward/grad/has_grad/set_has_grad
 }
 
 }  // namespace pd

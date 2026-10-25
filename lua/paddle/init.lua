@@ -70,9 +70,9 @@ require "paddle.tensor"
 
 -- ---- lazy submodule skeleton ----------------------------------------
 -- Keys resolve to module names; first access requires + caches. Populate
--- as each stage lands: device (P5), nn (P9), optimizer (P10), io (P11),
--- vision (P12).
-local lazy = { device = "paddle.device" }
+-- as each stage lands: device (P5), autograd (P6), nn (P9), optimizer
+-- (P10), io (P11), vision (P12).
+local lazy = { device = "paddle.device", autograd = "paddle.autograd" }
 
 setmetatable(M, {
   __index = function(t, k)

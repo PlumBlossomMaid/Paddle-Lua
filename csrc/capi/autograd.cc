@@ -24,12 +24,10 @@ extern "C" {
 
 pd_status pd_backward(const pd_tensor* tensors,
                       int ntensors,
-                      const pd_tensor* inputs,
-                      int ninputs,
+                      const pd_tensor* grad_tensors,
+                      int ngrad_tensors,
                       int retain_graph) {
   PD_GUARD_BEGIN;
-  (void)inputs;   // reserved: egr::Backward accumulates grad on every
-  (void)ninputs;  // autograd-enabled leaf; per-input selection is Grad().
   if (tensors == nullptr || ntensors <= 0) {
     pd_set_error(PD_INVALID_ARG, "tensors empty");
     return PD_INVALID_ARG;
@@ -45,9 +43,99 @@ pd_status pd_backward(const pd_tensor* tensors,
   }
   // backward.h:26-31 -- Backward(tensors, grad_tensors, retain_graph,
   // create_graph=false). Empty grad_tensors => Paddle seeds ones.
-  egr::Backward(vec, {}, retain_graph != 0, false);
+  std::vector<paddle::Tensor> gvec;
+  gvec.reserve(static_cast<size_t>(ngrad_tensors));
+  for (int i = 0; i < ngrad_tensors; ++i) {
+    if (grad_tensors[i] == nullptr) {
+      pd_set_error(PD_INVALID_ARG, "grad_tensors[i] is null");
+      return PD_INVALID_ARG;
+    }
+    gvec.push_back(
+        reinterpret_cast<const pd_tensor_t*>(grad_tensors[i])->value);
+  }
+  egr::Backward(vec, gvec, retain_graph != 0, false);
   return PD_OK;
   PD_GUARD_END(PD_ERROR);
+}
+
+pd_status pd_grad(const pd_tensor* tensors,
+                  int ntensors,
+                  const pd_tensor* inputs,
+                  int ninputs,
+                  const pd_tensor* grad_tensors,
+                  int ngrad_tensors,
+                  int retain_graph,
+                  int create_graph,
+                  int only_inputs,
+                  int allow_unused,
+                  pd_tensor* out_grads,
+                  int nout) {
+  PD_GUARD_BEGIN;
+  if (tensors == nullptr || ntensors <= 0) {
+    pd_set_error(PD_INVALID_ARG, "tensors empty");
+    return PD_INVALID_ARG;
+  }
+  if (inputs == nullptr || ninputs <= 0) {
+    pd_set_error(PD_INVALID_ARG, "inputs empty");
+    return PD_INVALID_ARG;
+  }
+  if (out_grads == nullptr || nout < ninputs) {
+    pd_set_error(PD_INVALID_ARG, "out_grads too small");
+    return PD_INVALID_ARG;
+  }
+  std::vector<paddle::Tensor> tvec, ivec, gvec;
+  tvec.reserve(static_cast<size_t>(ntensors));
+  for (int i = 0; i < ntensors; ++i) {
+    if (tensors[i] == nullptr) {
+      pd_set_error(PD_INVALID_ARG, "tensors[i] is null");
+      return PD_INVALID_ARG;
+    }
+    tvec.push_back(reinterpret_cast<const pd_tensor_t*>(tensors[i])->value);
+  }
+  ivec.reserve(static_cast<size_t>(ninputs));
+  for (int i = 0; i < ninputs; ++i) {
+    if (inputs[i] == nullptr) {
+      pd_set_error(PD_INVALID_ARG, "inputs[i] is null");
+      return PD_INVALID_ARG;
+    }
+    ivec.push_back(reinterpret_cast<const pd_tensor_t*>(inputs[i])->value);
+  }
+  gvec.reserve(static_cast<size_t>(ngrad_tensors));
+  for (int i = 0; i < ngrad_tensors; ++i) {
+    if (grad_tensors[i] == nullptr) {
+      pd_set_error(PD_INVALID_ARG, "grad_tensors[i] is null");
+      return PD_INVALID_ARG;
+    }
+    gvec.push_back(reinterpret_cast<const pd_tensor_t*>(grad_tensors[i])->value);
+  }
+  // backward.h:31-40 -- Grad(tensors, inputs, grad_tensors, retain_graph,
+  // create_graph, only_inputs, allow_unused, no_grad_vars, dump_path).
+  std::vector<paddle::Tensor> grads = egr::Grad(
+      tvec, ivec, gvec, retain_graph != 0, create_graph != 0,
+      only_inputs != 0, allow_unused != 0, {}, "");
+  for (size_t i = 0; i < grads.size() && i < static_cast<size_t>(nout);
+       ++i) {
+    // Caller owns each new shell over the grad tensor's storage.
+    out_grads[i] = reinterpret_cast<pd_tensor>(new pd_tensor_t{grads[i]});
+  }
+  return PD_OK;
+  PD_GUARD_END(PD_ERROR);
+}
+
+int pd_has_grad(void) {
+  PD_GUARD_BEGIN;
+  // global_utils.h:75 -- egr::Controller::Instance().HasGrad() (this is
+  // what core._has_grad binds to, imperative.cc:641).
+  return egr::Controller::Instance().HasGrad() ? 1 : 0;
+  PD_GUARD_END(1);
+}
+
+void pd_set_has_grad(int has_grad) {
+  PD_GUARD_BEGIN;
+  // global_utils.h:77 -- SetHasGrad(bool) (imperative.cc:642 _set_has_grad).
+  egr::Controller::Instance().SetHasGrad(has_grad != 0);
+  return;
+  PD_GUARD_END_VOID;
 }
 
 int pd_tensor_get_stop_gradient(const pd_tensor t) {

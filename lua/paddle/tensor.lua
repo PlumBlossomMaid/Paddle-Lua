@@ -435,6 +435,32 @@ M.item = function(t, ...)
   error("paddle: item() coordinate form pending (P6)")
 end
 
+-- x:backward() / x:backward{grad_tensors=nil, retain_graph=false} /
+-- x:backward(true) -- ONE bottom layer with paddle.autograd.backward
+-- (api/autograd.md sec.6 ②): this wrapper delegates to core.backward so
+-- retain-graph / accumulation semantics can never diverge.
+--
+-- NOTE: core.backward takes (tensors, grad_tensors, retain_graph). sol2
+-- treats a nil MIDDLE argument as "argument list terminator" (measured
+-- via _probe_optional, 2026-10-25): the optional param reads no value and
+-- every LATER param is dropped too. So grad_tensors must NEVER be nil
+-- here -- use {} (empty list == no seeds, same semantics).
+METHODS.backward = function(self, ...)
+  if select("#", ...) == 0 then
+    return paddle_core.backward({ self }, {}, false)
+  end
+  local arg = select(1, ...)
+  if type(arg) == "table" then
+    return paddle_core.backward({ self }, arg.grad_tensors or {},
+                                arg.retain_graph ~= nil and arg.retain_graph or false)
+  end
+  if select("#", ...) == 1 then
+    return paddle_core.backward({ self }, {}, arg and true or false)
+  end
+  -- (grad_tensors, retain_graph) positional
+  return paddle_core.backward({ self }, arg or {}, select(2, ...))
+end
+
 -- Mount the Lua-side methods so the __index dispatch finds them (the P3
 -- generator appends its operator methods to this same table later).
 METHODS.item = M.item

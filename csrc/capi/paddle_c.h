@@ -179,11 +179,30 @@ size_t     pd_dtype_sizeof(int dtype);
 /* ------------------------------------------------------------------ */
 
 /* Backward pass (tensors = leaf list to compute grads for;
- * retain_graph keeps the graph alive). Impl: evaluate Backward()
+ * grad_tensors seeds the initial gradients (empty = all ones);
+ * retain_graph keeps the graph alive. Impl: evaluate Backward()
  * (01-c-abi.md sec.2, eager/backward.h:25). */
 pd_status  pd_backward(const pd_tensor* tensors, int ntensors,
-                       const pd_tensor* inputs, int ninputs,
+                       const pd_tensor* grad_tensors, int ngrad_tensors,
                        int retain_graph);
+
+/* Grad() -- compute grads of `inputs` w.r.t. `tensors` WITHOUT
+ * accumulating onto .grad (backward.h:31-40). Caller allocates out_grads
+ * (capacity nout >= ninputs); each slot gets a NEW pd_tensor the caller
+ * owns (free it), or NULL when that input has no grad (allow_unused).
+ * only_inputs=1 restricts the path to the inputs. */
+pd_status  pd_grad(const pd_tensor* tensors, int ntensors,
+                   const pd_tensor* inputs, int ninputs,
+                   const pd_tensor* grad_tensors, int ngrad_tensors,
+                   int retain_graph, int create_graph,
+                   int only_inputs, int allow_unused,
+                   pd_tensor* out_grads, int nout);
+
+/* Global grad-enabled flag: egr::Controller::Instance().HasGrad() /
+ * SetHasGrad (global_utils.h:75/77). Python no_grad/is_grad_enabled go
+ * through core._has_grad/_set_has_grad (imperative.cc:641-642). */
+int        pd_has_grad(void);
+void       pd_set_has_grad(int has_grad);
 
 /* Read/write stop_gradient (autograd meta via eager/utils.h:123/149). */
 int        pd_tensor_get_stop_gradient(const pd_tensor t);
