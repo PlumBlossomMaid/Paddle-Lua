@@ -132,7 +132,7 @@ egr::Backward({y}, {}, false);
 | T-M1-12 | Linear/Conv2D/BN/ReLU/Dropout/Sequential | — | 8d |
 | T-M1-13 | `optimizer.SGD` / `Adam` | — | 5d |
 | T-M1-14 | `io.Dataset` / `DataLoader`(单 worker) | — | 5d |
-| T-M1-15 | `paddle.save/load` 走 `SaveTensor`/`LoadTensor` | D19 | 2d |
+| T-M1-15 | `paddle.save/load` 走 `SaveTensor`/`LoadTensor` | D19 | 2d | ✅ **DONE(2026-10-25,ea94bc5)**:`csrc/capi/serialize.cc` 新增 `pd_tensor_save`/`pd_tensor_load`(save_load_tensor.h:20/24,Group 7);`csrc/sol/tensor_binding.cc` `register_serialize_fns`(`core.save_tensor/load_tensor`);`lua/paddle/serialization.lua`(顶层 `paddle.save{obj,path}`/`paddle.load{path}`,inventory.md:439-440)+ init.lua 挂载。**SERIALIZATION_SMOKE PASS(两段式 --save/--load 独立进程,覆盖 07-serialization.md §5 重启进程读回)** + 六个旧 smoke 无回归 + lint 全绿。**踩坑**:CMake `file(GLOB)` 不自动拾取新 .cc → 重跑 `cmake -S . -B build-test` 后 LNK2019 消失。**剩余**:state_dict/manifest 目录格式归 P9/M2(lua-pickle 接线);pickle 只读归 M2 |
 | T-M1-16 | `paddle.dataset` MNIST | `plan/overview.md` §2.1.1 | 3d |
 | T-M1-17 | `jit::Layer` 绑定(可选,高性价比) | D18 | 2d |
 | T-M1-18 | GC 九层机制 | D5/D6 | 3d |

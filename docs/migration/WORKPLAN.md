@@ -146,8 +146,8 @@
  |    |    +-- [✅] 2.6.0 API 设计                -> plan/api/{autograd,scope}.md
  |    |    +-- [✅] 2.6.1 backward/grad/no_grad 绑定  ★ 2026-10-25(cd61d8e):T-M1-10 DONE,autograd_smoke 全过
  |    |    +-- [✅] 2.6.2 paddle.scope + memory_allocated  ★ 2026-10-25(ee03f65):scope_smoke 显存下降 PASS;OOM 回调随 T-M1-18(GC)
- |    +-- [🔵] 2.7 序列化                    -> plan/modules/07-serialization.md
- |    +-- [⬜] 2.8 jit::Layer 推理 ★可先交付 -> plan/modules/08-jit-infer.md
+ |    +-- [✅] 2.7 序列化                    -> plan/modules/07-serialization.md ★ 单张量 save/load(D19)已完成;state_dict/manifest 归 P9/M2
+ |    +-- [🔵] 2.8 jit::Layer 推理 ★可先交付 -> plan/modules/08-jit-infer.md
  |    +-- [⬜] 2.9 paddle.nn ★最大一块       -> plan/modules/09-nn.md
  |    |    +-- [⬜] 2.9.0 API 设计                -> plan/api/{nn,nn-functional,nn-initializer}.md
  |    |    +-- [⬜] 2.9.1 Layer 基类 + 它的测试   ★ 同时写
