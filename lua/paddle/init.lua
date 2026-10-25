@@ -82,7 +82,7 @@ M.load = serialization.load
 -- as each stage lands: device (P5), autograd (P6), nn (P9), optimizer
 -- (P10), io (P11), vision (P12).
 local lazy = { device = "paddle.device", autograd = "paddle.autograd",
-               scope = "paddle.scope" }
+               scope = "paddle.scope", jit = "paddle.jit" }
 
 setmetatable(M, {
   __index = function(t, k)

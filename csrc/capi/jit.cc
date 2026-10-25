@@ -20,9 +20,85 @@
 #include <string>
 #include <vector>
 
+#include "paddle/common/flags.h"
 #include "paddle/fluid/jit/serializer.h"
+#include "paddle/fluid/pir/dialect/operator/ir/pd_op.h"
+#include "paddle/pir/include/core/builtin_attribute.h"
 
 #include "capi_impl.h"
+
+// Runtime config for jit::Load, matching the T-M0-17 verified setup
+// (smoke_jit_load.cc RunMain): the WITH_PYTHON=OFF link does not pull in
+// PIR's parametric-storage registration (storage_manager.cc:85 throws when
+// the type is unregistered), so Load must read the NON-PIR format
+// (smoke_jit_load.cc RunMain): the WITH_PYTHON=OFF link does not pull in
+// PIR's parametric-storage registration (storage_manager.cc:85 throws when
+// the type is unregistered), so Load must read the NON-PIR format
+// (serializer.cc:48 branches on FLAGS_enable_pir_api) -- enable_pir_api
+// defaults to true (flags.cc:1888), which would select the PIR path.
+// The "New" engine is our target anyway (D16 InterpreterCore, serializer.cc:
+// 73-76), and use_mkldnn=false avoids the upstream fc/oneDNN bug (Q-24,
+// onednn_context.cc:347). These are set once here, before the first Load.
+COMMON_DECLARE_bool(enable_pir_api);
+COMMON_DECLARE_string(jit_engine_type);
+COMMON_DECLARE_bool(use_mkldnn);
+namespace {
+struct JitFlagsOnce {
+  JitFlagsOnce() {
+    FLAGS_enable_pir_api = false;
+    FLAGS_jit_engine_type = "New";
+    FLAGS_use_mkldnn = false;
+  }
+};
+const JitFlagsOnce kJitFlagsOnce;
+}  // namespace
+
+// ---------------------------------------------------------------------------
+// Upstream link-gap shim (WITH_PYTHON=OFF only), same source as the T-M0-17
+// smoke (smoke_jit_load.cc): libfluid_jit's PirFunctionInfo ctor
+// (function_schema.cc:112/115) calls paddle::GetFeedTargetNames /
+// GetFetchTargetNames unconditionally, but those free functions live in
+// paddle/fluid/pybind/pir_utils.cc:20/36 -- the pybind directory, which is
+// NOT built under WITH_PYTHON=OFF. The implementations are pure PIR (DataOp/
+// FeedOp/FetchOp/ShadowOutputOp + StrAttribute) with zero Python dependency,
+// so we provide equivalents here, in the same TU as pd_jit_layer_load -- a
+// static library pulls in jit.cc.obj (and with it this shim) only when a
+// pd_jit_layer_* symbol is referenced, which is exactly when libfluid_jit
+// needs the names. See process/m0-report.md T-M0-17 / api/jit.md sec.6 ①.
+namespace paddle {
+std::vector<std::string> GetFeedTargetNames(pir::Program* prog) {
+  std::vector<std::string> feed_target;
+  for (auto& op : *(prog->block())) {
+    if (op.isa<paddle::dialect::DataOp>()) {
+      auto name = op.attribute<pir::StrAttribute>("name").AsString();
+      feed_target.push_back(name);
+      continue;
+    } else if (op.isa<paddle::dialect::FeedOp>()) {
+      auto name = op.attribute<pir::StrAttribute>("name").AsString();
+      feed_target.push_back(name);
+      continue;
+    }
+  }
+  return feed_target;
+}
+
+std::vector<std::string> GetFetchTargetNames(pir::Program* prog) {
+  std::vector<std::string> fetch_target;
+  for (auto& op : *(prog->block())) {
+    if (op.isa<paddle::dialect::FetchOp>()) {
+      auto name = op.attribute<pir::StrAttribute>("name").AsString();
+      fetch_target.push_back(name);
+      continue;
+    } else if (op.isa<pir::ShadowOutputOp>()) {
+      auto name = op.attribute<pir::StrAttribute>("output_name").AsString();
+      fetch_target.push_back(name);
+      continue;
+    }
+  }
+  return fetch_target;
+}
+}  // namespace paddle
+// ---------------------------------------------------------------------------
 
 extern "C" {
 

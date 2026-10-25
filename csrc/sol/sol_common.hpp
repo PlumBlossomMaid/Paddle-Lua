@@ -91,6 +91,10 @@ void register_enums_place(lua_State* L, int module_index);
  * 3). Runs last in luaopen_paddle_core, after the usertypes it needs. */
 void register_ops(lua_State* L, int module_index);
 
+/* Register the LuaLayer usertype (jit::Layer face) + core.jit_load
+ * (jit_binding.cc, 2.8). Runs after register_ops. */
+void register_jit(lua_State* L, int module_index);
+
 }  // namespace pd
 
 #endif  // PADDLE_LUA_SOL_COMMON_H

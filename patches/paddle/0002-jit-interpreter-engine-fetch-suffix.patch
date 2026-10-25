@@ -1,0 +1,57 @@
+diff --git a/paddle/fluid/jit/engine/interpreter_engine.cc b/paddle/fluid/jit/engine/interpreter_engine.cc
+index 3836e08966..a10175aa77 100644
+--- a/paddle/fluid/jit/engine/interpreter_engine.cc
++++ b/paddle/fluid/jit/engine/interpreter_engine.cc
+@@ -26,6 +26,27 @@
+ 
+ namespace paddle::jit {
+ 
++namespace {
++// FunctionSchema::OutputArgNames() appends "@fetch" to every output name
++// (function_schema.cc:39-42), but the New executor (used_for_jit=true)
++// creates scope variables with the bare name after RemoveDescFeedFetch
++// dropped the fetch op. Strip the suffix so both skip_gc_vars and FetchOuts
++// match the actual scope variable names (interpreter_engine.cc:67-72,
++// 96-98); keeping the suffixed name would let GC collect the output var
++// (empty holder) or deref a null FindVar.
++std::vector<std::string> StripFetchSuffix(const std::vector<std::string> &names) {
++  std::vector<std::string> out(names);
++  const std::string kSuffix = "@fetch";
++  for (std::string &n : out) {
++    if (n.size() >= kSuffix.size() &&
++        n.compare(n.size() - kSuffix.size(), kSuffix.size(), kSuffix) == 0) {
++      n.resize(n.size() - kSuffix.size());
++    }
++  }
++  return out;
++}
++}  // namespace
++
+ InterpreterEngine::InterpreterEngine(
+     const std::shared_ptr<FunctionInfo> &info,
+     const std::shared_ptr<VariableMap> &params_dict,
+@@ -65,7 +86,7 @@ void InterpreterEngine::CreateInterpreterCore() {
+   execution_config.used_for_jit = true;
+ 
+   auto in_names = info_->InputArgNames();
+-  auto out_names = info_->OutputArgNames();
++  auto out_names = StripFetchSuffix(info_->OutputArgNames());
+   execution_config.skip_gc_vars.insert(in_names.begin(), in_names.end());
+   execution_config.skip_gc_vars.insert(out_names.begin(), out_names.end());
+ 
+@@ -87,8 +108,14 @@ std::vector<DenseTensor> InterpreterEngine::operator()(
+   auto &feed_names = info_->InputArgNames();
+   phi::FetchList outs = inner_interpreter_->Run(feed_names);
+ 
++  // FunctionSchema::OutputArgNames() appends "@fetch" to every output name
++  // (function_schema.cc:39-42), but the New executor creates the scope
++  // variables with the bare name (no suffix) after RemoveDescFeedFetch
++  // dropped the fetch op. FetchOuts does scope.FindVar per name; passing
++  // the suffixed name would deref a null pointer. Strip the suffix.
+   std::vector<DenseTensor> outputs;
+-  utils::FetchOuts(info_->OutputArgNames(), scope_, &outputs);
++  utils::FetchOuts(StripFetchSuffix(info_->OutputArgNames()), scope_,
++                   &outputs);
+   scope_.DropKids();
+ 
+   return outputs;

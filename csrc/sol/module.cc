@@ -116,5 +116,8 @@ extern "C" PD_LUAOPEN_EXPORT int luaopen_paddle_core(lua_State* L) {
   // gen_ops_all.cc: every pd_op_* C ABI function as a sol2 lambda
   // (2.3.4 closing item 3 -- generated, AGENTS sec.8.3).
   pd::register_ops(L, -1);
+  // jit_binding.cc: LuaLayer usertype + core.jit_load (2.8). Runs last:
+  // load needs the op registry (InterpreterCore) already in place.
+  pd::register_jit(L, -1);
   return 1;
 }
