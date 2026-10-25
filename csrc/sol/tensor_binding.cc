@@ -279,6 +279,18 @@ void register_tensor(lua_State* L, int module_index) {
         pd::check();
         return 0;
       },
+      /* 2.10 optimizer: t:copy_from(src) -- deep-copy src's data INTO
+       * t's existing storage; t keeps its handle identity / autograd
+       * meta / place. This is the Lua face of the in-place parameter
+       * update that Python gets from _C_ops.sgd_/adam_ (ParamOut back
+       * into Param, 10-optimizer.md sec.4). Requires dtype/place match
+       * (pd_tensor_copy_from -> Tensor::copy_, tensor.h:510). */
+      "copy_from",
+      [](const LuaTensor& t, const LuaTensor& src) {
+        pd_status st = pd_tensor_copy_from(t.h, src.h);
+        pd::check();
+        return 0;
+      },
       /* reserved now for P13 (02-binding.md sec.3.2) */
       "__lanesclone",
       [](void* dst, const LuaTensor& src) { new (dst) LuaTensor(src); });

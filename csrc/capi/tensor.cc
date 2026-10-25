@@ -338,6 +338,26 @@ pd_tensor pd_tensor_copy_to(const pd_tensor t, pd_place place, int blocking) {
   PD_GUARD_END(nullptr);
 }
 
+pd_status pd_tensor_copy_from(pd_tensor dst, const pd_tensor src) {
+  PD_GUARD_BEGIN;
+  if (dst == nullptr || src == nullptr) {
+    pd_set_error(PD_INVALID_ARG, "tensor is null");
+    return PD_INVALID_ARG;
+  }
+  paddle::Tensor& d = reinterpret_cast<pd_tensor_t*>(dst)->value;
+  const paddle::Tensor& s = reinterpret_cast<const pd_tensor_t*>(src)->value;
+  // tensor.h:510 -- Tensor::copy_(src, target_place, blocking) deep-copies
+  // src's data INTO this tensor's EXISTING storage; dst keeps its handle
+  // identity / autograd meta / place. This is the C ABI face of Python's
+  // in-place optimizer update (_C_ops.sgd_/adam_ write ParamOut back into
+  // Param, 10-optimizer.md sec.4). Requires dtype / tensor-type / place
+  // to match (tensor_method.cc:106-118); PADDLE_ENFORCE throws here and
+  // PD_GUARD catches it into the status slot.
+  d.copy_(s, d.place(), true);
+  return PD_OK;
+  PD_GUARD_END(PD_ERROR);
+}
+
 int64_t pd_tensor_to_host_buffer(const pd_tensor t, void* data, size_t nbytes) {
   PD_GUARD_BEGIN;
   if (t == nullptr || data == nullptr) {

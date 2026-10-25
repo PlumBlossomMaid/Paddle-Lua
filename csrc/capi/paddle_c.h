@@ -167,6 +167,14 @@ void       pd_tensor_place(const pd_tensor t, int* kind, int* index);
 /* Cross-device copy (semantics = paddle::Tensor::copy_to, tensor.h:492). */
 pd_tensor  pd_tensor_copy_to(const pd_tensor t, pd_place place, int blocking);
 
+/* Deep-copy src's data INTO dst's EXISTING storage: dst keeps its handle
+ * identity, autograd meta and place -- exactly Python's in-place
+ * parameter update (_C_ops.sgd_/adam_ write ParamOut back into Param,
+ * 10-optimizer.md sec.4). Source: tensor.h:510 Tensor::copy_ /
+ * tensor_method.cc:98. Requires dtype / tensor-type / place to match
+ * (tensor_method.cc:106-118); failure sets the status slot. */
+pd_status  pd_tensor_copy_from(pd_tensor dst, const pd_tensor src);
+
 /* Copy back to host buffer: caller allocates (capacity >=
  * numel * dtype_size). Returns bytes written; <0 => error (status set). */
 int64_t    pd_tensor_to_host_buffer(const pd_tensor t, void* data, size_t nbytes);

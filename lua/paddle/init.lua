@@ -83,7 +83,7 @@ M.load = serialization.load
 -- (P10), io (P11), vision (P12).
 local lazy = { device = "paddle.device", autograd = "paddle.autograd",
                scope = "paddle.scope", jit = "paddle.jit",
-               nn = "paddle.nn" }
+               nn = "paddle.nn", optimizer = "paddle.optimizer" }
 
 setmetatable(M, {
   __index = function(t, k)
