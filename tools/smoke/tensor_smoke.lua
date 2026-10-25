@@ -57,6 +57,19 @@ assert(ident:shape()[1] == 2 and ident:shape()[2] == 3, "x[\":\"]")
 local rev = x["::-1"]
 assert(rev:shape()[1] == 2 and rev:shape()[2] == 3, "x[\"::-1\"] shape")
 
+-- step slicing: x["1:3:2, :"] = odd rows (1-based rows 1..2 step 2 -> row 1)
+local odd = x["1:3:2, :"]
+assert(#odd:shape() == 2 and odd:shape()[1] == 1 and odd:shape()[2] == 3,
+       "x[\"1:3:2, :\"] one row")
+
+-- open ends: x["2:, :"] = rows 2..end; x[":2, :"] = rows 1..1
+local tail = x["2:, :"]
+assert(#tail:shape() == 2 and tail:shape()[1] == 1 and tail:shape()[2] == 3,
+       "x[\"2:, :\"] last row")
+local head = x[":2, :"]
+assert(#head:shape() == 2 and head:shape()[1] == 1 and head:shape()[2] == 3,
+       "x[\":2, :\"] first row")
+
 -- --- arithmetic operators
 local sum = x + x
 assert(sum:numel() == 6 and sum[1]:item(1) == 4.0, "x+x element 4.0")
