@@ -323,4 +323,131 @@ check(okg, "gumbel_softmax outputs in [0,1]")
 local okk, err = pcall(function() F.maxout{ x = cvec(3, 1.0) } end)
 check(not okk, "maxout without groups must raise")
 
+-- ---------------------------------------------------------------------
+-- 20: 池化(2.9.3.3)-- 镜像 Python test_pool2d_op.py 断言逻辑
+-- (输入 → 公式期望 → rtol=1e-5;常量输入使期望可手算)
+-- ---------------------------------------------------------------------
+
+-- 多维常量张量 + 全等检查(item 取 1-based 线性索引,tensor.lua:423)
+local function ctensor(shape, v)
+  return core.pd_op_full(shape, v, F32, CPU)
+end
+
+local function all_equals(t, v)
+  local n = t:numel()
+  for i = 1, n do
+    if math.abs(item(t, i) - v) > 1e-6 then return false end
+  end
+  return true
+end
+
+-- avg_pool2d:全 1 [1,1,4,4] kernel=2 stride=2 → [1,1,2,2] 全 1(窗口均值)
+local x = ctensor({1, 1, 4, 4}, 1.0)
+local y = F.avg_pool2d{ x, kernel_size = 2, stride = 2 }
+local sh = y:shape()
+check(sh[1] == 1 and sh[2] == 1 and sh[3] == 2 and sh[4] == 2,
+      "avg_pool2d x[1,1,4,4] k2 s2 -> [1,1,2,2]")
+check(all_equals(y, 1.0), "avg_pool2d all-1 k2 s2 -> all-1")
+local y = F.avg_pool2d{ ctensor({1, 1, 4, 4}, 3.0), kernel_size = 2, stride = 2 }
+check(all_equals(y, 3.0), "avg_pool2d all-3 k2 s2 -> all-3")
+
+-- avg_pool2d padding=1,exclusive=True(默认):padding 0 不参与平均,
+-- 全 1 输入仍全 1;shape (4+2*1-2)/1+1 = 5x5
+local y = F.avg_pool2d{ x, kernel_size = 2, stride = 1, padding = 1 }
+local sh = y:shape()
+check(sh[3] == 5 and sh[4] == 5, "avg_pool2d padding=1 k2 s1 -> 5x5")
+check(all_equals(y, 1.0), "avg_pool2d padding=1 exclusive=True all-1")
+
+-- avg_pool2d divisor_override:out * (k0*k1) / divisor(pooling.py:407-411;
+-- 全 1 k2 → 均值 1,1*4/2 = 2)
+local y = F.avg_pool2d{ x, kernel_size = 2, stride = 2, divisor_override = 2 }
+check(all_equals(y, 2.0), "avg_pool2d divisor_override=2 -> 2")
+
+-- avg_pool2d padding='SAME'(kernel=2 stride=1):H/W 保持
+local y = F.avg_pool2d{ x, kernel_size = 2, stride = 1, padding = "SAME" }
+local sh = y:shape()
+check(sh[3] == 4 and sh[4] == 4, "avg_pool2d padding='SAME' keeps 4x4")
+
+-- max_pool2d:全 5 → 全 5,shape [1,1,2,2]
+local y = F.max_pool2d{ ctensor({1, 1, 4, 4}, 5.0), kernel_size = 2, stride = 2 }
+local sh = y:shape()
+check(sh[3] == 2 and sh[4] == 2, "max_pool2d k2 s2 -> [1,1,2,2]")
+check(all_equals(y, 5.0), "max_pool2d all-5 k2 s2 -> all-5")
+
+-- max_pool2d return_mask=True:NCHW 双输出,out 全 5;mask 是输入展平的
+-- 最大值索引,1-based(C4,C ABI pd_idx_plus1)。kernel=2 stride=2 于
+-- [1,1,4,4] 的四个窗口:展平索引 0,2,8,10(0-based)→ 1,3,9,11
+local y, m = F.max_pool2d{ ctensor({1, 1, 4, 4}, 5.0), kernel_size = 2,
+                           stride = 2, return_mask = true }
+check(all_equals(y, 5.0), "max_pool2d return_mask out all-5")
+check(m:numel() == 4 and item(m, 1) == 1 and item(m, 2) == 3
+        and item(m, 3) == 9 and item(m, 4) == 11,
+      "max_pool2d return_mask mask = {1,3,9,11} (1-based flat idx)")
+
+-- max_pool2d dilation=2 → with_index 分支(pooling.py:1172)
+local y = F.max_pool2d{ ctensor({1, 1, 8, 8}, 5.0), kernel_size = 3,
+                        stride = 1, padding = 1, dilation = 2 }
+local sh = y:shape()
+check(sh[3] == 6 and sh[4] == 6, "max_pool2d dilation=2 k3 s1 -> 6x6")
+
+-- avg_pool1d:全 1 [1,1,4] k2 s2 → [1,1,2] 全 1(unsqueeze→pool2d→squeeze)
+local y = F.avg_pool1d{ ctensor({1, 1, 4}, 1.0), kernel_size = 2, stride = 2 }
+local sh = y:shape()
+check(sh[1] == 1 and sh[2] == 1 and sh[3] == 2, "avg_pool1d k2 s2 -> [1,1,2]")
+check(all_equals(y, 1.0), "avg_pool1d all-1 -> all-1")
+
+-- max_pool1d return_mask=True:out [1,1,2] 全 4;mask 是输入展平的最大值
+-- 索引 1-based(C4)。kernel=2 stride=2 在 [1,1,4] 的两个窗口:展平索引
+-- 0,2(0-based)→ 1,3
+local y, m = F.max_pool1d{ ctensor({1, 1, 4}, 4.0), kernel_size = 2,
+                           stride = 2, return_mask = true }
+local sh = y:shape()
+check(sh[3] == 2 and m:shape()[3] == 2, "max_pool1d return_mask shapes [1,1,2]")
+check(all_equals(y, 4.0) and m:numel() == 2 and item(m, 1) == 1
+        and item(m, 2) == 3,
+      "max_pool1d return_mask out all-4 mask = {1,3}")
+
+-- adaptive_avg_pool2d:全 1 4x4 output_size=2 → [1,1,2,2] 全 1
+local y = F.adaptive_avg_pool2d{ x, output_size = 2 }
+local sh = y:shape()
+check(sh[3] == 2 and sh[4] == 2, "adaptive_avg_pool2d os=2 -> [1,1,2,2]")
+check(all_equals(y, 1.0), "adaptive_avg_pool2d all-1 -> all-1")
+
+-- adaptive_max_pool2d output_size={2,2} 全 5 → [1,1,2,2] 全 5
+local y = F.adaptive_max_pool2d{ ctensor({1, 1, 4, 4}, 5.0),
+                                 output_size = {2, 2} }
+check(all_equals(y, 5.0), "adaptive_max_pool2d all-5 -> all-5")
+
+-- adaptive_avg_pool1d / adaptive_max_pool3d 冒烟:shape 正确
+local y = F.adaptive_avg_pool1d{ ctensor({1, 1, 6}, 2.0), output_size = 6 }
+check(y:shape()[3] == 6, "adaptive_avg_pool1d os=6 -> L=6")
+local y = F.adaptive_max_pool3d{ ctensor({1, 1, 4, 4, 4}, 2.0),
+                                 output_size = 2 }
+local sh = y:shape()
+check(sh[3] == 2 and sh[4] == 2 and sh[5] == 2,
+      "adaptive_max_pool3d os=2 -> [1,1,2,2,2]")
+
+-- avg_pool3d:全 1 [1,1,2,2,2] kernel=2 → [1,1,1,1,1] 全 1
+local y = F.avg_pool3d{ ctensor({1, 1, 2, 2, 2}, 1.0), kernel_size = 2 }
+local sh = y:shape()
+check(sh[3] == 1 and sh[4] == 1 and sh[5] == 1,
+      "avg_pool3d k2 -> [1,1,1,1,1]")
+check(all_equals(y, 1.0), "avg_pool3d all-1 -> all-1")
+
+-- 池化 argrule 门禁
+-- 1) kernel_size 坏类型(string)
+local okk, err = pcall(function() F.avg_pool2d{ x, kernel_size = "wide" } end)
+check(not okk, "avg_pool2d kernel_size string must raise")
+-- 2) 未知键
+local okk, err = pcall(function() F.avg_pool2d{ x, kernel_size = 2, bogus = 1 } end)
+check(not okk, "avg_pool2d unknown key must raise")
+-- 3) padding 未知字符串
+local okk, err = pcall(function() F.avg_pool2d{ x, kernel_size = 2,
+  padding = "UPPER" } end)
+check(not okk, "avg_pool2d padding='UPPER' must raise")
+-- 4) NHWC + return_mask 冲突(pooling.py:1212)
+local okk, err = pcall(function() F.max_pool2d{ x, kernel_size = 2,
+  data_format = "NHWC", return_mask = true } end)
+check(not okk, "max_pool2d NHWC+return_mask must raise")
+
 print(("NN_FUNCTIONAL_SMOKE PASS (%d assertions)"):format(ntests))

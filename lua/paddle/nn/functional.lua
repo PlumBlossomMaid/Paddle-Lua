@@ -367,4 +367,454 @@ M.gumbel_softmax = rule {
   return wrap.gumbel_softmax(x, temperature, hard, axis)
 end)
 
+-- ---------------------------------------------------------------------
+-- 池化(pooling.py):avg/max 1d/2d/3d + adaptive_avg/max 1d/2d/3d
+-- 直接绑定 pool2d/pool3d/max_pool2d_with_index/max_pool3d_with_index;
+-- padding 三态解析 Lua 重写(pooling.py:135-193 的 _update_padding_nd 等价)。
+-- ---------------------------------------------------------------------
+
+-- 标量 → {v}*n(convert_to_list 等价,layers_utils.py:51)
+local function pool_to_list(v, n)
+  if type(v) == "number" then
+    local t = {}
+    for i = 1, n do t[i] = v end
+    return t
+  end
+  return v
+end
+
+-- 对称 padding 检测:len==2n 且成对相等(layers_utils.py:361,
+-- 0-based 比较 (0,1),(2,3)... → 1-based (1,2),(3,4)...)
+local function pool_is_symmetric(padding, num_dims)
+  if #padding ~= num_dims * 2 then return true end
+  for i = 1, num_dims do
+    if padding[i * 2 - 1] ~= padding[i * 2] then return false end
+  end
+  return true
+end
+
+-- 对偶列表 [[b,a],...]:batch/channel 维必须全 0(pooling.py:95)
+local function pool_zero_bandc(padding, channel_last)
+  if channel_last then
+    return padding[1][1] == 0 and padding[1][2] == 0
+       and padding[#padding][1] == 0 and padding[#padding][2] == 0
+  end
+  return padding[1][1] == 0 and padding[1][2] == 0
+     and padding[2][1] == 0 and padding[2][2] == 0
+end
+
+-- 从对偶列表剔除 batch/channel 维并摊平(pooling.py:102)
+local function pool_exclude_bandc(padding, channel_last)
+  local out = {}
+  local from = channel_last and 2 or 3
+  local to = channel_last and (#padding - 1) or #padding
+  for i = from, to do
+    out[#out + 1] = padding[i][1]
+    out[#out + 1] = padding[i][2]
+  end
+  return out
+end
+
+-- 取 [0],[2],... 下标(对偶 → 单值)
+local function pool_even(t)
+  local out = {}
+  for i = 1, #t, 2 do out[#out + 1] = t[i] end
+  return out
+end
+
+-- pool_update_padding:padding 三态 → (paddings, padding_algorithm)
+-- 字符串 SAME/VALID / 数字 / 列表(一对、2n、n)(pooling.py:135)
+local function pool_update_padding(padding, num_dims, channel_last, ceil_mode)
+  if type(padding) == "string" then
+    local up = string.upper(padding)
+    if up ~= "SAME" and up ~= "VALID" then
+      error(("Unknown padding: '%s'. It can only be 'SAME' or 'VALID'.")
+        :format(padding), 2)
+    end
+    if up == "VALID" and ceil_mode then
+      error('When Attr(padding) is "VALID", Attr(ceil_mode) must be False. '
+        .. "Received ceil_mode: True.", 2)
+    end
+    local zero = {}
+    for i = 1, num_dims do zero[i] = 0 end
+    return zero, up
+  end
+  if type(padding) == "table" then
+    -- 对偶列表 [[b,a],[b,a],...],含 batch/channel 维
+    if #padding == 2 + num_dims and type(padding[1]) == "table" then
+      if not pool_zero_bandc(padding, channel_last) then
+        error("Non-zero padding in the batch or channel dimensions is "
+          .. "not supported.", 2)
+      end
+      local flat = pool_exclude_bandc(padding, channel_last)
+      if pool_is_symmetric(flat, num_dims) then
+        return pool_even(flat), "EXPLICIT"
+      end
+      return flat, "EXPLICIT"
+    end
+    -- [a,b,a,b,...] 2n 或 [d1,d2,...] n
+    if #padding == 2 * num_dims and type(padding[1]) == "number" then
+      if pool_is_symmetric(padding, num_dims) then
+        return pool_even(padding), "EXPLICIT"
+      end
+      return padding, "EXPLICIT"
+    end
+    if #padding == num_dims and type(padding[1]) == "number" then
+      return padding, "EXPLICIT"
+    end
+    error("Invalid padding: " .. tostring(padding), 2)
+  end
+  -- 数字
+  return pool_to_list(padding, num_dims), "EXPLICIT"
+end
+
+-- 1d 池化 padding 展开:2 值 → [0,0,*p],1 值 → [0,*p](pooling.py:196)
+local function pool_expand_low(padding)
+  if #padding == 2 then
+    return { 0, 0, padding[1], padding[2] }
+  elseif #padding == 1 then
+    return { 0, padding[1] }
+  end
+  error("The size of padding's dimension should be 1 or 2. But got padding="
+    .. tostring(padding), 2)
+end
+
+-- 校验 data_format 合法 + 是否 channel-last(pooling.py:108)
+local function pool_channel_last(data_format, n)
+  local map = {
+    [1] = { "NCL", "NLC" },
+    [2] = { "NCHW", "NHWC" },
+    [3] = { "NCDHW", "NDHWC" },
+  }
+  local pair = map[n]
+  if data_format ~= pair[1] and data_format ~= pair[2] then
+    error(("Attr(data_format) should be '%s' or '%s'. Received %s")
+      :format(pair[1], pair[2], tostring(data_format)), 2)
+  end
+  return data_format == pair[2]
+end
+
+-- 池化参数类型:kernel_size/stride = number 或 number 表
+local PoolLen = argrule.Union { argrule.number, argrule.table }
+-- padding = number / string / 表
+local PoolPad = argrule.Union { argrule.number, argrule.string, argrule.table }
+
+-- avg_pool1d{x, kernel_size, stride, padding, exclusive, ceil_mode}
+-- pooling.py:246-293:NCL→NCHW 升维,pool2d 再 squeeze
+M.avg_pool1d = rule {
+  { name = "x", type = Tensor, doc = "3-D [N,C,L] tensor (NCL)" },
+  { name = "kernel_size", type = PoolLen, doc = "pool window (int or {L})" },
+  { name = "stride", type = PoolLen, opt = true,
+    doc = "stride (default kernel_size)" },
+  { name = "padding", type = PoolPad, opt = true, default = 0,
+    doc = "'SAME'/'VALID' / int / {L} / 2-list / pair-list" },
+  { name = "exclusive", type = argrule.boolean, opt = true, default = true,
+    doc = "exclude padding in avg (pooling.py:258)" },
+  { name = "ceil_mode", type = argrule.boolean, opt = true, default = false,
+    doc = "ceil output shape (pooling.py:259)" },
+}(function(x, kernel_size, stride, padding, exclusive, ceil_mode)
+  local x2 = paddle_core.pd_op_unsqueeze(x, { 2 })  -- NCL→NCHW(0-based 轴2)
+  local ks = { 1, pool_to_list(kernel_size, 1)[1] }
+  local st
+  if stride == nil then st = ks else st = { 1, pool_to_list(stride, 1)[1] } end
+  local pad, alg = pool_update_padding(padding, 1, false, ceil_mode)
+  pad = pool_expand_low(pad)
+  local out = paddle_core.pd_op_pool2d(
+    x2, ks, st, pad, (ceil_mode and 1 or 0), (exclusive and 1 or 0),
+    "NCHW", "avg", 0, 0, alg)
+  return paddle_core.pd_op_squeeze(out, { 2 })
+end)
+
+-- max_pool1d{x, kernel_size, stride, padding, return_mask, ceil_mode,
+--            dilation} -- pooling.py:619-708
+M.max_pool1d = rule {
+  { name = "x", type = Tensor, doc = "3-D [N,C,L] tensor (NCL)" },
+  { name = "kernel_size", type = PoolLen, doc = "pool window (int or {L})" },
+  { name = "stride", type = PoolLen, opt = true,
+    doc = "stride (default kernel_size)" },
+  { name = "padding", type = PoolPad, opt = true, default = 0,
+    doc = "'SAME'/'VALID' / int / {L} / 2-list / pair-list" },
+  { name = "return_mask", type = argrule.boolean, opt = true, default = false,
+    doc = "also return max indices (1-based, C4)" },
+  { name = "ceil_mode", type = argrule.boolean, opt = true, default = false,
+    doc = "ceil output shape (pooling.py:637)" },
+  { name = "dilation", type = PoolLen, opt = true, default = 1,
+    doc = "dilation (pooling.py:638)" },
+}(function(x, kernel_size, stride, padding, return_mask, ceil_mode, dilation)
+  local x2 = paddle_core.pd_op_unsqueeze(x, { 2 })
+  local d1 = pool_to_list(dilation, 1)
+  local dl = { 1, d1[1] }
+  local ks = { 1, pool_to_list(kernel_size, 1)[1] }
+  local st
+  if stride == nil then st = ks else st = { 1, pool_to_list(stride, 1)[1] } end
+  local pad, alg = pool_update_padding(padding, 1, false, ceil_mode)
+  pad = pool_expand_low(pad)
+  local has_dilation = d1[1] ~= 1
+  local out
+  if return_mask or has_dilation then
+    -- max_pool2d_with_index 双输出,out/mask(python:return (o,m) 或 o[0])
+    local o, m = paddle_core.pd_op_max_pool2d_with_index(
+      x2, ks, st, pad, dl, 0, 0, (ceil_mode and 1 or 0))
+    if return_mask then
+      return paddle_core.pd_op_squeeze(o, { 2 }),
+             paddle_core.pd_op_squeeze(m, { 2 })
+    end
+    out = paddle_core.pd_op_squeeze(o, { 2 })
+  else
+    out = paddle_core.pd_op_pool2d(
+      x2, ks, st, pad, (ceil_mode and 1 or 0), 1,
+      "NCHW", "max", 0, 0, alg)
+    out = paddle_core.pd_op_squeeze(out, { 2 })
+  end
+  return out
+end)
+
+-- avg_pool2d{x, kernel_size, stride, padding, ceil_mode, exclusive,
+--            divisor_override, data_format} -- pooling.py:322-411
+M.avg_pool2d = rule {
+  { name = "x", type = Tensor, doc = "4-D [N,C,H,W] tensor" },
+  { name = "kernel_size", type = PoolLen, doc = "pool window (int or {H,W})" },
+  { name = "stride", type = PoolLen, opt = true,
+    doc = "stride (default kernel_size)" },
+  { name = "padding", type = PoolPad, opt = true, default = 0,
+    doc = "'SAME'/'VALID' / int / {H,W} / 4-list / pair-list" },
+  { name = "ceil_mode", type = argrule.boolean, opt = true, default = false,
+    doc = "ceil output shape (pooling.py:332)" },
+  { name = "exclusive", type = argrule.boolean, opt = true, default = true,
+    doc = "exclude padding in avg (pooling.py:333)" },
+  { name = "divisor_override", type = argrule.number, opt = true,
+    doc = "override division factor (pooling.py:407-411)" },
+  { name = "data_format", type = argrule.string, opt = true, default = "NCHW",
+    doc = "'NCHW' or 'NHWC' (pooling.py:335)" },
+}(function(x, kernel_size, stride, padding, ceil_mode, exclusive,
+          divisor_override, data_format)
+  local cl = pool_channel_last(data_format, 2)
+  local ks = pool_to_list(kernel_size, 2)
+  local st = ks
+  if stride ~= nil then st = pool_to_list(stride, 2) end
+  local pad, alg = pool_update_padding(padding, 2, cl, ceil_mode)
+  local out = paddle_core.pd_op_pool2d(
+    x, ks, st, pad, (ceil_mode and 1 or 0), (exclusive and 1 or 0),
+    data_format, "avg", 0, 0, alg)
+  if divisor_override ~= nil then
+    -- pooling.py:407:out * (k0*k1) / divisor_override
+    out = paddle_core.pd_op_scale(
+      out, ks[1] * ks[2] / divisor_override, 0, 1)
+  end
+  return out
+end)
+
+-- max_pool2d{x, kernel_size, stride, padding, return_mask, ceil_mode,
+--            dilation, data_format} -- pooling.py:1172-1330
+M.max_pool2d = rule {
+  { name = "x", type = Tensor, doc = "4-D [N,C,H,W] tensor" },
+  { name = "kernel_size", type = PoolLen, doc = "pool window (int or {H,W})" },
+  { name = "stride", type = PoolLen, opt = true,
+    doc = "stride (default kernel_size)" },
+  { name = "padding", type = PoolPad, opt = true, default = 0,
+    doc = "'SAME'/'VALID' / int / {H,W} / 4-list / pair-list" },
+  { name = "return_mask", type = argrule.boolean, opt = true, default = false,
+    doc = "also return max indices (1-based, C4);NCHW only" },
+  { name = "ceil_mode", type = argrule.boolean, opt = true, default = false,
+    doc = "ceil output shape (pooling.py:1187)" },
+  { name = "dilation", type = PoolLen, opt = true, default = 1,
+    doc = "dilation (pooling.py:1188)" },
+  { name = "data_format", type = argrule.string, opt = true, default = "NCHW",
+    doc = "'NCHW' or 'NHWC' (pooling.py:1189)" },
+}(function(x, kernel_size, stride, padding, return_mask, ceil_mode,
+          dilation, data_format)
+  local cl = pool_channel_last(data_format, 2)
+  local ks = pool_to_list(kernel_size, 2)
+  local st = ks
+  if stride ~= nil then st = pool_to_list(stride, 2) end
+  local dl = pool_to_list(dilation, 2)
+  local pad, alg = pool_update_padding(padding, 2, cl, ceil_mode)
+  if data_format == "NHWC" and return_mask then
+    error("When setting return_mask to true, data_format must be set to "
+      .. "NCHW in API:max_pool2d", 2)
+  end
+  local has_dilation = dl[1] ~= 1 or dl[2] ~= 1
+  if has_dilation and data_format == "NHWC" then
+    error("When dilation != 1, data_format must be set to NCHW in "
+      .. "API:max_pool2d", 2)
+  end
+  if return_mask or has_dilation then
+    local o, m = paddle_core.pd_op_max_pool2d_with_index(
+      x, ks, st, pad, dl, 0, 0, (ceil_mode and 1 or 0))
+    if return_mask then return o, m end
+    return o
+  end
+  return paddle_core.pd_op_pool2d(
+    x, ks, st, pad, (ceil_mode and 1 or 0), 1,
+    data_format, "max", 0, 0, alg)
+end)
+
+-- avg_pool3d{x, kernel_size, stride, padding, ceil_mode, exclusive,
+--            divisor_override, data_format} -- pooling.py:452-535
+M.avg_pool3d = rule {
+  { name = "x", type = Tensor, doc = "5-D [N,C,D,H,W] tensor" },
+  { name = "kernel_size", type = PoolLen, doc = "pool window (int or {D,H,W})" },
+  { name = "stride", type = PoolLen, opt = true,
+    doc = "stride (default kernel_size)" },
+  { name = "padding", type = PoolPad, opt = true, default = 0,
+    doc = "'SAME'/'VALID' / int / {D,H,W} / 6-list / pair-list" },
+  { name = "ceil_mode", type = argrule.boolean, opt = true, default = false,
+    doc = "ceil output shape (pooling.py:462)" },
+  { name = "exclusive", type = argrule.boolean, opt = true, default = true,
+    doc = "exclude padding in avg (pooling.py:463)" },
+  { name = "divisor_override", type = argrule.number, opt = true,
+    doc = "override division factor (pooling.py:534)" },
+  { name = "data_format", type = argrule.string, opt = true, default = "NCDHW",
+    doc = "'NCDHW' or 'NDHWC' (pooling.py:465)" },
+}(function(x, kernel_size, stride, padding, ceil_mode, exclusive,
+          divisor_override, data_format)
+  local cl = pool_channel_last(data_format, 3)
+  local ks = pool_to_list(kernel_size, 3)
+  local st = ks
+  if stride ~= nil then st = pool_to_list(stride, 3) end
+  local pad, alg = pool_update_padding(padding, 3, cl, ceil_mode)
+  local out = paddle_core.pd_op_pool3d(
+    x, ks, st, pad, (ceil_mode and 1 or 0), (exclusive and 1 or 0),
+    data_format, "avg", 0, 0, alg)
+  if divisor_override ~= nil then
+    -- pooling.py:534:out * (k0*k1*k2) / divisor_override
+    out = paddle_core.pd_op_scale(
+      out, ks[1] * ks[2] * ks[3] / divisor_override, 0, 1)
+  end
+  return out
+end)
+
+-- max_pool3d{x, kernel_size, stride, padding, return_mask, ceil_mode,
+--            dilation, data_format} -- pooling.py:1369-1535
+M.max_pool3d = rule {
+  { name = "x", type = Tensor, doc = "5-D [N,C,D,H,W] tensor" },
+  { name = "kernel_size", type = PoolLen, doc = "pool window (int or {D,H,W})" },
+  { name = "stride", type = PoolLen, opt = true,
+    doc = "stride (default kernel_size)" },
+  { name = "padding", type = PoolPad, opt = true, default = 0,
+    doc = "'SAME'/'VALID' / int / {D,H,W} / 6-list / pair-list" },
+  { name = "return_mask", type = argrule.boolean, opt = true, default = false,
+    doc = "also return max indices (1-based, C4);NCDHW only" },
+  { name = "ceil_mode", type = argrule.boolean, opt = true, default = false,
+    doc = "ceil output shape (pooling.py:1379)" },
+  { name = "dilation", type = PoolLen, opt = true, default = 1,
+    doc = "dilation (pooling.py:1380)" },
+  { name = "data_format", type = argrule.string, opt = true, default = "NCDHW",
+    doc = "'NCDHW' or 'NDHWC' (pooling.py:1381)" },
+}(function(x, kernel_size, stride, padding, return_mask, ceil_mode,
+          dilation, data_format)
+  local cl = pool_channel_last(data_format, 3)
+  local ks = pool_to_list(kernel_size, 3)
+  local st = ks
+  if stride ~= nil then st = pool_to_list(stride, 3) end
+  local dl = pool_to_list(dilation, 3)
+  local pad, alg = pool_update_padding(padding, 3, cl, ceil_mode)
+  if data_format == "NDHWC" and return_mask then
+    error("When setting return_mask to true, data_format must be set to "
+      .. "NCDHW in API:max_pool3d", 2)
+  end
+  local has_dilation = dl[1] ~= 1 or dl[2] ~= 1 or dl[3] ~= 1
+  if has_dilation and data_format == "NDHWC" then
+    error("When dilation != 1, data_format must be set to NCDHW in "
+      .. "API:max_pool3d", 2)
+  end
+  if return_mask or has_dilation then
+    local o, m = paddle_core.pd_op_max_pool3d_with_index(
+      x, ks, st, pad, dl, 0, 0, (ceil_mode and 1 or 0))
+    if return_mask then return o, m end
+    return o
+  end
+  return paddle_core.pd_op_pool3d(
+    x, ks, st, pad, (ceil_mode and 1 or 0), 1,
+    data_format, "max", 0, 0, alg)
+end)
+
+-- adaptive_avg_pool1d{x, output_size} -- pooling.py:1536-1626
+M.adaptive_avg_pool1d = rule {
+  { name = "x", type = Tensor, doc = "3-D [N,C,L] tensor (NCL)" },
+  { name = "output_size", type = PoolLen, doc = "target L (int or {L})" },
+}(function(x, output_size)
+  local os = pool_to_list(output_size, 1)
+  local ps = { 1, os[1] }
+  local x2 = paddle_core.pd_op_unsqueeze(x, { 2 })
+  -- pooling.py:1596-1599:pool2d adaptive,EXPLICIT
+  local out = paddle_core.pd_op_pool2d(
+    x2, ps, { 1, 1 }, { 0, 0 }, 0, 1, "NCHW", "avg", 0, 1, "EXPLICIT")
+  return paddle_core.pd_op_squeeze(out, { 2 })
+end)
+
+-- adaptive_avg_pool2d{x, output_size, data_format} -- pooling.py:1625-1738
+M.adaptive_avg_pool2d = rule {
+  { name = "x", type = Tensor, doc = "4-D [N,C,H,W] tensor" },
+  { name = "output_size", type = PoolLen, doc = "target {H,W} (int = both)" },
+  { name = "data_format", type = argrule.string, opt = true, default = "NCHW",
+    doc = "'NCHW' or 'NHWC' (pooling.py:1643)" },
+}(function(x, output_size, data_format)
+  local cl = pool_channel_last(data_format, 2)
+  local os = pool_to_list(output_size, 2)
+  return paddle_core.pd_op_pool2d(
+    x, os, { 1, 1 }, { 0, 0 }, 0, 1, data_format, "avg", 0, 1, "EXPLICIT")
+end)
+
+-- adaptive_avg_pool3d{x, output_size, data_format} -- pooling.py:1763-1898
+M.adaptive_avg_pool3d = rule {
+  { name = "x", type = Tensor, doc = "5-D [N,C,D,H,W] tensor" },
+  { name = "output_size", type = PoolLen, doc = "target {D,H,W} (int = all)" },
+  { name = "data_format", type = argrule.string, opt = true, default = "NCDHW",
+    doc = "'NCDHW' or 'NDHWC' (pooling.py:1776)" },
+}(function(x, output_size, data_format)
+  pool_channel_last(data_format, 3)
+  local os = pool_to_list(output_size, 3)
+  return paddle_core.pd_op_pool3d(
+    x, os, { 1, 1, 1 }, { 0, 0, 0 }, 0, 1, data_format, "avg", 0, 1,
+    "EXPLICIT")
+end)
+
+-- adaptive_max_pool1d{x, output_size, return_mask} -- pooling.py:1899-1990
+M.adaptive_max_pool1d = rule {
+  { name = "x", type = Tensor, doc = "3-D [N,C,L] tensor (NCL)" },
+  { name = "output_size", type = PoolLen, doc = "target L (int or {L})" },
+  { name = "return_mask", type = argrule.boolean, opt = true, default = false,
+    doc = "also return max indices (1-based, C4)" },
+}(function(x, output_size, return_mask)
+  local os = pool_to_list(output_size, 1)
+  local ps = { 1, os[1] }
+  local x2 = paddle_core.pd_op_unsqueeze(x, { 2 })
+  local o, m = paddle_core.pd_op_max_pool2d_with_index(
+    x2, ps, { 1, 1 }, { 0, 0 }, { 1, 1 }, 0, 1, 0)
+  if return_mask then
+    return paddle_core.pd_op_squeeze(o, { 2 }),
+           paddle_core.pd_op_squeeze(m, { 2 })
+  end
+  return paddle_core.pd_op_squeeze(o, { 2 })
+end)
+
+-- adaptive_max_pool2d{x, output_size, return_mask} -- pooling.py:2004-2060
+M.adaptive_max_pool2d = rule {
+  { name = "x", type = Tensor, doc = "4-D [N,C,H,W] tensor" },
+  { name = "output_size", type = PoolLen, doc = "target {H,W} (int = both)" },
+  { name = "return_mask", type = argrule.boolean, opt = true, default = false,
+    doc = "also return max indices (1-based, C4)" },
+}(function(x, output_size, return_mask)
+  local os = pool_to_list(output_size, 2)
+  local o, m = paddle_core.pd_op_max_pool2d_with_index(
+    x, os, { 1, 1 }, { 0, 0 }, { 1, 1 }, 0, 1, 0)
+  if return_mask then return o, m end
+  return o
+end)
+
+-- adaptive_max_pool3d{x, output_size, return_mask} -- pooling.py:2097-2202
+M.adaptive_max_pool3d = rule {
+  { name = "x", type = Tensor, doc = "5-D [N,C,D,H,W] tensor" },
+  { name = "output_size", type = PoolLen, doc = "target {D,H,W} (int = all)" },
+  { name = "return_mask", type = argrule.boolean, opt = true, default = false,
+    doc = "also return max indices (1-based, C4)" },
+}(function(x, output_size, return_mask)
+  local os = pool_to_list(output_size, 3)
+  local o, m = paddle_core.pd_op_max_pool3d_with_index(
+    x, os, { 1, 1, 1 }, { 0, 0, 0 }, { 1, 1, 1 }, 0, 1, 0)
+  if return_mask then return o, m end
+  return o
+end)
+
 return M
