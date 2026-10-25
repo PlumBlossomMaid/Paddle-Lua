@@ -14,6 +14,7 @@ local pooling = require "paddle.nn.layers.pooling"
 local norm = require "paddle.nn.layers.norm"
 local loss = require "paddle.nn.layers.loss"
 local common = require "paddle.nn.layers.common"
+local containers = require "paddle.nn.containers"
 local functional = require "paddle.nn.functional"
 
 local M = {}
@@ -84,6 +85,11 @@ M.Dropout = common.Dropout
 M.Dropout2D = common.Dropout2D
 M.Dropout3D = common.Dropout3D
 M.Embedding = common.Embedding
+
+-- 2.9.5 容器(containers.lua,D27 全继承 Layer)
+M.Sequential = containers.Sequential
+M.LayerList = containers.LayerList
+M.LayerDict = containers.LayerDict
 
 -- 2.9.4 池化层类全 12 个(pooling.lua,forward 转发 functional 2.9.3.3)
 M.AvgPool1D = pooling.AvgPool1D
