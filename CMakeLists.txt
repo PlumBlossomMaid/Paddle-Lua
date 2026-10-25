@@ -88,8 +88,23 @@ target_include_directories(paddle_core PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/csrc/capi")
 target_include_directories(paddle_core SYSTEM PUBLIC
   "${Lua5x_INCLUDE_DIR}"
-  "${CMAKE_CURRENT_SOURCE_DIR}/csrc/sol")
+  "${CMAKE_CURRENT_SOURCE_DIR}/csrc/sol"
+  "${CMAKE_CURRENT_SOURCE_DIR}/csrc/capi_gen")
 target_compile_definitions(paddle_core PUBLIC ${LibPaddle_DEFINES})
+# sol2 arg type-checking for op lambdas (add(1,2) -> Lua error, not a
+# 0xC0000005): SOL_SAFE_FUNCTION_CALLS alone is NOT enough under LuaJIT.
+# The actual gate for the pre-call argument check is
+#   stack.hpp:198  #if SOL_IS_OFF(SOL_PROPAGATE_EXCEPTIONS)
+# and LuaJIT 2.1+ forces that macro to SOL_DEFAULT_ON (compatibility/
+# lua_version.hpp:142-150), which reads SOL_ON only if the user defines
+# SOL_EXCEPTIONS_SAFE_PROPAGATION. So we must turn exception propagation
+# OFF explicitly, or number->const LuaTensor& reaches
+# stack_get_unqualified.hpp's get_no_lua_nil, which dereferences the NULL
+# from lua_touserdata (0xC0000005). Bad arg types must surface as Lua
+# errors (modules/02-binding.md sec.3.3).
+target_compile_definitions(paddle_core PRIVATE
+  SOL_SAFE_FUNCTION_CALLS=1
+  SOL_EXCEPTIONS_SAFE_PROPAGATION=0)
 
 if(MSVC)
   target_compile_options(paddle_core PRIVATE /bigobj /W0)

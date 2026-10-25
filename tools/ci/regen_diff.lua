@@ -1,12 +1,12 @@
 -- tools/ci/regen_diff.lua
 -- regen-diff gate (layout.md sec.5 / ci.md sec.6 item 3): the committed
--- generated products (csrc/capi_gen/, lua/paddle/_ops/) must be
--- byte-identical to what the generators produce from the yaml RIGHT NOW.
--- Someone hand-editing generated code, or a generator regression, shows up
--- here as a non-empty `git status --porcelain` on those two dirs -- the
--- products are regenerated IN PLACE (overwriting any hand-edit), then
--- compared against the committed versions. Pure Lua 5.1, zero Python
--- (C9 / R42).
+-- generated products (csrc/capi_gen/, lua/paddle/_ops/, csrc/sol/gen_*)
+-- must be byte-identical to what the generators produce from the yaml
+-- RIGHT NOW. Someone hand-editing generated code, or a generator
+-- regression, shows up here as a non-empty `git status --porcelain` on
+-- those dirs -- the products are regenerated IN PLACE (overwriting any
+-- hand-edit), then compared against the committed versions. Pure Lua
+-- 5.1, zero Python (C9 / R42).
 --
 -- Usage:
 --   lua tools/ci/regen_diff.lua [--paddle-root <dir>] [--sha <short-sha>]
@@ -22,6 +22,12 @@
 -- Input yaml set: ops.yaml + inconsistent/dygraph_ops.yaml (surveyed
 --   2026-10-24: add/matmul live in dygraph_ops.yaml, 03-codegen.md sec.2;
 --   the 529 forward ops come from exactly these two files).
+--
+-- Product dirs: csrc/capi_gen (emit_capi), lua/paddle/_ops (emit_lua),
+--   csrc/sol/gen_ops_*.cc + gen_ops_all.cc (emit_sol, 2.3.4 closing
+--   item 3). csrc/sol's HAND-written files (module.cc, tensor_binding.cc,
+--   sol_common.hpp, enums_place.cc, slice.cc) are NOT checked here --
+--   only the generator-owned gen_ops_* set.
 package.path = "tools/gen/?.lua;" .. package.path
 
 local function slurp(p)
@@ -105,14 +111,25 @@ if string.find(out, "emit_lua FAIL") then
   io.stderr:write("regen_diff: emit_lua failed:\n" .. out)
   os.exit(1)
 end
+-- emit_sol (2.3.4 closing item 3): csrc/sol/gen_ops_*.cc + gen_ops_all.cc.
+-- Full emission (no --ops whitelist): the committed products are the
+-- complete 529-op set. csrc/sol's hand-written files are NOT touched by
+-- the generator and are not part of this check.
+out = run("lua tools/gen/emit_sol.lua csrc/sol " .. y1 .. " "
+  .. y2 .. " --sha " .. sha)
+if string.find(out, "emit_sol FAIL") then
+  io.stderr:write("regen_diff: emit_sol failed:\n" .. out)
+  os.exit(1)
+end
 
 -- drift = any modified/untracked/deleted file in the product dirs
-local st = run("git status --porcelain -- csrc/capi_gen lua/paddle/_ops")
+local st = run("git status --porcelain -- csrc/capi_gen lua/paddle/_ops "
+  .. "csrc/sol/gen_ops_*")
 if st ~= "" then
   io.stderr:write("regen_diff FAIL: products drifted from committed "
     .. "versions:\n" .. st
     .. "Regenerate and commit the new products (do NOT hand-edit "
-    .. "csrc/capi_gen/ or lua/paddle/_ops/).\n")
+    .. "csrc/capi_gen/ lua/paddle/_ops/ or csrc/sol/gen_ops_*).\n")
   os.exit(1)
 end
 io.stdout:write("regen_diff: OK -- generated products are byte-identical "

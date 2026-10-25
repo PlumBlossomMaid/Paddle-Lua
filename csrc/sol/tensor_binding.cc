@@ -21,19 +21,9 @@
 
 namespace pd {
 
-/* One Lua-visible Tensor. Ownership is transfer-on-create, release on GC. */
-struct LuaTensor {
-  pd_tensor h;                        // opaque C ABI handle
-
-  explicit LuaTensor(pd_tensor handle) : h(handle) {}
-  ~LuaTensor() { pd_tensor_free(h); }
-
-  /* Copy shares storage via retain (new shell, same data). Required by the
-   * __lanesclone slot (02-binding.md sec.3.2) and by sol2 value returns. */
-  LuaTensor(const LuaTensor& other) : h(pd_tensor_retain(other.h)) {}
-  LuaTensor(LuaTensor&& other) noexcept : h(other.h) { other.h = nullptr; }
-  LuaTensor& operator=(const LuaTensor&) = delete;
-};
+/* NOTE: struct LuaTensor now lives in sol_common.hpp (the generated
+ * gen_ops_*.cc needs to construct/unwrap it, AGENTS sec.8.3); this TU
+ * only registers the usertype and the tensor factory. */
 
 /* Factory: paddle_core.tensor{dims} -> 0-filled FLOAT32 CPU tensor.
  * 1-based dims come in as a Lua table; C ABI wants int64_t array.

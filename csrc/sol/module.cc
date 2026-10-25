@@ -95,5 +95,13 @@ extern "C" PD_LUAOPEN_EXPORT int luaopen_paddle_core(lua_State* L) {
   // "paddle_core". The table we just built sits on top: pass -1 (relative
   // to the current top), not an absolute index.
   pd::register_tensor(L, -1);
+  // enums_place.cc: PD_DTYPE_* / PD_PLACE_* constants + pd_place_new
+  // factory + LuaPlace usertype (2.2.5). MUST precede register_ops: the
+  // generated op lambdas take `const LuaPlace&` and the _ops wrappers
+  // read the constants for attr defaults.
+  pd::register_enums_place(L, -1);
+  // gen_ops_all.cc: every pd_op_* C ABI function as a sol2 lambda
+  // (2.3.4 closing item 3 -- generated, AGENTS sec.8.3).
+  pd::register_ops(L, -1);
   return 1;
 }

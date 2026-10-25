@@ -29,7 +29,7 @@ pd_tensor pd_op_one_hot(pd_tensor x, double num_classes) {
   const paddle::Tensor& x_t = reinterpret_cast<pd_tensor_t*>(x)->value;
   paddle::Tensor x_1b = pd_idx_minus1(x_t);
   paddle::Tensor out = one_hot_ad_func(
-      x_1b /* Tensor index 1-based -> 0-based */, paddle::experimental::Scalar(num_classes) /* paddle::experimental::Scalar */);
+      x_1b /* Tensor index 1-based -> 0-based */, paddle::experimental::Scalar(static_cast<int64_t>(num_classes)) /* Scalar(int) constructed as int64 */);
   return reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
   PD_GUARD_END(nullptr);

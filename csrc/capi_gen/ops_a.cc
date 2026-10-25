@@ -336,7 +336,7 @@ pd_tensor pd_op_arange(pd_tensor start, pd_tensor end, pd_tensor step, pd_dtype 
 pd_tensor pd_op_argmax(pd_tensor x, double axis, int keepdims, int flatten, pd_dtype dtype) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = argmax_ad_func(
-      reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, paddle::experimental::Scalar(axis) /* paddle::experimental::Scalar */, keepdims != 0 /* bool */, flatten != 0 /* bool */, static_cast<phi::DataType>(dtype) /* phi::DataType */);
+      reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, paddle::experimental::Scalar(static_cast<int64_t>(axis)) /* Scalar(int64_t) constructed as int64 */, keepdims != 0 /* bool */, flatten != 0 /* bool */, static_cast<phi::DataType>(dtype) /* phi::DataType */);
   out = pd_idx_plus1(out);
   return reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
@@ -347,7 +347,7 @@ pd_tensor pd_op_argmax(pd_tensor x, double axis, int keepdims, int flatten, pd_d
 pd_tensor pd_op_argmin(pd_tensor x, double axis, int keepdims, int flatten, pd_dtype dtype) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = argmin_ad_func(
-      reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, paddle::experimental::Scalar(axis) /* paddle::experimental::Scalar */, keepdims != 0 /* bool */, flatten != 0 /* bool */, static_cast<phi::DataType>(dtype) /* phi::DataType */);
+      reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, paddle::experimental::Scalar(static_cast<int64_t>(axis)) /* Scalar(int64_t) constructed as int64 */, keepdims != 0 /* bool */, flatten != 0 /* bool */, static_cast<phi::DataType>(dtype) /* phi::DataType */);
   out = pd_idx_plus1(out);
   return reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});

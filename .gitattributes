@@ -5,4 +5,5 @@
 
 # Generated code: hide from PR diffs by default (layout.md "linguist-generated")
 csrc/capi_gen/ linguist-generated
+csrc/sol/gen_ops_*.cc linguist-generated
 lua/paddle/_ops/ linguist-generated

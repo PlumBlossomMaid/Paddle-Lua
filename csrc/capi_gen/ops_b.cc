@@ -165,7 +165,7 @@ pd_tensor pd_op_bilinear_interp(pd_tensor x, pd_tensor out_size, const pd_tensor
 pd_tensor pd_op_bincount(pd_tensor x, pd_tensor weights, double minlength) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = bincount_ad_func(
-      reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, weights ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(weights)->value) : paddle::none /* Tensor? */, paddle::experimental::Scalar(minlength) /* paddle::experimental::Scalar */);
+      reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, weights ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(weights)->value) : paddle::none /* Tensor? */, paddle::experimental::Scalar(static_cast<int64_t>(minlength)) /* Scalar(int) constructed as int64 */);
   return reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
   PD_GUARD_END(nullptr);

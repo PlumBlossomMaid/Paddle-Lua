@@ -157,7 +157,18 @@ local function parse_args(s)
         "yaml_subset: Tensor arg '" .. name .. "' must not have a default (codegen_utils.py:335)")
       inputs[#inputs + 1] = { name = name, type = cpp_type, pos = i - 1 }
     else
-      attrs[#attrs + 1] = { name = name, type = cpp_type, default = default, pos = i - 1 }
+      -- Keep the Scalar subtype ("int" / "int64_t" / "float" / "double")
+      -- when the yaml writes Scalar(...) (ops.yaml split:5313 declares
+      -- `Scalar(int) axis`; infermeta branches on the Scalar's internal
+      -- dtype, unary.cc:4929, so "Scalar(int)" must reach emit_capi as
+      -- int64, not double). Plain "Scalar" has sub = nil.
+      local sub = nil
+      if string.sub(arg_type, 1, 7) == "Scalar("
+         and string.sub(arg_type, -1) == ")" then
+        sub = string.sub(arg_type, 8, -2)
+      end
+      attrs[#attrs + 1] = { name = name, type = cpp_type,
+                            default = default, pos = i - 1, sub = sub }
     end
   end
   return inputs, attrs

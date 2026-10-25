@@ -70,18 +70,19 @@ Lua 子集解析器足够,不需要完整的 YAML 实现。**上线前用全部 
 ### 3.1 数据流
 
 ```
-ops.yaml + backward.yaml
+ops.yaml + inconsistent/dygraph_ops.yaml
         │
         │  yaml_subset.lua(纯 Lua 5.1 子集解析器,~300 行)
         ▼
    中间表示(算子名 / 输入 / 属性 / 输出 / 默认值)
         │
-        ├──► emit_capi.lua → csrc/generated/ops_*.c      调用 xxx_ad_func
+        ├──► emit_capi.lua → csrc/capi_gen/ops_*.cc      调用 xxx_ad_func(纯 C ABI)
         ├──► emit_lua.lua  → lua/paddle/_ops/*.lua       1-based 转换 + kwargs 分派
+        ├──► emit_sol.lua  → csrc/sol/gen_ops_*.cc       sol2 lambda 注册(2.3.4 收尾③)
         └──► gen_doc.lua   → docs/api/ops.md             (M2 之后)
 ```
 
-**四个 `.lua` 全是纯 Lua 5.1 语法,跑在 `lua` / `luajit` 上,零 Python(C9/R42)。**
+**五个 `.lua` 全是纯 Lua 5.1 语法,跑在 `lua` / `luajit` 上,零 Python(C9/R42)。**
 `yaml_subset.lua` 是唯一新增组件 —— 上游的解析藏在 codegen_utils.py 里,
 我们按它的语义用 Lua 重写,输出 IR 形状与 `codegen_utils.py` 对齐,
 这样 emit 逻辑可以和 Python 原版逐条对拍。

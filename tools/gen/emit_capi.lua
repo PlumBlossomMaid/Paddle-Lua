@@ -58,7 +58,25 @@ local skip_rules = require "skip_rules"
 --   { params = {decl...},   -- C declarations with <name> placeholder
 --     call   = {expr...},   -- call-site argument expressions
 --     prelude = {...}}      -- extra statements before the call (rare)
-local function capi_type(cpp_type)
+local function capi_type(cpp_type, sub)
+  -- Scalar(int) / Scalar(int64_t): the yaml pins the Scalar's inner type
+  -- to an integer (ops.yaml split:5313 `Scalar(int) axis`). Paddle's
+  -- infermeta BRANCHES on the Scalar's internal dtype and throws for float
+  -- where an int is required ("must be int, but got float", unary.cc:4929).
+  -- Reference: Python passes an int, eager_utils.cc:2541 builds the Scalar
+  -- from the Python type. Lua numbers are doubles only, so the ABI param
+  -- stays `double` (01-c-abi.md sec.4) and we force the CONSTRUCTED Scalar
+  -- to int64 -- behaviorally identical to Python for integral values.
+  -- (2026-10-25: revises the 2026-10-24 "Scalar -> double is behaviourally
+  -- equivalent" note below -- true for plain Scalar, false for Scalar(int).)
+  if cpp_type == "paddle::experimental::Scalar"
+     and (sub == "int" or sub == "int64_t") then
+    return {
+      params = { "double <name>" },
+      call = { "paddle::experimental::Scalar(static_cast<int64_t>(<name>)) "
+        .. "/* Scalar(" .. sub .. ") constructed as int64 */" },
+    }
+  end
   local scalar = {
     ["Tensor"]    = { "pd_tensor <name>" , "reinterpret_cast<pd_tensor_t*>(<name>)->value /* Tensor */" },
     ["bool"]      = { "int <name>"       , "<name> != 0 /* bool */" },
@@ -338,7 +356,7 @@ local function signature(ir)
     end
   end
   for _, attr in ipairs(ir.attrs or {}) do
-    local abi = capi_type(attr.type)
+    local abi = capi_type(attr.type, attr.sub)
     local name = attr.name
     for _, decl in ipairs(abi.params) do
       local d = string.gsub(decl, "<name>", name)

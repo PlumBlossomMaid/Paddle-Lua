@@ -178,7 +178,7 @@ int64_t pd_op_max_pool3d_with_index(pd_tensor* outs, int64_t nout, pd_tensor x, 
 int64_t pd_op_max_with_index(pd_tensor* outs, int64_t nout, pd_tensor x, double dim, int keepdim, int flatten) {
   PD_GUARD_BEGIN;
   auto r = max_with_index_ad_func(
-      reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, paddle::experimental::Scalar(dim) /* paddle::experimental::Scalar */, keepdim != 0 /* bool */, flatten != 0 /* bool */);
+      reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, paddle::experimental::Scalar(static_cast<int64_t>(dim)) /* Scalar(int64_t) constructed as int64 */, keepdim != 0 /* bool */, flatten != 0 /* bool */);
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   std::get<1>(r) = pd_idx_plus1(std::get<1>(r));
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
@@ -311,7 +311,7 @@ pd_tensor pd_op_min(pd_tensor x, const int64_t* axis, int64_t axis_n, int keepdi
 int64_t pd_op_min_with_index(pd_tensor* outs, int64_t nout, pd_tensor x, double dim, int keepdim, int flatten) {
   PD_GUARD_BEGIN;
   auto r = min_with_index_ad_func(
-      reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, paddle::experimental::Scalar(dim) /* paddle::experimental::Scalar */, keepdim != 0 /* bool */, flatten != 0 /* bool */);
+      reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, paddle::experimental::Scalar(static_cast<int64_t>(dim)) /* Scalar(int64_t) constructed as int64 */, keepdim != 0 /* bool */, flatten != 0 /* bool */);
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   std::get<1>(r) = pd_idx_plus1(std::get<1>(r));
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
@@ -558,7 +558,7 @@ int64_t pd_op_multiclass_nms3(pd_tensor* outs, int64_t nout, pd_tensor bboxes, p
 pd_tensor pd_op_multinomial(pd_tensor x, double num_samples, int replacement) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = multinomial_ad_func(
-      reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, paddle::experimental::Scalar(num_samples) /* paddle::experimental::Scalar */, replacement != 0 /* bool */);
+      reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, paddle::experimental::Scalar(static_cast<int64_t>(num_samples)) /* Scalar(int) constructed as int64 */, replacement != 0 /* bool */);
   out = pd_idx_plus1(out);
   return reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});

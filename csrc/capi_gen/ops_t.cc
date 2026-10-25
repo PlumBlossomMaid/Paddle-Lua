@@ -135,7 +135,7 @@ int64_t pd_op_top_p_sampling(pd_tensor* outs, int64_t nout, pd_tensor x, pd_tens
 int64_t pd_op_topk(pd_tensor* outs, int64_t nout, pd_tensor x, double k, int axis, int largest, int sorted) {
   PD_GUARD_BEGIN;
   auto r = topk_ad_func(
-      reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, paddle::experimental::Scalar(k) /* paddle::experimental::Scalar */, axis /* int */, largest != 0 /* bool */, sorted != 0 /* bool */);
+      reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, paddle::experimental::Scalar(static_cast<int64_t>(k)) /* Scalar(int) constructed as int64 */, axis /* int */, largest != 0 /* bool */, sorted != 0 /* bool */);
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   std::get<1>(r) = pd_idx_plus1(std::get<1>(r));
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});

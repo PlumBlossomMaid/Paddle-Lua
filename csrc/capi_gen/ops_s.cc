@@ -145,7 +145,7 @@ pd_tensor pd_op_sequence_conv(pd_tensor x, pd_tensor padding_data, pd_tensor fil
 pd_tensor pd_op_sequence_mask(pd_tensor x, double max_len, pd_dtype out_dtype) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = sequence_mask_ad_func(
-      reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, paddle::experimental::Scalar(max_len) /* paddle::experimental::Scalar */, static_cast<phi::DataType>(out_dtype) /* phi::DataType */);
+      reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, paddle::experimental::Scalar(static_cast<int64_t>(max_len)) /* Scalar(int) constructed as int64 */, static_cast<phi::DataType>(out_dtype) /* phi::DataType */);
   return reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
   PD_GUARD_END(nullptr);
@@ -435,7 +435,7 @@ pd_tensor pd_op_spectral_norm(pd_tensor weight, pd_tensor u, pd_tensor v, int di
 int64_t pd_op_split(pd_tensor* outs, int64_t nout, pd_tensor x, const int64_t* sections, int64_t sections_n, double axis) {
   PD_GUARD_BEGIN;
   auto r = split_ad_func(
-      reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, paddle::experimental::IntArray(sections, sections_n) /* paddle::experimental::IntArray */, paddle::experimental::Scalar(axis) /* paddle::experimental::Scalar */);
+      reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, paddle::experimental::IntArray(sections, sections_n) /* paddle::experimental::IntArray */, paddle::experimental::Scalar(static_cast<int64_t>(axis)) /* Scalar(int) constructed as int64 */);
   int64_t n = static_cast<int64_t>(r.size());
   for (int64_t i = 0; i < n && i < nout; ++i)
     outs[i] = reinterpret_cast<pd_tensor>(
@@ -448,7 +448,7 @@ int64_t pd_op_split(pd_tensor* outs, int64_t nout, pd_tensor x, const int64_t* s
 int64_t pd_op_split_with_num(pd_tensor* outs, int64_t nout, pd_tensor x, int num, double axis) {
   PD_GUARD_BEGIN;
   auto r = split_with_num_ad_func(
-      reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, num /* int */, paddle::experimental::Scalar(axis) /* paddle::experimental::Scalar */);
+      reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, num /* int */, paddle::experimental::Scalar(static_cast<int64_t>(axis)) /* Scalar(int) constructed as int64 */);
   int64_t n = static_cast<int64_t>(r.size());
   for (int64_t i = 0; i < n && i < nout; ++i)
     outs[i] = reinterpret_cast<pd_tensor>(
