@@ -73,6 +73,81 @@ void register_tensor(lua_State* L, int module_index) {
       },
       "is_contiguous",
       [](const LuaTensor& t) { return pd_tensor_is_contiguous(t.h); },
+      /* Group-2 unpack: place(kind,index) -> two Lua ints (device.lua
+       * reconstructs the value-semantic Place). */
+      "place_kind_index",
+      [](const LuaTensor& t) {
+        int kind = 0, index = 0;
+        pd_tensor_place(t.h, &kind, &index);
+        return std::make_pair(kind, index);
+      },
+      /* 2.5 tensor.lua: item() needs a scalar read. Only 0-d / single
+       * element; multi-element is a Lua-side error (api/tensor.md 2.3).
+       * pd_tensor_to_host_buffer sets the error slot on failure, so
+       * pd::check() must sit right after it (PD_GUARD entry clears the
+       * previous error). Layout is host endianness = phi's memory
+       * layout (float16.h etc. are byte-exact), so memcpy + cast. */
+      "item",
+      [](const LuaTensor& t) -> double {
+        int64_t numel = pd_tensor_numel(t.h);
+        if (numel != 1) {
+          throw sol::error("paddle: item() on a non-scalar tensor, use "
+                           "item(i) (1-based coordinate) -- P5 pending");
+        }
+        size_t esize = pd_dtype_sizeof(pd_tensor_dtype(t.h));
+        if (esize == 0) {
+          throw sol::error("paddle: item(): unsupported dtype");
+        }
+        std::vector<char> buf(esize);
+        pd_tensor_to_host_buffer(t.h, buf.data(), buf.size());
+        pd::check();
+        switch (pd_tensor_dtype(t.h)) {
+          case PD_DTYPE_FLOAT32: {
+            float f;
+            memcpy(&f, buf.data(), sizeof(f));
+            return static_cast<double>(f);
+          }
+          case PD_DTYPE_FLOAT64: {
+            double d;
+            memcpy(&d, buf.data(), sizeof(d));
+            return d;
+          }
+          case PD_DTYPE_INT64: {
+            int64_t i;
+            memcpy(&i, buf.data(), sizeof(i));
+            return static_cast<double>(i);
+          }
+          case PD_DTYPE_INT32: {
+            int32_t i;
+            memcpy(&i, buf.data(), sizeof(i));
+            return static_cast<double>(i);
+          }
+          case PD_DTYPE_BOOL:
+          case PD_DTYPE_UINT8:
+          case PD_DTYPE_INT8: {
+            uint8_t u;
+            memcpy(&u, buf.data(), sizeof(u));
+            return static_cast<double>(u);
+          }
+          default:
+            throw sol::error("paddle: item(): dtype not decodable yet");
+        }
+      },
+      /* 2.5 tensor.lua: raw host bytes for __tostring truncation and
+       * item(i) later. Returns a Lua string (byte-exact copy); Lua side
+       * decodes per dtype (float16.h:1107 etc. are byte-exact). */
+      "to_host_bytes",
+      [](const LuaTensor& t) {
+        int64_t numel = pd_tensor_numel(t.h);
+        size_t esize = pd_dtype_sizeof(pd_tensor_dtype(t.h));
+        if (numel <= 0 || esize == 0) {
+          return std::string();
+        }
+        std::vector<char> buf(static_cast<size_t>(numel) * esize);
+        pd_tensor_to_host_buffer(t.h, buf.data(), buf.size());
+        pd::check();
+        return std::string(buf.data(), buf.size());
+      },
       /* reserved now for P13 (02-binding.md sec.3.2) */
       "__lanesclone",
       [](void* dst, const LuaTensor& src) { new (dst) LuaTensor(src); });

@@ -55,12 +55,19 @@
 
 | Lua 元方法 | 对应 Python | 来源 |
 |---|---|---|
-| `__index`(`x[i]`) | `__getitem__` | `tensor_patch_methods.py:1045` → `_getitem_dygraph` |
-| `__newindex`(`x[i] = v`) | `__setitem__` | `:1052` → `_setitem_dygraph` |
+| `__index`(`x[i]`) | `__getitem__` | `tensor_patch_methods.py:1045` → `pre_deal_index`(:1033)→ **C++ `_getitem_dygraph`(eager_method.cc:1699)** |
+| `__newindex`(`x[i] = v`) | `__setitem__` | `tensor_patch_methods.py:1052` → **C++ `_setitem_dygraph`(eager_method.cc:1946)** |
 | `__len`(5.2+)/ 显式 `x:len()` | `__len__` | 见 §6 ⚠️ 5.1 限制 |
-| `__tostring` | `__str__` | `:927` → `tensor_to_string` |
+| `__tostring` | `__str__` | `tensor_patch_methods.py:927` → `tensor_to_string`(`tensor/to_string.py:451`) |
 | `__add`/`__sub`/`__mul`/`__div`/`__unm` 等 | `+ - * / -x` | 算术运算符 → 对应 `_C_ops`(sol2 元方法表,随生成器) |
 | `__eq`(`x == y`) | `==`(逐元素) | ⚠️ Python `==` 是逐元素 Tensor,不是布尔(§6) |
+
+> 📌 索引实现真相(2026-10-25 核实,`tensor_patch_methods.py` 全文无
+> `_getitem_dygraph` 的 Python def):`__getitem__`(:1045)→ `pre_deal_index`
+> (:1033,tuple→list、list/range 元素→np.array)→ 调 `self._getitem_dygraph`
+> (:1050 调用点);真实定义在 **C++ pybind `eager_method.cc:1699`**
+> (ParseIndex → `getTensorWithBasicIndexing`[slice_utils.h:574] → 高级索引)。
+> `__setitem__` 同理(`eager_method.cc:1946`)。
 
 ### 1.4 算子方法(生成器批量挂载,P3)
 
@@ -101,7 +108,8 @@ x[{1, 3}] = v     -- 赋值(__newindex)
 ### 2.2 字符串索引(D14:移植 Insight7 的 `lua_spec_to_cpp`)
 
 ```lua
-x["1:3, :"]        -- 第 1..3 行全列(闭区间,1-based)
+x["1:3, :"]        -- 第 1、2 行全列(半开:1-based [1,3) → 0-based [0,2),
+                   --   有 slice.cc 的 lua_spec_to_cpp 佐证:"1:3"→"0:2")
 x["::-1"]          -- 逆序(T-M0-14 已验证走 strided_slice,view 语义)
 x[", 2"]           -- 所有行第 2 列
 x["..., 2"]        -- 省略号展开

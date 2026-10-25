@@ -60,6 +60,14 @@ M.XPUPinnedPlace = device.XPUPinnedPlace
 M.IPUPlace = device.IPUPlace
 M.CustomPlace = device.CustomPlace
 
+-- ---- P5 tensor face (layout.md P5 step 3) ---------------------------
+-- tensor.lua ENHANCES the SHARED LuaTensor usertype metatable (__index
+-- dispatch / __tostring / arithmetic). The enhancement must happen before
+-- ANY tensor is used, so this is an eager require with no named export --
+-- the LuaTensor type itself is what users touch, created via
+-- paddle_core.tensor{...} (paddle.to_tensor lands later, 2.6).
+require "paddle.tensor"
+
 -- ---- lazy submodule skeleton ----------------------------------------
 -- Keys resolve to module names; first access requires + caches. Populate
 -- as each stage lands: device (P5), nn (P9), optimizer (P10), io (P11),
