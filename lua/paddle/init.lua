@@ -16,6 +16,14 @@
 
 local paddle_core = require "paddle_core"
 
+-- P5 dtype constants / place constructors are tiny pure-Lua tables (a
+-- string table + a pd_place_new redirect), so they load eagerly -- the
+-- same way `import paddle` gives you paddle.float32 / paddle.CPUPlace
+-- immediately (dtype-device.md sec.2.1). paddle.device's runtime-global
+-- functions (get_device/set_device) stay on the lazy submodule below.
+local dtype = require "paddle.dtype"
+local device = require "paddle.device"
+
 local M = {}
 
 -- ---- C extension surface (module.cc + tensor_binding.cc + slice.cc) --
@@ -31,10 +39,32 @@ M._version = paddle_core.version()
 -- a plain `require "paddle"` leaves a ready runtime behind.
 M.init = paddle_core.init
 
+-- ---- P5 dtype surface (dtype-device.md sec.1.1/1.3) ------------------
+-- dtype constants: paddle.float32 etc (the canonical string IS the
+-- value; dtype.lua also carries the alias names on itself, but the
+-- TOP-level table is what users touch -- dtype-device.md sec.2.1).
+for name in pairs(dtype) do
+  M[name] = dtype[name]
+end
+M.finfo = dtype.finfo
+M.iinfo = dtype.iinfo
+M.get_default_dtype = dtype.get_default_dtype
+M.set_default_dtype = dtype.set_default_dtype
+
+-- ---- P5 place constructors (dtype-device.md sec.1.2) -----------------
+M.CPUPlace = device.CPUPlace
+M.CUDAPlace = device.CUDAPlace
+M.CUDAPinnedPlace = device.CUDAPinnedPlace
+M.XPUPlace = device.XPUPlace
+M.XPUPinnedPlace = device.XPUPinnedPlace
+M.IPUPlace = device.IPUPlace
+M.CustomPlace = device.CustomPlace
+
 -- ---- lazy submodule skeleton ----------------------------------------
 -- Keys resolve to module names; first access requires + caches. Populate
--- as each stage lands: nn (P9), optimizer (P10), io (P11), vision (P12).
-local lazy = {}
+-- as each stage lands: device (P5), nn (P9), optimizer (P10), io (P11),
+-- vision (P12).
+local lazy = { device = "paddle.device" }
 
 setmetatable(M, {
   __index = function(t, k)
