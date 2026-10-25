@@ -8,6 +8,7 @@
 
 local layer = require "paddle.nn.layer"
 local linear = require "paddle.nn.layers.linear"
+local functional = require "paddle.nn.functional"
 
 local M = {}
 
@@ -18,6 +19,10 @@ M.Layer = layer.Layer
 -- First real layer (2.9.2): proves auto-registration + create_parameter
 -- + forward end to end (api/nn.md sec.2.3).
 M.Linear = linear
+
+-- Functionals (2.9.3): activation + more, all argrule-wrapped (D31;
+-- api/nn-functional.md). First batch = 16 activations.
+M.functional = functional
 
 -- 2.9.1 internals exposed for tests/CI greps (rawset discipline).
 M._FIELDS = layer.FIELDS
