@@ -39,6 +39,8 @@ assert(#rn:shape() == 1 and rn:shape()[1] == 3, "x[-1] last row")
 local el = x[{2, 1}]
 assert(#el:shape() == 0, "x[{2,1}] is 0-d")
 assert(el:item() == 2.0, "x[{2,1}] value")
+local el2 = x[{2, 3}]
+assert(#el2:shape() == 0 and el2:item() == 2.0, "x[{2,3}] 0-d value")
 
 -- --- string slice: x["1:3, :"] = whole rows (half-open: 1-based [1,3)
 -- becomes 0-based [0,2)); x["1:2, :"] = first row
@@ -69,6 +71,15 @@ assert(#tail:shape() == 2 and tail:shape()[1] == 1 and tail:shape()[2] == 3,
 local head = x[":2, :"]
 assert(#head:shape() == 2 and head:shape()[1] == 1 and head:shape()[2] == 3,
        "x[\":2, :\"] first row")
+
+-- step=2 on axis 0 (size 2): every-other -> 1 row; ":3" on size-2 axis
+-- clamps to all rows (kernel normalize_interval authority)
+local step2 = x["::2, :"]
+assert(#step2:shape() == 2 and step2:shape()[1] == 1 and step2:shape()[2] == 3,
+       "x[\"::2, :\"] one row")
+local up3 = x[":3, :"]
+assert(#up3:shape() == 2 and up3:shape()[1] == 2 and up3:shape()[2] == 3,
+       "x[\":3, :\"] clamps to all rows")
 
 -- --- arithmetic operators
 local sum = x + x

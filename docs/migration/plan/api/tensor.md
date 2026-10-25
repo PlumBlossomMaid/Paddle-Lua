@@ -255,6 +255,7 @@ API 写两套解析。
 |---|---|
 | 算子方法全量(约 200+) | **P3 生成器批量挂载**;P5 先挂训练必需(minimum: add/sub/mul/div/abs/exp/log/sum/mean/max/min/reshape/transpose/argmax/backward) |
 | `__len` 元方法(5.2+) | P5 顺手做;5.1 用 `x:len()` |
+| `x[i] = v` 赋值(`__newindex`) | **v1 不做**。sol2 默认 `__newindex` 拒绝并报可读错误("no defined new_index operation",实测 2026-10-25),安全失败不静默。落地走 `set_value` 算子(05-tensor.md §6 同口径:布尔掩码用 `paddle.masked_select`) |
 | `register_hook` | P6 autograd 一起做(`autograd.md`) |
 | `tolist` | P5,依赖 Insight7 互操作(D26) |
 | `persistable` / `is_parameter` | 静态侧属性,动态模式延后 |
