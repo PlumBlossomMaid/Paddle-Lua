@@ -450,4 +450,87 @@ local okk, err = pcall(function() F.max_pool2d{ x, kernel_size = 2,
   data_format = "NHWC", return_mask = true } end)
 check(not okk, "max_pool2d NHWC+return_mask must raise")
 
+-- ---------------------------------------------------------------------
+-- 21: 归一化(2.9.3.4)-- 镜像 Python test_layer_norm/test_batch_norm
+-- ---------------------------------------------------------------------
+
+-- layer_norm:全 1 [2,3] 输入,normalized_shape={2}(1-based 轴 2 →
+-- begin_norm_axis=1,归一化第二维 3 个元素)→ 每行归一化后均值 0 方差 1,
+-- 全 1 输入 → 输出全 0;weight=2,bias=1 → 0*2+1 = 1
+local lnx = ctensor({2, 3}, 1.0)
+local y = F.layer_norm{ lnx, normalized_shape = {2} }
+check(all_equals(y, 0.0), "layer_norm all-1 normalized_shape={2} -> all-0")
+local wgt = ctensor({3}, 2.0)
+local bse = ctensor({3}, 1.0)
+local y = F.layer_norm{ lnx, normalized_shape = {2}, weight = wgt, bias = bse }
+check(all_equals(y, 1.0), "layer_norm w=2 b=1 -> all-1")
+-- 单轴 int 形式:normalized_shape=2 等价 {2}
+local y = F.layer_norm{ lnx, normalized_shape = 2 }
+check(all_equals(y, 0.0), "layer_norm normalized_shape=2 (int) -> all-0")
+
+-- batch_norm is_test(running stats 路径):x 全 5,running_mean=0,
+-- running_var=4,weight=1,bias=0 → (5-0)/sqrt(4+1e-5) ≈ 2.5
+local x = ctensor({1, 1, 4}, 5.0)
+local rm = ctensor({1}, 0.0)
+local rv = ctensor({1}, 4.0)
+local w1 = ctensor({1}, 1.0)
+local b0 = ctensor({1}, 0.0)
+local y = F.batch_norm{ x, rm, rv, w1, b0 }  -- training=false → is_test
+check(math.abs(item(y, 1) - 2.5) < 1e-3,
+      "batch_norm is_test (5-0)/sqrt(4) ≈ 2.5")
+
+-- ---------------------------------------------------------------------
+-- 22: 损失(2.9.3.4 首批)-- 镜像 Python 公式逻辑
+-- ---------------------------------------------------------------------
+
+-- mse_loss:input 全 2,label 全 1 → diff=1,square=1 → mean=1,sum=3
+local y = F.mse_loss{ ctensor({3}, 2.0), ctensor({3}, 1.0) }
+close(item(y, 1), 1.0, "mse_loss mean (2-1)^2 = 1")
+local y = F.mse_loss{ ctensor({3}, 2.0), ctensor({3}, 1.0), reduction = "sum" }
+close(item(y, 1), 3.0, "mse_loss sum = 3")
+local y = F.mse_loss{ ctensor({3}, 2.0), ctensor({3}, 1.0), reduction = "none" }
+check(y:shape()[1] == 3 and all_equals(y, 1.0), "mse_loss none = [1,1,1]")
+
+-- l1_loss:input 全 2,label 全 1 → |diff|=1 → mean=1,sum=3
+local y = F.l1_loss{ ctensor({3}, 2.0), ctensor({3}, 1.0) }
+close(item(y, 1), 1.0, "l1_loss mean |2-1| = 1")
+local y = F.l1_loss{ ctensor({3}, 2.0), ctensor({3}, 1.0), reduction = "sum" }
+close(item(y, 1), 3.0, "l1_loss sum = 3")
+
+-- smooth_l1_loss(huber,delta=1):input=[0.5,1.5],label=[0,0]
+-- |0.5|<1 → 0.5*0.25=0.125;|1.5|>=1 → 1.5-0.5=1.0 → mean=0.5625
+local y = F.smooth_l1_loss{ ctensor({2}, 0.5), ctensor({2}, 0.0) }
+close(item(y, 1), 0.125, "smooth_l1 |0.5|<1 -> 0.5*0.25")
+local y = F.smooth_l1_loss{ ctensor({2}, 1.5), ctensor({2}, 0.0) }
+close(item(y, 1), 1.0, "smooth_l1 |1.5|>=1 -> 1.5-0.5")
+local y = F.smooth_l1_loss{ ctensor({2, 1}, 1.5), ctensor({2, 1}, 0.0),
+                            reduction = "none" }
+local sh = y:shape()
+check(sh[1] == 2 and sh[2] == 1, "smooth_l1 none keeps shape")
+
+-- binary_cross_entropy:input=0.5,label=1 → -log(0.5) = ln2
+local y = F.binary_cross_entropy{ ctensor({1}, 0.5), ctensor({1}, 1.0) }
+close(item(y, 1), math.log(2.0), "bce(0.5,1) = -log(0.5) = ln2")
+
+-- binary_cross_entropy_with_logits:logit=0,label=1 → sigmoid(0)=0.5,
+-- -log(0.5)=ln2;sigmoid_cross_entropy_with_logits 数值等价
+local y = F.binary_cross_entropy_with_logits{ ctensor({1}, 0.0),
+                                              ctensor({1}, 1.0) }
+close(item(y, 1), math.log(2.0), "bce_with_logits(0,1) = ln2")
+local y = F.binary_cross_entropy_with_logits{ ctensor({2}, 0.0),
+                                              ctensor({2}, 1.0),
+                                              reduction = "sum" }
+close(item(y, 1), 2.0 * math.log(2.0), "bce_with_logits sum = 2*ln2")
+
+-- 归一化/损失 argrule 门禁
+local okk, err = pcall(function() F.batch_norm{ x, rm, rv, w1, b0,
+  data_format = "BAD" } end)
+check(not okk, "batch_norm data_format='BAD' must raise")
+local okk, err = pcall(function() F.mse_loss{ ctensor({3}, 1.0),
+  ctensor({3}, 1.0), reduction = "avg" } end)
+check(not okk, "mse_loss reduction='avg' must raise")
+local okk, err = pcall(function() F.layer_norm{ lnx, normalized_shape = {2},
+  bogus = 1 } end)
+check(not okk, "layer_norm unknown key must raise")
+
 print(("NN_FUNCTIONAL_SMOKE PASS (%d assertions)"):format(ntests))

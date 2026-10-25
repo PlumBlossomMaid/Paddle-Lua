@@ -817,4 +817,185 @@ M.adaptive_max_pool3d = rule {
   return o
 end)
 
+-- ---------------------------------------------------------------------
+-- 归一化(norm.py):batch_norm、layer_norm。直调 pd_op_batch_norm(6 输出
+-- 取第 1)/pd_op_layer_norm(单出);scale/bias 均可空(sol optional)。
+-- normalized_shape 是 1-based 轴范围(C4,nn-functional.md sec.3),转成
+-- C++ 的 begin_norm_axis(norm.py:419-421 的等价:起点轴 - 1)。
+-- ---------------------------------------------------------------------
+
+-- 归一化/损失共用 reduction helper(sum/mean_all/原样)
+local function reduce_out(out, reduction, fname)
+  if reduction == "sum" then
+    return paddle_core.pd_op_sum(out, {}, paddle_core.PD_DTYPE_UNDEFINED, 0)
+  elseif reduction == "mean" then
+    return paddle_core.pd_op_mean_all(out)
+  elseif reduction == "none" then
+    return out
+  end
+  error(("'reduction' in '%s' should be 'sum', 'mean' or 'none', but "
+    .. "received %s"):format(fname, tostring(reduction)), 3)
+end
+
+-- batch_norm{x, running_mean, running_var, weight, bias, training,
+--            momentum, epsilon, data_format, use_global_stats}
+-- norm.py:162-285。is_test = not training;use_global_stats=None →
+-- use_global_stats = not training + trainable_statistics=False,否则
+-- trainable_statistics = not use_global_stats(norm.py:246-252)。
+M.batch_norm = rule {
+  { name = "x", type = Tensor, doc = "input [N,C,...] (float32/64)" },
+  { name = "running_mean", type = Tensor, doc = "running mean (1-D, C)" },
+  { name = "running_var", type = Tensor, doc = "running variance (1-D, C)" },
+  { name = "weight", type = Tensor, opt = true,
+    doc = "scale gamma (1-D, C); nil = identity" },
+  { name = "bias", type = Tensor, opt = true,
+    doc = "shift beta (1-D, C); nil = zero" },
+  { name = "training", type = argrule.boolean, opt = true, default = false,
+    doc = "train mode; is_test = not training (norm.py:258)" },
+  { name = "momentum", type = argrule.number, opt = true, default = 0.9,
+    doc = "running stats momentum (norm.py:256)" },
+  { name = "epsilon", type = argrule.number, opt = true, default = 1e-5,
+    doc = "variance epsilon (norm.py:257)" },
+  { name = "data_format", type = argrule.string, opt = true, default = "NCHW",
+    doc = "'NC'/'NCL'/'NCHW'/'NCDHW' -> NCHW; 'NLC'/'NHWC'/'NDHWC' -> NHWC" },
+  { name = "use_global_stats", type = argrule.boolean, opt = true,
+    doc = "nil: is_test by training (norm.py:246)" },
+}(function(x, running_mean, running_var, weight, bias, training, momentum,
+          epsilon, data_format, use_global_stats)
+  -- norm.py:241:按第 2 个字符 C → NCHW,否则 NHWC
+  local norm_format = "NHWC"
+  if string.sub(data_format, 2, 2) == "C" then norm_format = "NCHW" end
+  local ugs, trainable
+  if use_global_stats == nil then
+    ugs = not training
+    trainable = false
+  else
+    ugs = use_global_stats
+    trainable = not use_global_stats
+  end
+  local out = paddle_core.pd_op_batch_norm(
+    x, running_mean, running_var, weight, bias, (training and 0 or 1),
+    momentum, epsilon, norm_format, (ugs and 1 or 0), (trainable and 1 or 0))
+  return out  -- 6 输出取第 1(python 同样只取 batch_norm_out,norm.py:262)
+end)
+
+-- layer_norm{x, normalized_shape, weight, bias, epsilon}
+-- norm.py:346-436。normalized_shape = 1-based 轴范围闭区间(C4,
+-- nn-functional.md sec.3:{1,2} 归一化前两维);begin_norm_axis = 起点-1,
+-- 即 C++ 的 0-based 起点(与 norm.py:421 input_ndim - normalized_ndim
+-- 对"从尾部数"等价,这里按轴范围算起点)。
+M.layer_norm = rule {
+  { name = "x", type = Tensor, doc = "input tensor (bf16/f16/f32/f64)" },
+  { name = "normalized_shape", type = argrule.Union { argrule.number,
+    argrule.table },
+    doc = "1-based 轴范围闭区间 {start,end} 或单轴 int(归一化到末尾)" },
+  { name = "weight", type = Tensor, opt = true,
+    doc = "per-element gain (norm.py:356); nil = identity" },
+  { name = "bias", type = Tensor, opt = true,
+    doc = "per-element shift (norm.py:357); nil = zero" },
+  { name = "epsilon", type = argrule.number, opt = true, default = 1e-5,
+    doc = "variance epsilon (norm.py:358)" },
+}(function(x, normalized_shape, weight, bias, epsilon)
+  local begin_axis
+  if type(normalized_shape) == "number" then
+    begin_axis = normalized_shape - 1      -- 单轴:该 1-based 轴 → 0-based
+  else
+    begin_axis = normalized_shape[1] - 1   -- 闭区间起点
+  end
+  return paddle_core.pd_op_layer_norm(x, weight, bias, epsilon, begin_axis)
+  -- ops_gen.h:281
+end)
+
+-- ---------------------------------------------------------------------
+-- 损失(loss.py,首批):mse/l1/smooth_l1/bce/bce_with_logits + 辅助。
+-- 组合损失用基础算子链;singleton 算子直绑。label 非 index 语义(连续
+-- target)除外 —— 本批均无 index label。reduction 三态共用 reduce_out。
+-- ---------------------------------------------------------------------
+
+-- mse_loss{input, label, reduction} -- loss.py:1988-2061
+-- square(subtract(input,label));mean → mean_all,sum → sum,none → 原样
+M.mse_loss = rule {
+  { name = "input", type = Tensor, doc = "prediction (float32/64)" },
+  { name = "label", type = Tensor, doc = "target, same shape" },
+  { name = "reduction", type = argrule.string, opt = true, default = "mean",
+    doc = "'none' | 'mean' | 'sum' (loss.py:2046)" },
+}(function(input, label, reduction)
+  local d = paddle_core.pd_op_subtract(input, label)
+  local sq = paddle_core.pd_op_square(d)
+  return reduce_out(sq, reduction, "mse_loss")
+end)
+
+-- l1_loss{input, label, reduction} -- loss.py:1436-1514
+-- abs(subtract(input,label));mean → mean_all,sum → sum,none → 原样
+M.l1_loss = rule {
+  { name = "input", type = Tensor, doc = "prediction (float32/64/int)" },
+  { name = "label", type = Tensor, doc = "target, same shape" },
+  { name = "reduction", type = argrule.string, opt = true, default = "mean",
+    doc = "'none' | 'mean' | 'sum' (loss.py:1508)" },
+}(function(input, label, reduction)
+  local d = paddle_core.pd_op_subtract(input, label)
+  local a = paddle_core.pd_op_abs(d)
+  return reduce_out(a, reduction, "l1_loss")
+end)
+
+-- smooth_l1_loss{input, label, reduction, delta, is_huber}
+-- loss.py:1175-1263:huber_loss(input,label,delta);is_huber=False 时
+-- out/delta(loss.py:1248),再 reduction。
+M.smooth_l1_loss = rule {
+  { name = "input", type = Tensor, doc = "prediction (float32/64)" },
+  { name = "label", type = Tensor, doc = "target, same shape" },
+  { name = "reduction", type = argrule.string, opt = true, default = "mean",
+    doc = "'none' | 'mean' | 'sum' (loss.py:1251)" },
+  { name = "delta", type = argrule.number, opt = true, default = 1.0,
+    doc = "huber threshold (loss.py:1186)" },
+  { name = "is_huber", type = argrule.boolean, opt = true, default = true,
+    doc = "False divides loss by delta (loss.py:1200)" },
+}(function(input, label, reduction, delta, is_huber)
+  local out = paddle_core.pd_op_huber_loss(input, label, delta)
+  if not is_huber then
+    -- loss.py:1248:out / delta → scale(out, 1/delta, 0, 1)
+    out = paddle_core.pd_op_scale(out, 1.0 / delta, 0, 1)
+  end
+  return reduce_out(out, reduction, "smooth_l1_loss")
+end)
+
+-- binary_cross_entropy{input, label, weight, reduction}
+-- loss.py:627-738:bce_loss(input,label) → *weight → reduction
+M.binary_cross_entropy = rule {
+  { name = "input", type = Tensor,
+    doc = "probabilities (sigmoid output), in [0,1]" },
+  { name = "label", type = Tensor, doc = "target, same shape, in [0,1]" },
+  { name = "weight", type = Tensor, opt = true,
+    doc = "per-element rescale (loss.py:646); nil = none" },
+  { name = "reduction", type = argrule.string, opt = true, default = "mean",
+    doc = "'none' | 'mean' | 'sum' (loss.py:651)" },
+}(function(input, label, weight, reduction)
+  local out = paddle_core.pd_op_bce_loss(input, label)  -- ops_gen.h:56
+  if weight ~= nil then
+    out = paddle_core.pd_op_multiply(out, weight)  -- loss.py:710
+  end
+  return reduce_out(out, reduction, "binary_cross_entropy")
+end)
+
+-- binary_cross_entropy_with_logits{logit, label, weight, reduction,
+--   pos_weight} -- loss.py:773-960,sigmoid_cross_entropy_with_logits 单出
+M.binary_cross_entropy_with_logits = rule {
+  { name = "logit", type = Tensor, doc = "raw logits (pre-sigmoid)" },
+  { name = "label", type = Tensor, doc = "target, same shape, in [0,1]" },
+  { name = "weight", type = Tensor, opt = true,
+    doc = "per-element rescale (loss.py:819); nil = none" },
+  { name = "reduction", type = argrule.string, opt = true, default = "mean",
+    doc = "'none' | 'mean' | 'sum' (loss.py:824)" },
+  { name = "pos_weight", type = Tensor, opt = true,
+    doc = "positive-class weight (loss.py:821); nil = none" },
+}(function(logit, label, weight, reduction, pos_weight)
+  -- loss.py:916:normalize=False, ignore_index=-100
+  local out = paddle_core.pd_op_sigmoid_cross_entropy_with_logits(
+    logit, label, pos_weight, 0, -100)  -- ops_gen.h:450
+  if weight ~= nil then
+    out = paddle_core.pd_op_multiply(out, weight)  -- loss.py:921
+  end
+  return reduce_out(out, reduction, "binary_cross_entropy_with_logits")
+end)
+
 return M
