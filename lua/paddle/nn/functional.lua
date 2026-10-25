@@ -19,6 +19,15 @@ local argrule = require "argrule"
 local rule = require "argrule.rule"
 local paddle_core = require "paddle_core"
 
+-- CPU place 缓存(dropout_nd 的 uniform/full 需要 place 参数)
+local CPU_PLACE
+local function cpu_place()
+  if CPU_PLACE == nil then
+    CPU_PLACE = paddle_core.pd_place_new(paddle_core.PD_PLACE_CPU, 0)
+  end
+  return CPU_PLACE
+end
+
 -- Shared LuaTensor usertype metatable (tensor.lua augments the same one).
 -- Structural tensor test, same pattern as nn/layer.lua.
 local probe = paddle_core.tensor{1}
@@ -139,10 +148,13 @@ M.softplus = rule {
   return paddle_core.pd_op_softplus(x, beta, threshold)  -- ops_gen.h:461
 end)
 
--- hardswish{x} -- activation.py:400 (_C_ops.hardswish, 无参数)
+-- hardswish{x, inplace} -- activation.py:400-401 (inplace=False)
 M.hardswish = rule {
   { name = "x", type = Tensor, doc = "input tensor" },
-}(function(x)
+  { name = "inplace", type = argrule.boolean, opt = true, default = false,
+    doc = "in-place variant (generator M2)" },
+}(function(x, inplace)
+  if inplace then return no_inplace_yet "hardswish"() end
   return paddle_core.pd_op_hardswish(x)  -- ops_gen.h:243
 end)
 
@@ -290,6 +302,15 @@ M.softshrink = rule {
     doc = "shrink threshold, Python default 0.5 (activation.py:1399)" },
 }(function(x, threshold)
   return paddle_core.pd_op_softshrink(x, threshold)  -- ops_gen.h:462
+end)
+
+-- hardshrink{x, threshold} -- activation.py:302 (threshold=0.5)
+M.hardshrink = rule {
+  { name = "x", type = Tensor, doc = "input tensor" },
+  { name = "threshold", type = argrule.number, opt = true, default = 0.5,
+    doc = "shrink threshold, Python default 0.5 (activation.py:306)" },
+}(function(x, threshold)
+  return paddle_core.pd_op_hardshrink(x, threshold)  -- gen_ops_h.cc:17
 end)
 
 -- maxout{x, groups, axis} -- activation.py:904 (groups 必选, axis 默认 1);
@@ -852,8 +873,49 @@ M.dropout = rule {
       .. "'downscale_in_infer' or 'upscale_in_train'", 2)
   end
   if axis ~= nil then
-    error("paddle.nn.functional.dropout: axis dropout (dropout_nd) "
-      .. "lands in a later batch -- tracked in tasks.md", 2)
+    -- dropout_nd 组合(common.py:1473-1520):
+    --   training: scale_input = x/(1-p)(upscale)或 x;mask 在 axis 维
+    --   保持原尺寸、其余维为 1;uniform(mask_shape) >= p → keep_mask;
+    --   scale_input * keep_mask
+    --   test: downscale → x*(1-p),否则 x
+    local keep_prob = 1.0 - p
+    if not training then
+      if mode == "downscale_in_infer" then
+        return paddle_core.pd_op_scale(x, keep_prob, 0, 1)
+      end
+      return x
+    end
+    if p == 1.0 then
+      return paddle_core.pd_op_scale(x, 0.0, 0, 1)  -- common.py:1481
+    end
+    local scale_input = x
+    if mode == "upscale_in_train" then
+      scale_input = paddle_core.pd_op_scale(x, 1.0 / keep_prob, 0, 1)
+    end
+    local input_shape = x:shape()
+    local drop_axes = axis
+    if type(axis) == "number" then drop_axes = { axis } end
+    -- axis 1-based(C4)→ 0-based mask 索引;负数从尾数
+    local mask_shape = {}
+    for i = 1, #input_shape do mask_shape[i] = 1 end
+    for _, a in ipairs(drop_axes) do
+      local idx = a
+      if idx < 0 then idx = #input_shape + idx + 1 end
+      if idx < 1 or idx > #input_shape then
+        error(("paddle.nn.functional.dropout: axis %s out of range for "
+          .. "%d-D input"):format(tostring(a), #input_shape), 2)
+      end
+      mask_shape[idx] = input_shape[idx]
+    end
+    local random_tensor = paddle_core.pd_op_uniform(
+      mask_shape, paddle_core.PD_DTYPE_FLOAT32, 0.0, 1.0, 0, cpu_place())
+    local p_t = paddle_core.pd_op_full(
+      { 1 }, p, paddle_core.PD_DTYPE_FLOAT32, cpu_place())
+    local keep_mask = paddle_core.pd_op_greater_equal(random_tensor, p_t)
+    local dt = x:dtype()
+    scale_input = paddle_core.pd_op_cast(scale_input, dt)
+    keep_mask = paddle_core.pd_op_cast(keep_mask, dt)
+    return paddle_core.pd_op_multiply(scale_input, keep_mask)
   end
   local m = (mode == "downscale_in_infer") and "downgrade_in_infer" or mode
   return paddle_core.pd_op_dropout(x, nil, p, (training and 0 or 1), m, 0, 0)

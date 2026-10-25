@@ -29,12 +29,60 @@ M.Linear = linear
 -- 2.9.4 层类(MNIST 验收路径):Conv2D/ReLU/BatchNorm2D/
 -- CrossEntropyLoss/Flatten/Dropout/Embedding。构造函数全部 argrule
 -- 包装(self 规则,用户 2026-10-25 纪律)。
-M.Conv2D = conv
-M.ReLU = activation
-M.BatchNorm2D = norm
-M.CrossEntropyLoss = loss
+-- 2.9.4.2b:conv.lua 泛化为 1D/2D/3D + Transpose 六个变体(表导出)
+M.Conv1D = conv.Conv1D
+M.Conv2D = conv.Conv2D
+M.Conv3D = conv.Conv3D
+M.Conv1DTranspose = conv.Conv1DTranspose
+M.Conv2DTranspose = conv.Conv2DTranspose
+M.Conv3DTranspose = conv.Conv3DTranspose
+-- 2.9.4.2b:activation.lua 批量激活层类(表导出)。ReLU 原单类→表中。
+M.CELU = activation.CELU
+M.ELU = activation.ELU
+M.GELU = activation.GELU
+M.Hardshrink = activation.Hardshrink
+M.Hardswish = activation.Hardswish
+M.Tanh = activation.Tanh
+M.Hardtanh = activation.Hardtanh
+M.PReLU = activation.PReLU
+M.RReLU = activation.RReLU
+M.ReLU = activation.ReLU
+M.ReLU6 = activation.ReLU6
+M.SELU = activation.SELU
+M.LeakyReLU = activation.LeakyReLU
+M.Sigmoid = activation.Sigmoid
+M.Hardsigmoid = activation.Hardsigmoid
+M.Softplus = activation.Softplus
+M.Softshrink = activation.Softshrink
+M.Softsign = activation.Softsign
+M.Swish = activation.Swish
+M.Mish = activation.Mish
+M.Tanhshrink = activation.Tanhshrink
+M.ThresholdedReLU = activation.ThresholdedReLU
+M.Silu = activation.Silu
+M.LogSigmoid = activation.LogSigmoid
+M.Softmax = activation.Softmax
+M.LogSoftmax = activation.LogSoftmax
+M.Maxout = activation.Maxout
+M.Softmax2D = activation.Softmax2D
+-- 2.9.4.2b:norm.lua 泛化为 BatchNorm1D/2D/3D + LayerNorm + GroupNorm
+M.BatchNorm1D = norm.BatchNorm1D
+M.BatchNorm2D = norm.BatchNorm2D
+M.BatchNorm3D = norm.BatchNorm3D
+M.LayerNorm = norm.LayerNorm
+M.GroupNorm = norm.GroupNorm
+-- 2.9.4.2b:loss.lua 表导出(CrossEntropyLoss + MSELoss/L1Loss/
+-- SmoothL1Loss/BCELoss/BCEWithLogitsLoss,forward 转发 functional)
+M.CrossEntropyLoss = loss.CrossEntropyLoss
+M.MSELoss = loss.MSELoss
+M.L1Loss = loss.L1Loss
+M.SmoothL1Loss = loss.SmoothL1Loss
+M.BCELoss = loss.BCELoss
+M.BCEWithLogitsLoss = loss.BCEWithLogitsLoss
 M.Flatten = common.Flatten
 M.Dropout = common.Dropout
+M.Dropout2D = common.Dropout2D
+M.Dropout3D = common.Dropout3D
 M.Embedding = common.Embedding
 
 -- 2.9.4 池化层类全 12 个(pooling.lua,forward 转发 functional 2.9.3.3)

@@ -327,4 +327,122 @@ check(not okk, "MaxPool3D unknown key must raise")
 local okk, err = pcall(function() nn.AdaptiveAvgPool2D{ output_size = "x" } end)
 check(not okk, "AdaptiveAvgPool2D output_size='x' must raise")
 
+-- ---------------------------------------------------------------------
+-- 12: 2.9.4.2b 其余层类 —— Conv 变体数值(定值手算)+ 构造注册 +
+--    norm/激活/损失/Dropout2D/3D 导出与门禁。镜像 Python test_conv、
+--    test_norm、test_loss 的逻辑;池化/norm 数值在 functional 已验,
+--    层类只验层壳转发 + 构造落位。
+-- ---------------------------------------------------------------------
+check(nn.Conv1D ~= nil and nn.Conv3D ~= nil and nn.Conv1DTranspose ~= nil
+  and nn.Conv2DTranspose ~= nil and nn.Conv3DTranspose ~= nil,
+  "all 5 conv variants exported")
+
+-- Conv1D:全 1 [1,1,4],W 全 1 [1,1,2],bias=0,k2 s1 → [1,1,3] 全 2
+local c1 = nn.Conv1D{ in_channels = 1, out_channels = 1, kernel_size = 2 }
+c1:set_state_dict{ weight = ctensor({1, 1, 2}, 1.0),
+                   bias = ctensor({1}, 0.0) }
+local y = c1(ctensor({1, 1, 4}, 1.0))
+local sh = shape_of(y)
+check(sh[1] == 1 and sh[2] == 1 and sh[3] == 3,
+  "Conv1D k2 s1 -> [1,1,3]")
+close(item(y, 1), 2.0, "Conv1D sum(W)=2 (NCL conv2d 模拟链)")
+
+-- Conv3D:全 1 [1,1,2,2,2],W 全 1 [1,1,2,2,2],bias=0,k2 → [1,1,1,1,1] = 8
+local c3 = nn.Conv3D{ in_channels = 1, out_channels = 1, kernel_size = 2 }
+c3:set_state_dict{ weight = ctensor({1, 1, 2, 2, 2}, 1.0),
+                   bias = ctensor({1}, 0.0) }
+local y = c3(ctensor({1, 1, 2, 2, 2}, 1.0))
+local sh = shape_of(y)
+check(sh[1] == 1 and sh[2] == 1 and sh[5] == 1,
+  "Conv3D k2 -> [1,1,1,1,1]")
+close(item(y, 1), 8.0, "Conv3D sum(W)=8")
+
+-- Conv2DTranspose:全 1 [1,1,2,2],W 全 1 [1,1,2,2],bias=0,k2 s1 p0
+-- → 输出 [1,1,3,3],中心加权 = 4(重叠全 1)
+local ct = nn.Conv2DTranspose{ in_channels = 1, out_channels = 1,
+                               kernel_size = 2 }
+ct:set_state_dict{ weight = ctensor({1, 1, 2, 2}, 1.0),
+                   bias = ctensor({1}, 0.0) }
+local y = ct(ctensor({1, 1, 2, 2}, 1.0))
+local sh = shape_of(y)
+check(sh[3] == 3 and sh[4] == 3, "Conv2DTranspose k2 -> [1,1,3,3]")
+close(item(y, 5), 4.0, "Conv2DTranspose center overlaps 4")
+
+-- LayerNorm:全 2 [1,4],normalized_shape 4 → 归一化后全 0
+local ln = nn.LayerNorm{ normalized_shape = 4 }
+local y = ln(ctensor({1, 4}, 2.0))
+close(item(y, 1), 0.0, "LayerNorm all-2 -> 0")
+close(item(y, 4), 0.0, "LayerNorm last -> 0")
+
+-- GroupNorm:全 2 [1,4],num_groups=2 → 每组内归一化 → 全 0
+local gn = nn.GroupNorm{ num_groups = 2, num_channels = 4 }
+local y = gn(ctensor({1, 4}, 2.0))
+close(item(y, 1), 0.0, "GroupNorm g2 all-2 -> 0")
+close(item(y, 4), 0.0, "GroupNorm last -> 0")
+
+-- BatchNorm1D/3D:eval 用 running stats,同 BatchNorm2D 逻辑
+local bn1 = nn.BatchNorm1D{ num_features = 2 }
+bn1:set_state_dict{ weight = ctensor({2}, 1.0), bias = ctensor({2}, 0.0),
+                    _mean = ctensor({2}, 0.0),
+                    _variance = ctensor({2}, 1.0) }
+bn1:eval()
+local y = bn1(ctensor({1, 2, 4}, 1.0))
+close(item(y, 1), 1.0 / math.sqrt(1.0 + 1e-5), "BatchNorm1D eval x=1")
+local bn3 = nn.BatchNorm3D{ num_features = 2 }
+bn3:set_state_dict{ weight = ctensor({2}, 1.0), bias = ctensor({2}, 0.0),
+                    _mean = ctensor({2}, 0.0),
+                    _variance = ctensor({2}, 1.0) }
+bn3:eval()
+local y = bn3(ctensor({1, 2, 2, 2, 2}, 1.0))
+close(item(y, 1), 1.0 / math.sqrt(1.0 + 1e-5), "BatchNorm3D eval x=1")
+
+-- 激活层类批量:恒定公式核验(与 NN_FUNCTIONAL_SMOKE 同款期望)
+close(item(nn.LeakyReLU{ negative_slope = 0.01 }(
+  ctensor({2}, -2.0)), 1), -0.02, "LeakyReLU(-2) = -0.02")
+close(item(nn.Hardswish{}(ctensor({2}, 1.0)), 1), 1.0 * (1.0 + 3.0) / 6.0,
+  "Hardswish(1) = x(x+3)/6")
+close(item(nn.Sigmoid{}(ctensor({2}, 0.0)), 1), 0.5, "Sigmoid(0) = 0.5")
+close(item(nn.Softplus{}(ctensor({2}, 10.0)), 1), 10.0,
+  "Softplus(10) ~ x (threshold 20)")
+local sm = nn.Softmax{ axis = -1 }
+local y = sm(ctensor({1, 3}, 1.0))
+close(item(y, 1), math.exp(1.0) / (3.0 * math.exp(1.0)),
+  "Softmax all-equal -> 1/3")
+
+-- 损失层类:数值镜像 functional 已验逻辑
+local mse = nn.MSELoss{}
+close(item(mse(ctensor({2}, 2.0), ctensor({2}, 1.0)), 1), 1.0,
+  "MSELoss(2,1) mean = 1")
+local l1 = nn.L1Loss{}
+close(item(l1(ctensor({2}, 2.0), ctensor({2}, 1.0)), 1), 1.0,
+  "L1Loss(2,1) mean = 1")
+local sml = nn.SmoothL1Loss{}
+close(item(sml(ctensor({2}, 0.5), ctensor({2}, 0.0)), 1), 0.125,
+  "SmoothL1Loss(|0.5|<1) = 0.5*0.25")
+local bce = nn.BCELoss{}
+close(item(bce(ctensor({2}, 0.5), ctensor({2}, 1.0)), 1), -math.log(0.5),
+  "BCELoss(0.5,1) = -log0.5")
+local bcewl = nn.BCEWithLogitsLoss{}
+close(item(bcewl(ctensor({2}, 0.0), ctensor({2}, 1.0)), 1), math.log(2.0),
+  "BCEWithLogits(0,1) = ln2")
+
+-- Dropout2D/3D:eval 恒等,构造门禁
+local d2 = nn.Dropout2D{ p = 0.5 }
+d2:eval()
+local y = d2(ctensor({1, 1, 2, 2}, 3.0))
+close(item(y, 1), 3.0, "Dropout2D eval keeps input")
+local d3 = nn.Dropout3D{ p = 0.5 }
+d3:eval()
+local y = d3(ctensor({1, 1, 2, 2, 2}, 3.0))
+close(item(y, 1), 3.0, "Dropout3D eval keeps input")
+local okk, err = pcall(function() nn.Dropout2D{ p = 0.5,
+                                                 data_format = "BAD" } end)
+check(not okk, "Dropout2D data_format='BAD' must raise")
+
+-- 2.9.4.2b 构造门禁(坏类型)
+local okk, err = pcall(function() nn.Conv1D{ 1, 1, 2, groups = "x" } end)
+check(not okk, "Conv1D groups='x' must raise")
+local okk, err = pcall(function() nn.GroupNorm{ groups = 1 } end)
+check(not okk, "GroupNorm missing num_channels must raise")
+
 print(("NN_LAYERS_SMOKE PASS (%d assertions)"):format(ntests))
