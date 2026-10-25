@@ -200,8 +200,18 @@
 |---|---|
 | 现象 | `tools/smoke/smoke_jit_load.cc` 实测:`jit::Load` 加载 `multi_program_load/export` 成功(Predictor 与 New 两引擎路径都能读入 .pdmodel/.pdiparams/.meta、构造 Layer、创建引擎),但 **forward 执行 fc 算子时失败**:Predictor 引擎路径抛 `NotFoundError: OneDnnContext does not have the input W`(`paddle/phi/backends/onednn/onednn_context.cc:347`,operator `< fc >`);New 引擎(InterpreterEngine)路径在 oneDNN context 初始化后 0xC0000005。已确认 sample 网络里确实含 fc 算子(pdmodel 二进制扫到 `fc` 字符串 4 次) |
 | 已排查 | ① `FLAGS_jit_engine_type="New"` 绕开 Predictor 分析管线后仍崩(0xC0000005) → 不是 Predictor 独有;② `FLAGS_use_mkldnn=false` 后 oneDNN v3.6.2 仍被初始化(`onednn_context.cc:81`) → fc 的 oneDNN kernel 在无输入名映射时无条件撞墙;③ fc oneDNN kernel 查输入名 `W`,而 `SetInputsName` 只在 `operator.cc:3194`(老执行器)与 `onednn_instruction.cc:523`(新执行器)有条件调用 |
-| 需要什么才能关 | 不需要现在关。**判定:上游既有 bug,非无 Python 构建特有** —— `multi_program_load` 是 2022 年的导出 sample,fc + oneDNN kernel 的组合在新版 Paddle 上从未被这条路径验证过(上游 `test/cpp/jit/CMakeLists.txt:2` 只 `NOT WIN32` 且 CI 带 Python)。Lua 侧 P8 `jit::Layer` 落地时:优先用不含 fc 的模型 / 新导出产物验证;或届时打补丁(给 fc 的 onednn kernel 路径补输入名映射,C2) |
+| ~~需要什么才能关~~ | ~~不需要现在关。判定:上游既有 bug,非无 Python 构建特有~~ —— `multi_program_load` 是 2022 年的导出 sample,fc + oneDNN kernel 的组合在新版 Paddle 上从未被这条路径验证过(上游 `test/cpp/jit/CMakeLists.txt:2` 只 `NOT WIN32` 且 CI 带 Python)。Lua 侧 P8 `jit::Layer` 落地时:优先用不含 fc 的模型 / 新导出产物验证;或届时打补丁 |
 | 影响 | **不阻塞 G1**。T-M0-17 的落点是「`jit::Layer Load()` 符号与加载链在无 Python 下可用」——已验证;forward 的 fc+oneDNN 问题记入 P8 jit 模块的坑清单 |
+| ✅ **翻案(2026-10-25)** | **「fc+oneDNN 是 New 引擎 0xC0000005 根因」不成立。** 用无 fc 的 tiny 网络(add+add+relu,Python 3.5.0.dev OldIrGuard 导出)复现同一 0xC0000005,`dumpbin`/GLOG 定位真根因 = **`interpreter_engine.cc` 的 `@fetch` 后缀断裂**:`FunctionSchema::OutputArgNames()`(function_schema.cc:39-42)统一给输出名加 `@fetch`,而 New executor 建的 scope 变量是裸名(`relu_0.tmp_0`)→ `FetchOuts` 查空指针 + `skip_gc_vars` 不匹配致 GC 回收输出。上游 Python 默认走 Predictor 引擎、从不经过 InterpreterEngine,所以这条断裂从未被上游撞见。**已修复**:`patches/paddle/0002-jit-interpreter-engine-fetch-suffix.patch`(置 `StripFetchSuffix`,两处调用点)固化,`git apply -R` 可逆验证通过;`smoke_jit_tiny.cc` C++ 直连 PASS(`out[0]=2.5`)。fc 的 Predictor `NotFoundError` 仍是独立上游缺陷,后续验 fc 网络时再处理 |
+
+### Q-25 · 宿主 Lua 进程在 `jit::Layer` forward 后退出竞态 0xC0000005
+
+| | |
+|---|---|
+| 现象 | 修复 Q-24 的 `@fetch` 断裂后,所有功能正确(`jit_load`/`function_names`/forward 数值 2.5),但 **luajit 宿主进程在脚本正常结束后于 lua_close 阶段确定性 0xC0000005**(两次复现,退出码 -1073741819) |
+| 证据 | ① C++ 直连 `smoke_jit_tiny.exe` 同流程**干净退出(exit 0)** → 不是引擎/绑定逻辑错;② `os.exit(0)` 干净 → 崩溃在 `lua_close`(跳过它就不崩);③ 只 Load 不 forward 干净 → 与 load 无关;④ 显式 `collectgarbage` 释放 layer/输出后仍崩 → 与 LuaLayer 析构无关;⑤ **forward 后忙等 2 秒再退出干净** → 时间敏感;⑥ GLOG:forward 期间 New executor 起 `HostTasks` 线程池,serial_run 后变 `GarbageCollector_thread_0`/`DeviceKernelLaunch_thread_0`(`nonblocking_threadpool.h:251`),且 `onednn_context.cc:81` 出现在两个不同线程 ID → **AsyncWorkQueue 线程池与宿主 lua_close/进程退出的时序竞态**(线程未 join 完就 exit) |
+| 需要什么才能关 | 上游层面:`ProgramInterpreter` 析构时 join 异步线程池(或 phi 全局线程池显式 shutdown);或宿主侧规避(进程退出前给线程池 wind-down 时间)。**不阻塞 M1**:2.8 验收 smoke 以 `os.exit(0)` 收尾(探针实证干净),文档已注明;真实「Python 训练 / Lua 推理」场景脚本退出时也会撞,需在 P8 落地时一并处理(jit 模块文档已挂 Q-25) |
+| 影响 | P8 `jit::Layer`;**不阻塞 2.8 完成** |
 
 ### Q-21 · 上游有没有「显式 `None` 与缺省含义不同」的参数
 
