@@ -256,9 +256,9 @@ close(item(y, 1), 2.0 / 3.0, "softsign(2) == 2/3")
 local y = F.softsign{ cvec(3, -0.5) }
 close(item(y, 1), -0.5 / 1.5, "softsign(-0.5)")
 
--- tanh_shrink: x - tanh(x)  (TestTanhShrink)
-local y = F.tanh_shrink{ cvec(3, 1.0) }
-close(item(y, 1), 1.0 - math.tanh(1.0), "tanh_shrink(1)")
+-- tanhshrink: x - tanh(x)  (TestTanhShrink)
+local y = F.tanhshrink{ cvec(3, 1.0) }
+close(item(y, 1), 1.0 - math.tanh(1.0), "tanhshrink(1)")
 
 -- swish: x*sigmoid(x) = silu 语义同 swish(独立算子 swish)
 local y = F.swish{ cvec(3, 2.0) }

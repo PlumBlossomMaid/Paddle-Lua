@@ -245,8 +245,9 @@ M.softsign = rule {
   return paddle_core.pd_op_softsign(x)  -- ops_gen.h:463
 end)
 
--- tanh_shrink{x} -- activation.py:1636 附近 (_C_ops.tanh_shrink)
-M.tanh_shrink = rule {
+-- tanhshrink{x} -- activation.py:1610 (_C_ops.tanh_shrink,算子名带下划线
+-- 但 API 名是 tanhshrink -- 命名铁律:照搬 Python 函数名)
+M.tanhshrink = rule {
   { name = "x", type = Tensor, doc = "input tensor" },
 }(function(x)
   return paddle_core.pd_op_tanh_shrink(x)  -- ops_gen.h:489
