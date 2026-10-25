@@ -182,10 +182,10 @@ paddle-lua/
 ### P5 · Tensor
 
 ```
-1. dtype.lua + device.lua    ← 无依赖,最容易对齐 Paddle 命名
-2. _wrap.lua                 ← 后面所有 API 都要用它
+1. dtype.lua + device.lua    ← 无依赖,最容易对齐 Paddle 命名 ✅(2026-10-25)
+2. ~~_wrap.lua~~             ← 已删(R27/foundations §5.4.4:第二套参数处理,违反 C11)
 3. tensor.lua                ← __index/__newindex/元方法
-4. slice.lua                 ← 1-based 转换的 Lua 侧
+4. slice.lua                 ← 1-based 转换的 Lua 侧(实现已演进:转换在 csrc/sol/slice.cc core.slice_spec,见 03-codegen.md)
 ```
 
 ### P9 · nn(最大的一块,顺序最值得讲究)
