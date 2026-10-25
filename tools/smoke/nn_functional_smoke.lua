@@ -246,4 +246,81 @@ check(not okk, "relu{inplace=true} must raise (M2, skip_rules trailing _)")
 check(err ~= nil and err:find("inplace") ~= nil,
        ("inplace error is explicit, got: %s"):format(tostring(err)))
 
+-- ---------------------------------------------------------------------
+-- 19: 第二批激活(2.9.3.2)-- 镜像 Python 公式
+-- ---------------------------------------------------------------------
+
+-- softsign: x/(1+|x|)  (test_activation_op.py TestSoftsign)
+local y = F.softsign{ cvec(3, 2.0) }
+close(item(y, 1), 2.0 / 3.0, "softsign(2) == 2/3")
+local y = F.softsign{ cvec(3, -0.5) }
+close(item(y, 1), -0.5 / 1.5, "softsign(-0.5)")
+
+-- tanh_shrink: x - tanh(x)  (TestTanhShrink)
+local y = F.tanh_shrink{ cvec(3, 1.0) }
+close(item(y, 1), 1.0 - math.tanh(1.0), "tanh_shrink(1)")
+
+-- swish: x*sigmoid(x) = silu 语义同 swish(独立算子 swish)
+local y = F.swish{ cvec(3, 2.0) }
+close(item(y, 1), 2.0 / (1.0 + math.exp(-2.0)), "swish(2)")
+
+-- log_sigmoid: log(1/(1+e^-x)) = -log(1+e^-x) (TestLogSigmoid)
+local y = F.log_sigmoid{ cvec(3, 0.0) }
+close(item(y, 1), -math.log(2.0), "log_sigmoid(0) == -ln2")
+local y = F.log_sigmoid{ cvec(3, 1.0) }
+close(item(y, 1), -math.log(1.0 + math.exp(-1.0)), "log_sigmoid(1)")
+
+-- mish: x*tanh(softplus(x)), softplus(x)=ln(1+e^x) for x small (TestMish)
+local function softplus1(v) return math.log(1.0 + math.exp(v)) end
+local y = F.mish{ cvec(3, 0.0) }
+close(item(y, 1), 0.0, "mish(0) == 0")
+local y = F.mish{ cvec(3, 1.0) }
+close(item(y, 1), 1.0 * math.tanh(softplus1(1.0)), "mish(1)")
+
+-- softshrink: x>t? x-t : x<-t? x+t : 0 (t=0.5 default) (TestSoftshrink)
+local y = F.softshrink{ cvec(3, 1.0) }
+close(item(y, 1), 0.5, "softshrink(1,0.5) == 0.5")
+local y = F.softshrink{ cvec(3, -1.0) }
+close(item(y, 1), -0.5, "softshrink(-1,0.5) == -0.5")
+local y = F.softshrink{ cvec(3, 0.2) }
+close(item(y, 1), 0.0, "softshrink(0.2) == 0")
+
+-- maxout: 4D input [N,C,H,W], groups 分通道取最大 (TestMaxoutAPI)
+-- x = [1, 4, 1, 1] values [1,3,2,4], groups=2, axis=2(1-based 通道)
+-- C 维被 groups 分成 2 组 → 输出 C=2:每组的 max → [3, 4]
+local xmo = core.pd_op_full({1, 4, 1, 1}, 1.0, F32, CPU)
+local xmo2 = core.pd_op_full({1, 4, 1, 1}, 2.0, F32, CPU)
+local xmo3 = core.pd_op_full({1, 4, 1, 1}, 3.0, F32, CPU)
+local xmo4 = core.pd_op_full({1, 4, 1, 1}, 4.0, F32, CPU)
+local ymo = F.maxout{ x = xmo4, groups = 2 }
+-- 全 4 时每组 max = 4 → 输出 2 通道都 4
+assert(ymo:shape()[1] == 1 and ymo:shape()[2] == 2,
+       "maxout [1,4,1,1]/groups=2 -> [1,2,1,1]")
+close(item(ymo, 1), 4.0, "maxout all-4 group max == 4")
+
+-- prelu: x>0? x : weight*x ; weight numel==1 -> mode=all (TestPReluAPI)
+local w1 = core.pd_op_full({1}, 2.0, F32, CPU)
+local y = F.prelu{ x = cvec(3, 2.0), weight = w1 }
+close(item(y, 1), 2.0, "prelu(2,w=2) == 2")
+local y = F.prelu{ x = cvec(3, -2.0), weight = w1 }
+close(item(y, 1), -4.0, "prelu(-2,w=2) == -4")
+
+-- rrelu: 运行 + is_test 语义(负斜率在 [lower,upper] 内) (TestRRelu)
+local y = F.rrelu{ x = cvec(3, 2.0), training = false }  -- is_test=1
+close(item(y, 1), 2.0, "rrelu(2,is_test) == 2")
+
+-- gumbel_softmax: 运行不崩(随机采样,只验证 shape) (TestGumbelSoftmax)
+local y = F.gumbel_softmax{ x = cvec(3, 1.0) }
+assert(y:shape()[1] == 3, "gumbel_softmax keeps shape")
+local okg = true
+for i = 1, 3 do
+  local v = item(y, i)
+  if v < 0 or v > 1 or v ~= v then okg = false end
+end
+check(okg, "gumbel_softmax outputs in [0,1]")
+
+-- 第二批 argrule 门禁:maxout groups 必填
+local okk, err = pcall(function() F.maxout{ x = cvec(3, 1.0) } end)
+check(not okk, "maxout without groups must raise")
+
 print(("NN_FUNCTIONAL_SMOKE PASS (%d assertions)"):format(ntests))

@@ -103,13 +103,16 @@ end)
 
 -- softmax{x, axis, dtype} -- activation.py:1191-1378;axis 1-based(C4),
 -- 负数不变;dtype 首批不支持(需 cast 算子链,见 nn-functional.md §7)。
--- axis 的 1-based->0-based 转换由 _ops/softmax.lua 生成物做(显式传值)。
+-- ★ index 语义参数转发 `_ops` 生成物(它做 1-based->0-based 转换,
+--   见 emit_lua 的 index_semantics;直调 pd_op 会漏转换,实测报
+--   "axis only supported 1, -1 or 3" 类错误)。
 M.softmax = rule {
   { name = "x", type = Tensor, doc = "input tensor" },
   { name = "axis", type = argrule.number, opt = true, default = -1,
     doc = "softmax axis, 1-based, negative counts from the end (C4)" },
 }(function(x, axis)
-  return paddle_core.pd_op_softmax(x, axis)  -- ops_gen.h:460
+  local wrap = require("paddle._ops.softmax")
+  return wrap.softmax(x, axis)
 end)
 
 -- log_softmax{x, axis} -- activation.py:1729 (_C_ops.log_softmax)
@@ -118,7 +121,9 @@ M.log_softmax = rule {
   { name = "axis", type = argrule.number, opt = true, default = -1,
     doc = "log-softmax axis, 1-based, negative from the end (C4)" },
 }(function(x, axis)
-  return paddle_core.pd_op_log_softmax(x, axis)  -- ops_gen.h:297
+  -- index 语义参数一律走生成物(1-based->0-based 转换在 _ops 层)
+  local wrap = require("paddle._ops.log_softmax")
+  return wrap.log_softmax(x, axis)
 end)
 
 -- softplus{x, beta, threshold} -- yaml (ops.yaml:5238): beta=1.0,
@@ -226,6 +231,139 @@ M.selu = rule {
 }(function(x, scale, alpha, inplace)
   if inplace then return no_inplace_yet "selu"() end
   return paddle_core.pd_op_selu(x, scale, alpha)  -- ops_gen.h:433
+end)
+
+-- ---------------------------------------------------------------------
+-- 第二批(2026-10-25):纯转发/单算子,Python 契约核对过的剩余激活。
+-- glu/swiglu(y=nil 分支)是组合算子(chunk 未生成,v1 延后,见 tasks)。
+-- ---------------------------------------------------------------------
+
+-- softsign{x} -- activation.py:1459 (_C_ops.softsign)
+M.softsign = rule {
+  { name = "x", type = Tensor, doc = "input tensor" },
+}(function(x)
+  return paddle_core.pd_op_softsign(x)  -- ops_gen.h:463
+end)
+
+-- tanh_shrink{x} -- activation.py:1636 附近 (_C_ops.tanh_shrink)
+M.tanh_shrink = rule {
+  { name = "x", type = Tensor, doc = "input tensor" },
+}(function(x)
+  return paddle_core.pd_op_tanh_shrink(x)  -- ops_gen.h:489
+end)
+
+-- swish{x, inplace} -- activation.py:1498 (silu 的另一种缩放;独立算子 swish)
+M.swish = rule {
+  { name = "x", type = Tensor, doc = "input tensor" },
+  { name = "inplace", type = argrule.boolean, opt = true, default = false,
+    doc = "in-place variant (generator M2)" },
+}(function(x, inplace)
+  if inplace then return no_inplace_yet "swish"() end
+  return paddle_core.pd_op_swish(x)  -- ops_gen.h:483
+end)
+
+-- log_sigmoid{x} -- activation.py:858 (_C_ops.logsigmoid,算子名无下划线)
+M.log_sigmoid = rule {
+  { name = "x", type = Tensor, doc = "input tensor" },
+}(function(x)
+  return paddle_core.pd_op_logsigmoid(x)  -- gen_ops_l.cc:249
+end)
+
+-- mish{x, inplace} -- activation.py:1554;内部固定 lambda=20
+-- (activation.py:1599 `_C_ops.mish(x, 20)`);yaml lambda 无默认
+-- (ops.yaml:3852)→ functional 显式传 20,不暴露给用户。
+M.mish = rule {
+  { name = "x", type = Tensor, doc = "input tensor" },
+  { name = "inplace", type = argrule.boolean, opt = true, default = false,
+    doc = "in-place variant (generator M2)" },
+}(function(x, inplace)
+  if inplace then return no_inplace_yet "mish"() end
+  return paddle_core.pd_op_mish(x, 20.0)  -- ops_gen.h:342;lambda=20 fix
+end)
+
+-- softshrink{x, threshold} -- activation.py:1398 (threshold=0.5);
+-- ★ 生成物默认 threshold=0 是错的(yaml 0.5 ops.yaml:5253)→ 显式 0.5
+M.softshrink = rule {
+  { name = "x", type = Tensor, doc = "input tensor" },
+  { name = "threshold", type = argrule.number, opt = true, default = 0.5,
+    doc = "shrink threshold, Python default 0.5 (activation.py:1399)" },
+}(function(x, threshold)
+  return paddle_core.pd_op_softshrink(x, threshold)  -- ops_gen.h:462
+end)
+
+-- maxout{x, groups, axis} -- activation.py:904 (groups 必选, axis 默认 1);
+-- yaml axis 默认 1(ops.yaml:3721,0-based)→ Lua 1-based 默认 2;
+-- index 语义(C4),生成物负责 1-based->0-based(显式传 2)。
+M.maxout = rule {
+  { name = "x", type = Tensor, doc = "input 4-D tensor [N,C,H,W]" },
+  { name = "groups", type = argrule.number, doc = "channel groups (required)" },
+  { name = "axis", type = argrule.number, opt = true, default = 2,
+    doc = "channel axis, 1-based; Python default 1 (activation.py:905)" },
+}(function(x, groups, axis)
+  -- axis 是 index 语义:必须走生成物做 1-based->0-based(maxout 只
+  -- 接受 1/-1/3,实测直调 pd_op 传 2 报错 unary.cc:2825)
+  local wrap = require("paddle._ops.maxout")
+  return wrap.maxout(x, groups, axis)
+end)
+
+-- prelu{x, weight, data_format} -- activation.py:548;Python 由 weight
+-- numel 推导 mode:numel==1 → "all",否则 "channel"(activation.py:608-637);
+-- data_format 默认 "NCHW"。★ 生成物默认 data_format/mode 带引号
+-- ("\"NCHW\"" 生成器 bug)→ functional 显式传,绝不经过生成物默认。
+M.prelu = rule {
+  { name = "x", type = Tensor, doc = "input tensor" },
+  { name = "weight", type = Tensor,
+    doc = "learnable slope; numel==1 -> 'all', else per-channel" },
+  { name = "data_format", type = argrule.string, opt = true,
+    default = "NCHW", doc = "NC/NCL/NCHW/NCDHW/NLC/NHWC/NDHWC" },
+}(function(x, weight, data_format)
+  local mode = "all"
+  if weight:numel() > 1 then
+    mode = "channel"
+    local fmt = data_format
+    if fmt == "NCL" or fmt == "NCHW" or fmt == "NCDHW" then
+      data_format = "NCHW"
+    elseif fmt == "NLC" or fmt == "NHWC" or fmt == "NDHWC" then
+      data_format = "NHWC"
+    end  -- activation.py:627 的归一化
+  end
+  return paddle_core.pd_op_prelu(x, weight, data_format, mode)
+  -- ops_gen.h:391
+end)
+
+-- rrelu{x, lower, upper, training, inplace} -- activation.py:671;
+-- Python is_test = not training(activation.py:777),算子收 is_test。
+M.rrelu = rule {
+  { name = "x", type = Tensor, doc = "input tensor" },
+  { name = "lower", type = argrule.number, opt = true, default = 1 / 8,
+    doc = "lower bound (activation.py:672)" },
+  { name = "upper", type = argrule.number, opt = true, default = 1 / 3,
+    doc = "upper bound (activation.py:673)" },
+  { name = "training", type = argrule.boolean, opt = true, default = true,
+    doc = "train mode; is_test = not training (activation.py:777)" },
+  { name = "inplace", type = argrule.boolean, opt = true, default = false,
+    doc = "in-place variant (generator M2)" },
+}(function(x, lower, upper, training, inplace)
+  if inplace then return no_inplace_yet "rrelu"() end
+  local is_test = 0
+  if not training then is_test = 1 end
+  return paddle_core.pd_op_rrelu(x, lower, upper, is_test)  -- ops_gen.h:426
+end)
+
+-- gumbel_softmax{x, temperature, hard, axis} -- activation.py:1925;
+-- D35:装饰器(别名层)不移植,绑定被装饰函数 = 此签名。axis 1-based。
+M.gumbel_softmax = rule {
+  { name = "x", type = Tensor, doc = "logits tensor" },
+  { name = "temperature", type = argrule.number, opt = true, default = 1.0,
+    doc = "softmax temperature (activation.py:1926)" },
+  { name = "hard", type = argrule.boolean, opt = true, default = false,
+    doc = "hard one-hot sample (activation.py:1927)" },
+  { name = "axis", type = argrule.number, opt = true, default = -1,
+    doc = "softmax axis, 1-based, negative from the end (C4)" },
+}(function(x, temperature, hard, axis)
+  -- axis 是 index 语义:走生成物做 1-based->0-based(同 softmax 教训)
+  local wrap = require("paddle._ops.gumbel_softmax")
+  return wrap.gumbel_softmax(x, temperature, hard, axis)
 end)
 
 return M
