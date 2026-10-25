@@ -818,6 +818,49 @@ M.adaptive_max_pool3d = rule {
 end)
 
 -- ---------------------------------------------------------------------
+-- 正则化(common.py):dropout。axis=nil 主路径直调 pd_op_dropout;
+-- mode 语义转换 'downscale_in_infer'→'downgrade_in_infer'(common.py:1419)。
+-- ---------------------------------------------------------------------
+
+-- dropout{x, p, axis, training, inplace, mode}
+-- common.py:1234-1431。F.dropout 主路径(axis=nil):
+--   _C_ops.dropout(x, None, p, not training, mode, seed, fix_seed)
+--   (common.py:1426-1428)。p==0 快速返回 x;p 校验 [0,1](1400-1407);
+-- axis 非 nil 走 dropout_nd 组合(common.py:1477+),v2 随批。
+M.dropout = rule {
+  { name = "x", type = Tensor, doc = "input (fp16/fp32/fp64)" },
+  { name = "p", type = argrule.number, opt = true, default = 0.5,
+    doc = "zero-out probability (common.py:1235)" },
+  { name = "axis", type = argrule.any, opt = true,
+    doc = "dropout_nd axes; nil = element-wise (v2)" },
+  { name = "training", type = argrule.boolean, opt = true, default = true,
+    doc = "train phase; is_test = not training (common.py:1427)" },
+  { name = "inplace", type = argrule.boolean, opt = true, default = false,
+    doc = "in-place variant (generator M2)" },
+  { name = "mode", type = argrule.string, opt = true,
+    default = "upscale_in_train",
+    doc = "'upscale_in_train' | 'downscale_in_infer' (common.py:1238)" },
+}(function(x, p, axis, training, inplace, mode)
+  if inplace then return no_inplace_yet "dropout"() end
+  if p == 0 then return x end                       -- common.py:1400
+  if p < 0 or p > 1 then
+    error(("paddle.nn.functional.dropout: p=%s out of [0,1]")
+      :format(tostring(p)), 2)
+  end
+  if mode ~= "downscale_in_infer" and mode ~= "upscale_in_train" then
+    error("paddle.nn.functional.dropout: mode must be "
+      .. "'downscale_in_infer' or 'upscale_in_train'", 2)
+  end
+  if axis ~= nil then
+    error("paddle.nn.functional.dropout: axis dropout (dropout_nd) "
+      .. "lands in a later batch -- tracked in tasks.md", 2)
+  end
+  local m = (mode == "downscale_in_infer") and "downgrade_in_infer" or mode
+  return paddle_core.pd_op_dropout(x, nil, p, (training and 0 or 1), m, 0, 0)
+  -- ops_gen.h:147
+end)
+
+-- ---------------------------------------------------------------------
 -- 归一化(norm.py):batch_norm、layer_norm。直调 pd_op_batch_norm(6 输出
 -- 取第 1)/pd_op_layer_norm(单出);scale/bias 均可空(sol optional)。
 -- normalized_shape 是 1-based 轴范围(C4,nn-functional.md sec.3),转成
@@ -996,6 +1039,77 @@ M.binary_cross_entropy_with_logits = rule {
     out = paddle_core.pd_op_multiply(out, weight)  -- loss.py:921
   end
   return reduce_out(out, reduction, "binary_cross_entropy_with_logits")
+end)
+
+-- ---------------------------------------------------------------------
+-- 损失续(loss.py):cross_entropy(hard-label 主路径)。直调
+-- pd_op_cross_entropy_with_softmax(2 输出取 loss,sol gen_ops_c.cc:392;
+-- C ABI 层对 label 内容做 pd_idx_minus1,ops_c.cc:433)。INDEX 语义:
+--   label 内容 1-based→0-based 由 C ABI 完成;
+--   ignore_index 是 label 值(1-based,C4),C ABI 原样透传 → 正数 -1;
+--   axis 正数 -1(C4),负数不变。
+-- soft_label / weight / label_smoothing 后续批(tasks.md 剩余清单)。
+-- ---------------------------------------------------------------------
+
+-- cross_entropy{input, label, weight, ignore_index, reduction,
+--               soft_label, axis, use_softmax, label_smoothing}
+-- loss.py:2902-3453 主路径(hard label,use_softmax=true):
+--   _, out = _C_ops.cross_entropy_with_softmax(input, label, soft_label,
+--     use_softmax, True, ignore_index, axis)(loss.py:3218)
+M.cross_entropy = rule {
+  { name = "input", type = Tensor, doc = "logits [N..., C] (fp32/64)" },
+  { name = "label", type = Tensor, doc = "class ids, 1-based (C4)" },
+  { name = "weight", type = Tensor, opt = true,
+    doc = "class weights (v2, tasks 剩余)" },
+  { name = "ignore_index", type = argrule.number, opt = true, default = -100,
+    doc = "class id to ignore, 1-based (C4, nn.md sec.3)" },
+  { name = "reduction", type = argrule.string, opt = true, default = "mean",
+    doc = "'none' | 'mean' | 'sum' (loss.py:2965)" },
+  { name = "soft_label", type = argrule.boolean, opt = true, default = false,
+    doc = "one-hot target (v2, tasks 剩余)" },
+  { name = "axis", type = argrule.number, opt = true, default = -1,
+    doc = "class axis, 1-based (C4)" },
+  { name = "use_softmax", type = argrule.boolean, opt = true, default = true,
+    doc = "softmax inside op (loss.py:2910)" },
+  { name = "label_smoothing", type = argrule.number, opt = true, default = 0.0,
+    doc = "smoothing epsilon (v2, tasks 剩余)" },
+}(function(input, label, weight, ignore_index, reduction, soft_label,
+          axis, use_softmax, label_smoothing)
+  if soft_label or weight ~= nil or label_smoothing > 0 then
+    error("paddle.nn.functional.cross_entropy: soft_label / weight / "
+      .. "label_smoothing land in a later batch -- tracked in tasks.md", 2)
+  end
+  if reduction ~= "none" and reduction ~= "mean" and reduction ~= "sum" then
+    error(("'reduction' in 'cross_entropy' should be 'sum', 'mean' or "
+      .. "'none', but received %s"):format(tostring(reduction)), 2)
+  end
+  -- loss.py:3204-3208:input rank == label rank + 1 → label unsqueeze(axis)
+  local idim = #input:shape()
+  local ldim = #label:shape()
+  local ax = (axis > 0) and (axis - 1) or axis  -- 1-based → 0-based
+  if idim - 1 == ldim then
+    label = paddle_core.pd_op_unsqueeze(label, { ax })
+  end
+  local ig = ignore_index
+  if ig > 0 then ig = ig - 1 end  -- 1-based → 0-based,负数不变(C4)
+  local _, out = paddle_core.pd_op_cross_entropy_with_softmax(
+    input, label, 0, (use_softmax and 1 or 0), 1, ig, ax)
+  -- gen_ops_c.cc:392(2 输出取 loss);label 内容 C ABI 已 -1
+  if reduction == "none" then
+    if idim - 1 == ldim then
+      out = paddle_core.pd_op_squeeze(out, { ax })  -- loss.py:3477
+    end
+    return out
+  elseif reduction == "sum" then
+    return paddle_core.pd_op_sum(out, {}, paddle_core.PD_DTYPE_UNDEFINED, 0)
+  end
+  -- mean:ignore_index<0(默认)→ mean_all;>=0 的 mask 计数后续批
+  if ignore_index >= 0 then
+    error("paddle.nn.functional.cross_entropy: mean reduction with "
+      .. "ignore_index >= 0 needs the mask-count path -- tracked in "
+      .. "tasks.md", 2)
+  end
+  return paddle_core.pd_op_mean_all(out)  -- loss.py:3395
 end)
 
 return M
