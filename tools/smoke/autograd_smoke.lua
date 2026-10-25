@@ -104,5 +104,7 @@ assert(xi:stop_gradient(), "fresh tensor stops gradient by default")
 xi:set_stop_gradient(false)
 assert(not xi:stop_gradient(), "set_stop_gradient(false) works")
 xi:set_stop_gradient(true)
+assert(xi:grad() == nil,
+       "stop_gradient tensor has nil grad (06-autograd.md sec.4 ④)")
 
 print("AUTOGRAD_SMOKE PASS")
