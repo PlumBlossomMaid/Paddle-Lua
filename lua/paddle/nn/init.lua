@@ -26,17 +26,30 @@ M.Layer = layer.Layer
 -- + forward end to end (api/nn.md sec.2.3).
 M.Linear = linear
 
--- 2.9.4 层类(MNIST 验收路径):Conv2D/ReLU/MaxPool2D/BatchNorm2D/
+-- 2.9.4 层类(MNIST 验收路径):Conv2D/ReLU/BatchNorm2D/
 -- CrossEntropyLoss/Flatten/Dropout/Embedding。构造函数全部 argrule
 -- 包装(self 规则,用户 2026-10-25 纪律)。
 M.Conv2D = conv
 M.ReLU = activation
-M.MaxPool2D = pooling
 M.BatchNorm2D = norm
 M.CrossEntropyLoss = loss
 M.Flatten = common.Flatten
 M.Dropout = common.Dropout
 M.Embedding = common.Embedding
+
+-- 2.9.4 池化层类全 12 个(pooling.lua,forward 转发 functional 2.9.3.3)
+M.AvgPool1D = pooling.AvgPool1D
+M.AvgPool2D = pooling.AvgPool2D
+M.AvgPool3D = pooling.AvgPool3D
+M.MaxPool1D = pooling.MaxPool1D
+M.MaxPool2D = pooling.MaxPool2D
+M.MaxPool3D = pooling.MaxPool3D
+M.AdaptiveAvgPool1D = pooling.AdaptiveAvgPool1D
+M.AdaptiveAvgPool2D = pooling.AdaptiveAvgPool2D
+M.AdaptiveAvgPool3D = pooling.AdaptiveAvgPool3D
+M.AdaptiveMaxPool1D = pooling.AdaptiveMaxPool1D
+M.AdaptiveMaxPool2D = pooling.AdaptiveMaxPool2D
+M.AdaptiveMaxPool3D = pooling.AdaptiveMaxPool3D
 
 -- Functionals (2.9.3): activation + more, all argrule-wrapped (D31;
 -- api/nn-functional.md). First batch = 16 activations.

@@ -238,4 +238,93 @@ local okk, err = pcall(function() cebad(ctensor({1, 3}, 1.0),
                                         ctensor({1}, 1.0, I64)) end)
 check(not okk, "CrossEntropyLoss reduction='avg' forward must raise")
 
+-- ---------------------------------------------------------------------
+-- 11: 池化层类(2.9.4.2)—— 层壳 forward 转发 functional(2.9.3.3 已验
+--   数值),本段验证构造参数落位 + 转发语义。镜像 Python test_pool2d
+--   定值手算(与 NN_FUNCTIONAL_SMOKE 池化段同款期望)。
+-- ---------------------------------------------------------------------
+-- 导出齐全
+check(nn.AvgPool1D ~= nil and nn.AvgPool2D ~= nil and nn.AvgPool3D ~= nil
+  and nn.MaxPool1D ~= nil and nn.MaxPool3D ~= nil
+  and nn.AdaptiveAvgPool1D ~= nil and nn.AdaptiveAvgPool2D ~= nil
+  and nn.AdaptiveAvgPool3D ~= nil and nn.AdaptiveMaxPool1D ~= nil
+  and nn.AdaptiveMaxPool2D ~= nil and nn.AdaptiveMaxPool3D ~= nil,
+  "all 11 pooling layer classes exported")
+
+-- AvgPool1D:全 1 [1,1,4] k2 s2 → [1,1,2] 全 1
+local ap1 = nn.AvgPool1D{ kernel_size = 2, stride = 2 }
+local y = ap1(ctensor({1, 1, 4}, 1.0))
+local sh = shape_of(y)
+check(sh[1] == 1 and sh[2] == 1 and sh[3] == 2, "AvgPool1D k2 s2 -> [1,1,2]")
+check(math.abs(item(y, 1) - 1.0) < 1e-6, "AvgPool1D all-1 -> all-1")
+
+-- AvgPool2D:全 1 [1,1,4,4] k2 s2 → [1,1,2,2] 全 1;divisor_override=2 → 2
+local ap2 = nn.AvgPool2D{ kernel_size = 2, stride = 2 }
+local y = ap2(ctensor({1, 1, 4, 4}, 1.0))
+local sh = shape_of(y)
+check(sh[3] == 2 and sh[4] == 2, "AvgPool2D k2 s2 -> [1,1,2,2]")
+check(math.abs(item(y, 1) - 1.0) < 1e-6, "AvgPool2D all-1 -> all-1")
+local ap2d = nn.AvgPool2D{ kernel_size = 2, stride = 2, divisor_override = 2 }
+local y = ap2d(ctensor({1, 1, 4, 4}, 1.0))
+check(math.abs(item(y, 1) - 2.0) < 1e-6,
+  "AvgPool2D divisor_override=2 -> 2 (pooling.py:407)")
+
+-- AvgPool3D:全 1 [1,1,2,2,2] k2 → [1,1,1,1,1] 全 1
+local ap3 = nn.AvgPool3D{ kernel_size = 2 }
+local y = ap3(ctensor({1, 1, 2, 2, 2}, 1.0))
+local sh = shape_of(y)
+check(sh[3] == 1 and sh[4] == 1 and sh[5] == 1, "AvgPool3D k2 -> [1,1,1,1,1]")
+check(math.abs(item(y, 1) - 1.0) < 1e-6, "AvgPool3D all-1 -> all-1")
+
+-- MaxPool1D:全 4 [1,1,4] k2 s2 → [1,1,2] 全 4
+local mp1 = nn.MaxPool1D{ kernel_size = 2, stride = 2 }
+local y = mp1(ctensor({1, 1, 4}, 4.0))
+check(shape_of(y)[3] == 2 and math.abs(item(y, 1) - 4.0) < 1e-6,
+  "MaxPool1D all-4 k2 s2 -> [1,1,2] all-4")
+
+-- MaxPool3D:全 5 [1,1,2,2,2] k2 → [1,1,1,1,1] 全 5
+local mp3 = nn.MaxPool3D{ kernel_size = 2 }
+local y = mp3(ctensor({1, 1, 2, 2, 2}, 5.0))
+local sh = shape_of(y)
+check(sh[3] == 1 and sh[4] == 1 and sh[5] == 1, "MaxPool3D k2 -> [1,1,1,1,1]")
+check(math.abs(item(y, 1) - 5.0) < 1e-6, "MaxPool3D all-5 -> all-5")
+
+-- AdaptiveAvgPool1D/2D/3D:全 1 → 目标形状全 1
+local aa1 = nn.AdaptiveAvgPool1D{ output_size = 2 }
+local y = aa1(ctensor({1, 1, 4}, 1.0))
+check(shape_of(y)[3] == 2, "AdaptiveAvgPool1D os=2 -> L=2")
+local aa2 = nn.AdaptiveAvgPool2D{ output_size = 2 }
+local y = aa2(ctensor({1, 1, 4, 4}, 1.0))
+local sh = shape_of(y)
+check(sh[3] == 2 and sh[4] == 2, "AdaptiveAvgPool2D os=2 -> [1,1,2,2]")
+local aa3 = nn.AdaptiveAvgPool3D{ output_size = 2 }
+local y = aa3(ctensor({1, 1, 4, 4, 4}, 1.0))
+local sh = shape_of(y)
+check(sh[3] == 2 and sh[4] == 2 and sh[5] == 2,
+  "AdaptiveAvgPool3D os=2 -> [1,1,2,2,2]")
+
+-- AdaptiveMaxPool1D/2D/3D:全 5 → 目标形状全 5;return_mask 双输出
+local am1 = nn.AdaptiveMaxPool1D{ output_size = 2 }
+local y = am1(ctensor({1, 1, 4}, 5.0))
+check(shape_of(y)[3] == 2 and math.abs(item(y, 1) - 5.0) < 1e-6,
+  "AdaptiveMaxPool1D os=2 all-5")
+local am2 = nn.AdaptiveMaxPool2D{ output_size = 2 }
+local y = am2(ctensor({1, 1, 4, 4}, 5.0))
+local sh = shape_of(y)
+check(sh[3] == 2 and sh[4] == 2, "AdaptiveMaxPool2D os=2 -> [1,1,2,2]")
+local am3 = nn.AdaptiveMaxPool3D{ output_size = 2, return_mask = true }
+local y, m = am3(ctensor({1, 1, 4, 4, 4}, 5.0))
+local sh = shape_of(y)
+check(sh[3] == 2 and sh[4] == 2 and sh[5] == 2,
+  "AdaptiveMaxPool3D os=2 return_mask -> [1,1,2,2,2]")
+check(m ~= nil and shape_of(m)[3] == 2, "AdaptiveMaxPool3D mask output")
+
+-- 池化层类 argrule 门禁
+local okk, err = pcall(function() nn.AvgPool1D{ kernel_size = "x" } end)
+check(not okk, "AvgPool1D kernel_size='x' must raise")
+local okk, err = pcall(function() nn.MaxPool3D{ kernel_size = 2, bogus = 1 } end)
+check(not okk, "MaxPool3D unknown key must raise")
+local okk, err = pcall(function() nn.AdaptiveAvgPool2D{ output_size = "x" } end)
+check(not okk, "AdaptiveAvgPool2D output_size='x' must raise")
+
 print(("NN_LAYERS_SMOKE PASS (%d assertions)"):format(ntests))
