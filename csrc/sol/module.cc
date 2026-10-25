@@ -38,6 +38,18 @@ int l_device_count(lua_State* L) {
   return 1;
 }
 
+/* Device memory allocation stats (device.cc pd_device_allocated_bytes).
+ * Kind defaults to CPU. Current allocated bytes or -1 when that stat is
+ * unavailable on this build. Backs paddle.scope's entry/exit water level
+ * (api/scope.md sec.2.1, 14-gc.md sec.3 / sec.5 acceptance). */
+int l_memory_allocated(lua_State* L) {
+  int kind = static_cast<int>(luaL_optinteger(L, 1, PD_PLACE_CPU));
+  int64_t bytes = pd_device_allocated_bytes(kind);
+  pd::check();                     // bad kind -> Lua error
+  lua_pushinteger(L, static_cast<lua_Integer>(bytes));
+  return 1;
+}
+
 /* Eager runtime init (idempotent, device.cc pd_init_once). MUST be called
  * before any tensor{} / op touches the phi kernel factory. Only the C ABI
  * layer links Paddle (02-binding.md sec.2); the Lua embedder never does. */
@@ -59,6 +71,7 @@ const luaL_Reg kModuleFns[] = {
     {"version", l_version},
     {"init", l_init},
     {"device_count", l_device_count},
+    {"memory_allocated", l_memory_allocated},
     {"place_kind_name", l_place_kind_name},
     {nullptr, nullptr},
 };
