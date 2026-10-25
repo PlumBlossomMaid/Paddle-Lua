@@ -278,6 +278,20 @@ int        pd_jit_layer_function_names(pd_layer layer,
 /* Clone the layer (layer.h:78 Clone() with null stream). */
 pd_layer   pd_jit_layer_clone(pd_layer layer);
 
+/* ------------------------------------------------------------------ */
+/* Group 7: single-tensor serialization (2 fns, 07-serialization.md)  */
+/* ------------------------------------------------------------------ */
+
+/* Save a tensor in Paddle's single-tensor wire format (D19, T-M0-19
+ * verified: versioned, lossless, byte-identical re-save).
+ * Source: paddle/fluid/framework/io/save_load_tensor.h:20. */
+pd_status  pd_tensor_save(const pd_tensor t, const char* path, int overwrite);
+
+/* Load the single-tensor wire format at `path` into a NEW pd_tensor the
+ * caller owns (free it). dtype/place come from the file.
+ * Source: paddle/fluid/framework/io/save_load_tensor.h:24. */
+pd_status  pd_tensor_load(const char* path, pd_tensor* out);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif

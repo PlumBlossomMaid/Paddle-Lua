@@ -121,6 +121,33 @@ void register_autograd_fns(sol::table& mod) {
   mod.set_function("set_has_grad", [](bool v) { pd_set_has_grad(v ? 1 : 0); });
 }
 
+/* ---- 2.7 module-level serialization entries (paddle_c.h Group 7) ----
+ * Single-tensor save/load on Paddle's own wire format (D19). The Lua API
+ * layer (paddle.save/load) dispatches state_dict objects to lua-pickle
+ * and plain tensors to these two (07-serialization.md sec.3.2). */
+void register_serialize_fns(sol::table& mod) {
+  /* core.save_tensor(tensor, path, overwrite=false) */
+  mod.set_function(
+      "save_tensor",
+      [](const LuaTensor& t, const char* path, sol::optional<bool> overwrite) {
+        pd_status st = pd_tensor_save(
+            t.h, path, overwrite.has_value() ? (*overwrite ? 1 : 0) : 1);
+        pd::check();
+        return 0;
+      });
+
+  /* core.load_tensor(path) -> LuaTensor (ownership transfer; caller gets
+   * a NEW shell over the loaded storage, GC frees it on collect). */
+  mod.set_function(
+      "load_tensor",
+      [](const char* path) -> LuaTensor {
+        pd_tensor t = nullptr;
+        pd_status st = pd_tensor_load(path, &t);
+        pd::check();  // read status NOW; t may be null on error
+        return LuaTensor(t);
+      });
+}
+
 /* Register the LuaTensor usertype + factory into the module table (which
  * sits at stack index `module_index`, as created by luaopen_paddle_core).
  * Extra methods arrive in slices (2.2.4) and the Lua API layer (P5). */
@@ -259,6 +286,7 @@ void register_tensor(lua_State* L, int module_index) {
   push_tensor_factory(mod);
   register_slice(mod);          // slice.cc: core.slice_spec (D14 string transform)
   register_autograd_fns(mod);   // 2.6: core.backward/grad/has_grad/set_has_grad
+  register_serialize_fns(mod);  // 2.7: core.save_tensor/load_tensor (Group 7)
 }
 
 }  // namespace pd

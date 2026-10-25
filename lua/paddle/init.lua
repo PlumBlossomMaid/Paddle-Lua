@@ -68,6 +68,15 @@ M.CustomPlace = device.CustomPlace
 -- paddle_core.tensor{...} (paddle.to_tensor lands later, 2.6).
 require "paddle.tensor"
 
+-- ---- P7 serialization (top-level save/load, inventory.md:439-440) ----
+-- Top-level FUNCTIONS, not a submodule: paddle.save{t, path} /
+-- paddle.load{path} (07-serialization.md sec.3). Single tensors go
+-- through Paddle's SaveTensor/LoadTensor wire format (D19); state_dict
+-- dispatch to lua-pickle lands with P9/M2.
+local serialization = require "paddle.serialization"
+M.save = serialization.save
+M.load = serialization.load
+
 -- ---- lazy submodule skeleton ----------------------------------------
 -- Keys resolve to module names; first access requires + caches. Populate
 -- as each stage lands: device (P5), autograd (P6), nn (P9), optimizer
