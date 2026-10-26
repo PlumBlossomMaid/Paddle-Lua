@@ -10,11 +10,11 @@
 ```
 G0  ✅ 已通过(2026-10-22)  WITH_PYTHON=OFF + ON_INFER=OFF 能编出可用 libpaddle
 G1  ✅ 已通过(2026-10-23)  M0 必做 17 项全部完成,产出 M0_REPORT(见 m0-report.md §0)
-G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
+G2  ✅ 已通过(2026-10-27)  M1 验收:MNIST 训练收敛(lua examples/mnist.lua,2 epoch,test accuracy 0.9869 > 0.95)
 ```
 
-**当前允许做的事:M1 全部工作(建 `csrc/` `lua/` 目录、rockspec、CMakeLists)。**
-**⛔ 尚未开 G2:先做 M1 MVP(MNIST 训练收敛)。**
+**当前允许做的事:M2 全部工作(3.1 dataset+vision / 3.2 Lanes / 3.3 GC 九层 / 3.4 CIFAR 验收)。**
+**⛔ 尚未开 G3:M2 验收(CIFAR + 吞吐 3×)先做。**
 
 ---
 
@@ -24,9 +24,9 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 
 | | |
 |---|---|
-| 阶段 | **M1(已开闸)** —— 先搭 `csrc/` C ABI 中间层 + sol2 绑定 + MNIST 收尾 |
-| 工程树位置 | `WORKPLAN.md` 节点 **2.12 M1 验收:MNIST > 95%**(🔵;2.9 paddle.nn 全段 ✅ + 2.10 optimizer ✅ + **2.11 paddle.io ✅**) |
-| 下一个动作 | **2.11 paddle.io(单 worker)完成(2026-10-26)**:`lua/paddle/io.lua`(723 行)Dataset(Dataset/IterableDataset/TensorDataset/ConcatDataset/Subset/random_split)+ Sampler(Sequence/Random/WeightedRandom/Batch)+ DataLoader + default_collate,全部 argrule 包装。**shuffle RNG = Insight7 choice(用户定案:固定种子与 numpy 2.4.6 逐位一致),播种 = 构造期一次、epoch 间继续流(numpy 全局流语义——每轮 iter 重播会让每 epoch 同序)**。**1-based 全链路(C4)**:Dataset:get/采样器输出/Subset.indices/weights 全 1-based,Insight choice 0-based 值在采样层 +1;`pd_op_randperm` 有 `returns_index={1}`(index_semantics.lua)→ C ABI 层 pd_idx_plus1,random_split 直接可用。**构造互斥前置 _init**(reader.py 同款):IterableDataset+shuffle/sampler/batch_sampler 报错、batch_sampler 组台约束、num_workers>0 报"尚未实现"(P13)。**default_collate**:数字→Tensor(I64/F64 判全整)、Tensor→pd_op_stack 沿新轴 0(**直接调 C ABI axis=0,不经过 _ops/stack.lua 的 1-based→0-based wrapper**)、多返回→pl.List(D27)、map 保键、string 裸表。**random_split**:绝对数/比例(余数轮流分配 dataset.py:334-344)+ seed 走 Insight randperm。**IO_SMOKE PASS(55 断言)**:seed=42 diag 逐位对拍(seq/rand/replace/weighted/batch/drop_last)+ 1-based 迭代 + break 重开 + num_workers>0 报错 + IterableDataset + ConcatDataset/Subset/BatchSampler + TensorDataset 多字段 + REQUIRE/OPTIMIZER 回归 + lint 全绿。**踩坑(实测 4)**:① pl.class `super` 是 call_ctor 临时注入(继承链有 `_init` 才注入,用后即清)——Dataset/Sampler/DataLoader 基类无 `_init`,8 处 `self:super()` 全报 nil → 删(optimizer 能跑是因基类 Optimizer 有 `_init`);② collate 前向引用(collate_sample 引用后定义的 default_collate → 全局 nil,删包装直接自递归);③ **Insight7 本地 Lua 绑定链陈旧**(dll 副本陷阱的 Lua 镜像):`build/bindings/lua/_insight.dll`(10-19)+ `build/backends/cpu/insight_cpu_backend.dll`(10-18)都在 numpy 对齐(10-25/26)前,Python 侧 10-26 新 backend 只 POST_BUILD 到 bindings/python/insight/ → 重配 `-DINSIGHT_BUILD_LUA_BINDING=ON` 重建 `insight_lua` 目标(连带 insight_core+backend)后 choice 对齐恢复;④ smoke 必须 x64 LuaJIT(vcpkg `tools\luajit\luajit.exe`),32 位 lua.exe 加载 x64 paddle_core.dll 报"不是有效的 Win32 应用程序";backend 依赖 fftw3/libopenblas 须 `build\backends\cpu` 在 PATH。**下一步 = 2.12 M1 验收:MNIST > 95%(plan/roadmap.md §1)** |
+| 阶段 | **M2(已开闸,2026-10-27)** —— 3.1 dataset+vision / 3.2 Lanes 多 worker / 3.3 GC 九层 / 3.4 CIFAR 验收 |
+| 工程树位置 | `WORKPLAN.md` 节点 **3. M2 可用**(🔵;2.12 M1 验收 ✅ G2 已开) |
+| 下一个动作 | **2.12 M1 验收通过(2026-10-27)**:`examples/mnist.lua` 跑通,2 epoch,test accuracy **0.9869(9869/10000)> 0.95**(epoch 1 loss 0.1716 / epoch 2 loss 0.0454)。**三个根因全实证修复**:① **生成器 in-place predefined_out 缺口**(emit_capi.lua):yaml `inplace:` 标注 AND 单输出 AND **op 名 `_inplace$` 结尾**(gaussian_inplace/uniform_inplace)才追加 `paddle::make_optional(&x_ip) /* predefined_out */`——不加则内核分配新输出、原参数恒 Constant(0)(loss 钉在 ln10);**asin 等一元算子的 inplace 标注只是内核 buffer 复用,绝不能加**(扩大化会静默改写输入→0xC0000005);② **初始化须 no_grad**(layer.lua):gaussian_inplace 带自身反向节点(ops.yaml:2564),has_grad 下挂进 autograd 图,backward 崩 "TensorWrappers do not exist"(backward.cc:215);③ **显式 GC**:LuaJIT 默认 GC 阈值不回收累积的 LuaTensor shell,C 侧 ~300 batch 堆崩 0xC0000005,每 100 batch `collectgarbage("collect")`(探针 12:938 batch 全跑完)。**数据管线**:`from_host_bytes` sol 绑定(tensor_binding.cc,C ABI pd_tensor_from_host_buffer paddle_c.h:128)整块导入 60000x784。**下一步 = 3. M2:3.1.0 API 设计 + 3.0 前置 Insight7 axis 1-based** |
 | 人点名的三件调研 | **① Q-22** phi 层有没有不依赖 pybind 的 DLPack 通道(决定 Insight7 内存协议怎么定);**② 数出「跑通 MNIST 训练,Insight7 至少要哪些函数」**(从上游代码里数,不凭感觉 —— 已知 `python/paddle` 全层只用 132 个 `np.*` 符号、真函数约 15 个,见 `research/ecosystem.md` §5.1);**③ Q-23** Array API Standard 是否如记忆所述(要走代理核实)。三件都**不阻塞** `WORKPLAN` 主线 |
 | 全部 ⛔ 阻塞节点 | `WORKPLAN.md` 4.3 distributed —— 无多卡环境(待拍板 P2) |
 | 待人拍板 | 剩余待拍板:P3 / P4 / P6 / P7(改写)+ 1.7 的 P9(Penlight 分发)与 luarocks 占位 —— 见 `process/decisions.md` §3 §4 |
@@ -205,18 +205,18 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 | 阶段 | 模块 | 状态 |
 |---|---|---|
 | P0 | 无 Python 构建 | ✅ **已验证通过(2026-10-22)** 编译成功 + `egr::Backward` 冒烟数值与手算一致(见 `process/m0-report.md`)。注:冒烟与手算对拍,Python 端逐位对拍未做(本构建即无 Python;如需可另建 WITH_PYTHON=ON 构建对拍,列为可选) |
-| P1 | C ABI 中间层 | ⬜ 阻塞于 P0 收尾 |
-| P2 | sol2 绑定层 | ⬜ |
-| P3 | 算子代码生成 | ⬜ |
-| P4 | 构建与打包 | ⬜ |
-| P5 | `paddle.Tensor` | ⬜ |
-| P6 | 自动微分与生命周期 | ⬜ |
-| P7 | 序列化 | ⬜ |
-| P8 | `jit::Layer` 推理 ★ | ⬜ |
-| P9 | `paddle.nn` | ⬜ |
-| P10 | `paddle.optimizer` | ⬜ |
-| P11 | `paddle.io`(单 worker) | ⬜ |
-| — | **M1 验收:MNIST** | ⬜ |
+| P1 | C ABI 中间层 | ✅ **已完成(2026-10-24)** 2.1 全段(paddle_c.h/status/tensor/autograd/迷你训练/device/jit),T-M1-05 DONE |
+| P2 | sol2 绑定层 | ✅ **已完成(2026-10-24)** 2.2 全段(module/error/tensor_binding/slice),SOL_SMOKE PASS,T-M1-06/07 DONE |
+| P3 | 算子代码生成 | ✅ **已完成(2026-10-25)** 2.3 全段(yaml_subset/三算子/全量 529 ops/regen-diff CI/emit_sol),coverage 98.0% ≥ 95%,T-M1-08/09 DONE |
+| P4 | 构建与打包 | ✅ **已完成** 2.4(CMakeLists/rockspecs),见 plan/modules/04-packaging.md |
+| P5 | `paddle.Tensor` | ✅ **已完成** 2.5(tensor.lua: METHODS/切片/工厂),TENSOR_SMOKE PASS |
+| P6 | 自动微分与生命周期 | ✅ **已完成(2026-10-25)** 2.6 全段(backward/grad/no_grad/scope/memory_allocated),06-autograd.md §5 七项验收全过,T-M1-10 DONE |
+| P7 | 序列化 | ✅ **已完成(2026-10-25)** 2.7 单张量 save/load(D19),SERIALIZATION_SMOKE PASS,T-M1-15 DONE;state_dict 接线归 M2 |
+| P8 | `jit::Layer` 推理 ★ | ✅ **已完成(2026-10-25)** 2.8 全链路(paddle.jit.load),JIT_SMOKE PASS,Q-24 翻案 + patch 0002,T-M1-17 DONE;残留 Q-25(宿主退出竞态) |
+| P9 | `paddle.nn` | ✅ **已完成(2026-10-26)** 2.9 全段(Layer 基类/Linear/functional 49/层类 40+/容器),NN_* 5 smoke 全绿,T-M1-11/12 DONE |
+| P10 | `paddle.optimizer` | ✅ **已完成(2026-10-26)** 2.10(SGD/Adam,组合基础算子 + 核公式直抄),OPTIMIZER_SMOKE PASS(18 断言),T-M1-13 DONE |
+| P11 | `paddle.io`(单 worker) | ✅ **已完成(2026-10-26)** 2.11(Dataset/Sampler/DataLoader,Insight choice shuffle),IO_SMOKE PASS(55 断言),T-M1-14 DONE |
+| — | **M1 验收:MNIST** | ✅ **已通过(2026-10-27)** `lua examples/mnist.lua` 2 epoch test accuracy **0.9869 > 0.95**,G2 闸门打开,WORKPLAN 蓝点 → 3.M2 |
 | P12 | dataset + vision | ⬜ |
 | P13 | Lanes 多 worker | ⬜ |
 | P14 | GC 九层机制 | ⬜ |
@@ -231,6 +231,7 @@ G2  ⬜ 未开始   M1 验收:MNIST 训练收敛
 
 | 日期 | 变更 |
 |---|---|
+| 2026-10-27 | **✅ G2 闸门通过,M1 验收完成(2.12,蓝点 → 3.M2)** —— `examples/mnist.lua`(验收载体)2 epoch test accuracy **0.9869(9869/10000)> 0.95**(epoch 1 loss 0.1716 / epoch 2 loss 0.0454)。**数据管线**:`from_host_bytes` 新增 sol 绑定(tensor_binding.cc,C ABI `pd_tensor_from_host_buffer` paddle_c.h:128)一次性整块导入 60000x784 UINT8 → cast F32 → scale(2/255,-1,1)(mnist.py:73-75);label 0-9 → +1 得 1-10(C4)。**三个根因全实证修复**:① **生成器 in-place predefined_out 缺口**(emit_capi.lua):yaml `inplace:` 标注 AND 单输出 AND **op 名 `_inplace$` 结尾**(gaussian_inplace/uniform_inplace)才追加 `paddle::make_optional(&x_ip) /* predefined_out */`——不加则内核分配新输出、原参数恒 Constant(0)(loss 钉在 ln10,探针 8);**asin 等一元算子的 inplace 标注只是内核 buffer 复用,绝不能加**(扩大化会静默改写输入→0xC0000005,探针);② **初始化须 no_grad**(layer.lua):gaussian_inplace 带自身反向节点(ops.yaml:2564 backward: gaussian_inplace_grad),has_grad 下挂进 autograd 图,backward 崩 "TensorWrappers do not exist"(backward.cc:215,探针 9→探针 10 loss 下降实证);③ **显式 GC**:LuaJIT 默认 GC 阈值不回收逐 batch 累积的 LuaTensor shell → C 侧 ~300 batch 堆崩 0xC0000005(探针 11),每 100 batch `collectgarbage("collect")` 后 938 batch 全跑完(探针 12)。**遗留(不阻塞)**:smoke_capi EXE 目标 LNK2001(test_c_only.c 无 main,全量构建时处理);nn.initializer 未落地(MNIST 用用户侧显式 gaussian 初始化,文件头注释)。**下一步 = 3. M2:3.1.0 API 设计 + 3.0 前置 Insight7 axis 1-based** |
 | 2026-10-26 | **2.11 paddle.io(单 worker)完成(蓝点 → 2.12)** —— `lua/paddle/io.lua`(723 行)Dataset(Dataset/IterableDataset/TensorDataset/ConcatDataset/Subset/random_split)+ Sampler(Sequence/Random/WeightedRandom/Batch)+ DataLoader + default_collate,全部 argrule 包装。**shuffle RNG = Insight7 choice(用户定案:固定种子与 numpy 2.4.6 逐位一致),播种 = 构造期一次、epoch 间继续流(numpy 全局流语义)**。**1-based 全链路(C4)**:Dataset:get/采样器输出/Subset.indices/weights 全 1-based,Insight choice 0-based 值在采样层 +1;`pd_op_randperm` 有 `returns_index={1}` → C ABI 层 pd_idx_plus1,random_split 直接可用。**构造互斥前置 _init**(reader.py 同款);**default_collate**:数字→Tensor、Tensor→pd_op_stack 沿新轴 0(**直接调 C ABI axis=0,不经过 _ops/stack.lua wrapper**)、多返回→pl.List、map 保键、string 裸表。**IO_SMOKE PASS(55 断言)**:seed=42 diag 逐位对拍(seq/rand/replace/weighted/batch/drop_last)+ 1-based 迭代 + break 重开 + num_workers>0 报错 + IterableDataset + ConcatDataset/Subset/BatchSampler + REQUIRE/OPTIMIZER 回归 + lint 全绿。**踩坑(实测 4)**:① pl.class `super` 是 call_ctor 临时注入(继承链有 `_init` 才注入,用后即清)——Dataset/Sampler/DataLoader 基类无 `_init`,8 处 `self:super()` 全报 nil → 删;② collate 前向引用(collate_sample 引用后定义的 default_collate → 全局 nil,删包装直接自递归);③ **Insight7 本地 Lua 绑定链陈旧**(dll 副本陷阱的 Lua 镜像):`build/bindings/lua/_insight.dll`(10-19)+ `build/backends/cpu/insight_cpu_backend.dll`(10-18)都在 numpy 对齐前,Python 侧 10-26 新 backend 只 POST_BUILD 到 bindings/python/insight/ → 重配 `-DINSIGHT_BUILD_LUA_BINDING=ON` 重建 `insight_lua` 目标后 choice 对齐恢复;④ smoke 必须 x64 LuaJIT(32 位 lua.exe 加载 x64 paddle_core.dll 报 Win32 错误),backend 依赖 fftw3/libopenblas 须 `build\backends\cpu` 在 PATH。**下一步 = 2.12 M1 验收:MNIST > 95%** |
 | 2026-10-26 | **2.10 paddle.optimizer(SGD/Adam 首批)完成(蓝点 → 2.11)** —— `lua/paddle/optimizer.lua` Optimizer 基类 + SGD + Adam 全部 argrule 包装。**M1 无融合算子(10-optimizer.md §2 前提改写)**:`sgd_`/`adam_` 全是被 skip 的 in-place 变体(skip_rules.lua:45)→ **组合基础算子 + 核公式直抄**(SGD `param -= lr*grad` cpu/sgd_kernel.cc:39;Adam adam_functors.h:325-345:lr_eff 含 bias correction、mom1/mom2 递推、denom=√m2+ε·√(1-b2p);βN_pow **初始=βN**(adam.py:311-335,非 1)且每步 `*=βN` cpu/adam_kernel.cc:118-119)。**新增 C ABI 原语 `pd_tensor_copy_from`**(paddle_c.h Group 3 + tensor.cc,内部 `Tensor::copy_` tensor.h:510,深拷贝进参数本体、保持 autograd meta/leaf 身份——Python `_C_ops.sgd_/adam_` ParamOut in-place 语义)+ sol 绑定 `t:copy_from(src)`。**step 包 no_grad**(optimizer.py:2060 的 `@no_grad`,组合算子不得在 leaf 上建图,pcall 恢复)。**clear_grad 置零**(grad shell 共享 autograd 存储 autograd.cc:167,copy_from(zeros_like) 写本体,eager_method.cc:1066 set_to_zero=true 语义)。**OPTIMIZER_SMOKE PASS(18 断言)**:SGD/Adam 一步手算定值(含 β_pow 初值 0.9/0.999、第二步 bias correction 推进)、weight_decay 耦合 L2、clear_grad 后 grad=0、参数写回保身份、5 步 Linear+MSELoss+Adam loss 下降 + 8 smoke 回归全绿(NN_CONTAINERS 43/NN_LAYERS 87/NN_FUNCTIONAL 107/NN_LINEAR/NN_LAYER/OPS/AUTOGRAD/TENSOR)+ lint 全绿。**踩坑(实测 3)**:① pl.class 必须 `class()` 而非 `class("Optimizer")`(字符串名报 "must derive from a table type");② `parameters:len()` 只对 pl.List 存在,普通 Lua 数组报 nil → 谓词与镜像循环统一用 `#v`;③ smoke 第二步 backward 会累积梯度(autograd_smoke 同款语义),复算前必须先 clear_grad。**剩余(随 2.10 后续)**:Momentum/AdamW、lr 调度器、参数组、grad_clip、state_dict 接线、set_to_zero=false。**下一步 = 2.11 paddle.io(单 worker)** |
 | 2026-10-26 | **2.9.5 容器完成(蓝点 → 2.10)** —— `lua/paddle/nn/containers.lua` 三个容器全继承 Layer(D27,is_a(nn.Layer) 为真,state_dict/parameters/train 递归零特例)。**构造 = argrule parse_whole_first 变长形态**(规则表仅 `{ name="self", type=argrule.table }`,回调收 whole,whole[1]=实例、whole[2..]=子层;`Sequential{ l1, l2 }` / 命名对 `Sequential{ {"fc1", l1}, ... }` / `LayerDict{ {"conv1", l1}, ... }`)。**方法层 1-based↔0-based 转换(D-R15 双基准)**:用户下标 ml[i] 1-based(按 order 书序取第 k 个,负数从尾数),state_dict 键名 0-based 字符串("0.weight")。LayerList append/insert/extend,Sequential forward 依序 + append/insert/extend,LayerDict update/keys/values/iter。**NN_CONTAINERS_SMOKE → 43 断言**(镜像 test_layerlist.py 空表 insert 边界 + test_imperative_container_layerlist.py 的 append/insert(-1)/extend/forward shape + LayerDict 行为 + state_dict 键名 + is_a + #ml==0)+ nn 全家 5 smoke 回归全绿 + ops/autograd/tensor 回归全绿 + lint 全绿。**踩坑(3 个 argrule 形态陷阱,全实测)**:① 空构造走 parse_position_table 直接收 **self 实例**(带子层才走 parse_whole_first 收 whole 表),回调须 `rawget(whole, FIELDS)` 区分;② 方法规则表第一规则不能叫 "self"(parse_self_call 对裸表第二参数做构造展开 → extend({l1,l2}) 被拆成 3 位置参数报错),改 `{ name="container", type=Layer }`;③ insert 直接操作 sublayers 槽绕过 __newindex 时,搬移新键 "n" 必须手动补进 order 书。FIELDS 键经 layer.lua:602 模块表导出,不在 Layer 类表上(须 `layer_module.FIELDS`)。**下一步 = 2.10 paddle.optimizer(SGD/Adam)** |

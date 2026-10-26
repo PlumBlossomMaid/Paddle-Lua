@@ -46,6 +46,30 @@ void push_tensor_factory(sol::table& mod) {
         pd_place_free(cpu);
         return LuaTensor(t);
       });
+
+  /* 2.12 MNIST 数据管线:一次性把 Lua 字节串(host 端原始布局)造进
+   * Tensor。60000x784 的数据逐算子填充不可行,必须整块导入。
+   * 上游对照:paddle/phi/api/include/api.h:384 paddle::experimental::
+   * empty(shape, dtype, place) + memcpy(字节由 shape*dtype 隐含,
+   * tensor.cc:198 处 nbytes 被忽略)。C ABI 入口 pd_tensor_from_host_buffer
+   * (paddle_c.h:128),这里只是 sol 薄绑定。
+   * 参数纪律:place 用 const LuaPlace&(与全部 pd_op_* lambda 一致,
+   * sol2 不接受按值 move-only —— enums_place.cc 删了拷贝构造);
+   * data 用 std::string(Lua 字符串可含 \0,不能用 const char* 裸收)。 */
+  mod.set_function(
+      "from_host_bytes",
+      [](const std::string& data, sol::table dims, int dtype,
+         const LuaPlace& place) -> LuaTensor {
+        std::vector<int64_t> shape;
+        for (auto& kv : dims) {
+          shape.push_back(kv.second.as<int64_t>());
+        }
+        pd_tensor t = pd_tensor_from_host_buffer(
+            place.h, shape.data(), static_cast<int>(shape.size()),
+            dtype, data.data(), data.size());
+        pd::check();
+        return LuaTensor(t);
+      });
 }
 
 /* ---- 2.6 module-level autograd entries (paddle.autograd.* backend) --

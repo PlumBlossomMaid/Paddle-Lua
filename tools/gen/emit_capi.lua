@@ -238,6 +238,9 @@ local function signature(ir)
   local params, callargs, preludes = {}, {}, {}
   local opt = optional_set(ir)
   local takes = takes_index_set(ir)
+  local ip_name = nil   -- in-place target input (yaml `inplace:`), set in the
+                        -- plain-Tensor branch; drives the trailing
+                        -- predefined_out call argument below
   local function add_abi(abi, name)
     for _, decl in ipairs(abi.params or {}) do
       params[#params + 1] = string.gsub(decl, "<name>", name)
@@ -286,6 +289,40 @@ local function signature(ir)
             .. "reinterpret_cast<pd_tensor_t*>(<name>)->value) : paddle::none"
             .. " /* Tensor? */" },
         }, name)
+      elseif ir.inplace and ir.inplace[in_.name] ~= nil
+             and #(ir.returns or {}) == 1
+             and string.find(ir.op, "_inplace$") ~= nil then
+        -- in-place target, SINGLE-output, and the op NAME ends in
+        -- "_inplace" (gaussian_inplace / uniform_inplace). These are the
+        -- TRUE API-level in-place variants: the phi kernel writes into the
+        -- caller's tensor ONLY when the ad_func's trailing
+        -- `paddle::optional<paddle::Tensor*> predefined_out` is passed
+        -- (upstream pybind eager_op_function.cc:23169 passes it;
+        -- api.cc:27526 `predefined_out ? **predefined_out : out_tmp` picks
+        -- the write-back target). Without it the op silently allocates a
+        -- fresh output and the input param stays Constant(0) -- caught by
+        -- 2.12 MNIST (loss pinned at ln(10), zero gradients).
+        -- CRITICAL SCOPE GUARD: MANY ordinary unary ops (asin / asinh /
+        -- abs / ceil ...) ALSO carry a yaml `inplace: (x -> out)` marker,
+        -- but that is only a KERNEL-LEVEL buffer-reuse optimization -- the
+        -- Python API (paddle.asin(x)) stays a pure function and the pybind
+        -- layer resolves predefined_out from kwargs (none by default). Only
+        -- ops NAMED "*_inplace" are in-place in the API sense; extending
+        -- predefined_out to the unary set silently mutates their inputs
+        -- (0xC0000005 during MNIST training, 2026-10-27). Bind a reference
+        -- so we can hand its address back as predefined_out.
+        -- Multi-output in-place ops (dropout: out+mask) take
+        -- optional<std::tuple<...>> predefined_out -- NOT handled here;
+        -- they stay on the plain path below (fresh output, still correct).
+        add_abi({
+          params = { "pd_tensor <name>" },
+          prelude = {
+            "  paddle::Tensor& <name>_ip = "
+              .. "reinterpret_cast<pd_tensor_t*>(<name>)->value;",
+          },
+          call = { "<name>_ip /* Tensor (in-place) */" },
+        }, name)
+        ip_name = name
       else
         add_abi({
           params = { "pd_tensor <name>" },
@@ -370,6 +407,13 @@ local function signature(ir)
       local e = string.gsub(c, "<name>", name)
       callargs[#callargs + 1] = e
     end
+  end
+  if ip_name then
+    -- in-place: hand the input tensor's address back as predefined_out so
+    -- the kernel writes into the CALLER's storage (api.cc:27526 pattern).
+    callargs[#callargs + 1] =
+      "paddle::make_optional(&" .. ip_name
+        .. "_ip) /* predefined_out: in-place write-back */"
   end
   return table.concat(params, ", "), table.concat(callargs, ", "),
          table.concat(preludes, "\n")

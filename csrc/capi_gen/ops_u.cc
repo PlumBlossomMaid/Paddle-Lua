@@ -59,8 +59,9 @@ pd_tensor pd_op_uniform(const int64_t* shape, int64_t shape_n, pd_dtype dtype, d
 /* uniform_inplace (yaml block line 5840) */
 pd_tensor pd_op_uniform_inplace(pd_tensor x, float min, float max, int seed, int diag_num, int diag_step, float diag_val) {
   PD_GUARD_BEGIN;
+  paddle::Tensor& x_ip = reinterpret_cast<pd_tensor_t*>(x)->value;
   paddle::Tensor out = uniform_inplace_ad_func(
-      reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, min /* float */, max /* float */, seed /* int */, diag_num /* int */, diag_step /* int */, diag_val /* float */);
+      x_ip /* Tensor (in-place) */, min /* float */, max /* float */, seed /* int */, diag_num /* int */, diag_step /* int */, diag_val /* float */, paddle::make_optional(&x_ip) /* predefined_out: in-place write-back */);
   return reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
   PD_GUARD_END(nullptr);

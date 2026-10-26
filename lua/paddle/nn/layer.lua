@@ -593,7 +593,19 @@ Layer.create_parameter = rule {
   local v = paddle_core.pd_op_full(shape, 0.0, dtype, CPU_PLACE_CACHE)
   v:set_stop_gradient(false)
   if default_initializer ~= nil then
-    default_initializer(v)
+    -- 初始化在 no_grad 下跑(gaussian_inplace 等 in-place 初始化算子带
+    -- 自己的反向节点,如 gaussian_inplace_grad —— yaml ops.yaml:2564
+    -- `backward: gaussian_inplace_grad`)。has_grad 下执行会把节点挂进
+    -- autograd 图,训练时再次 backward 到同一参数即崩(FatalError:
+    -- "TensorWrappers of GaussianInplaceGradNode do not exist",
+    -- backward.cc:215,2026-10-27 MNIST 验收实证)。上游 Python 的
+    -- initializer 同样不建图。与 optimizer.step 的 pcall 恢复同款
+    -- (10-optimizer.md sec.4)。
+    local old = paddle_core.has_grad()
+    paddle_core.set_has_grad(false)
+    local ok, err = pcall(default_initializer, v)
+    paddle_core.set_has_grad(old)
+    if not ok then error(err, 0) end
   end
   PARAMETER_REGISTRY[v] = true
   return v
