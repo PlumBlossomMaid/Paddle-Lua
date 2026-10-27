@@ -392,7 +392,23 @@ paddle.to_insight(t)       -- 同上
 > 成员索引和维度索引都要 1-base。」**
 > 本节从「⚠️ 阻塞项,待拍板」改为「已定方向,待实施」。待拍板 P1 关闭,Q-12 转为已决。
 
-#### 现状:一半做了,一半漏了
+#### ✅ 2026-10-27 已实施完成
+
+> **本节写于 2026-08-03,下方「现状」表当时属实;2026-10-27 开工前重新核实,
+> 发现代码早已部分演进(见下),按 §4.4「文档与源码冲突→信源码,并修文档」更新。**
+> 实施落点 = **Insight7 仓库 commit 647af07**(paddle-lua 侧文档落账同步)。
+
+| 项 | 核实结果(2026-10-27) | 处理 |
+|---|---|---|
+| 成员索引 / 切片(`a[1]`、`a["1:3, :"]`) | ✅ 本就 1-based(`insight_lua.cpp:212-266` `lua_spec_to_cpp`) | 无改动,保持 |
+| 维度索引 / `axis` **reduction/manipulation/fft/argsort/sort/topk/slice 全族** | ✅ **早已 1-based** —— native 层 `lua_axis_to_cpp`(`insight_lua.cpp:408`)统一做 Lua 1-based → C++ 0-based 转换,reduction.lua/signal 系全部经它 | 无改动,保持 |
+| **gather/scatter/scatter_add/scatter_reduce** | ❌ 旧 0-based —— Lua 层 `dim_to_lua`(indexing.lua:17 **+1**)与 native `lua_axis_to_cpp`(**-1**)互相抵消 → 净 0-based | 修(indexing.lua 删 Lua 侧移位,直通 native;647af07) |
+| **take** | ❌ 旧 0-based —— native 直绑 `&ins::take` 绕过转换(`ins::take` 内部 `normalize_axis` 收 0-based) | 修(`lua_optional_axis_to_cpp` 包一层;647af07) |
+| **gradient** | ❌ 旧 0-based —— `insight_lua.cpp:1487` `axis.value()` 未转换 | 修(`lua_axis_to_cpp` 包一层;647af07) |
+
+**验收实测(harness 39 断言全绿)**:`ins.sum(a,1)` 对 `[1,2,3;4,5,6]` → `[5,7,9]`(第 1 维,与 Julia `sum(a,dims=1)` 一致);`axis=0` 报错;负数轴 `-1` 保持(从末尾数);`gather(a,1,idx)` 值序证明 `dim=1` = axis 0。**P12 transforms 前置条件已满足。**
+
+#### 现状:一半做了,一半漏了(2026-08-03 原稿,已被上表替代)
 
 | | 现在 | 目标 |
 |---|---|---|

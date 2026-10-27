@@ -170,8 +170,8 @@
  |
  +-- [🔵] 3. M2 可用                         前置:2 ✅ G2 已开(2026-10-27)
  |    +-- [⬜] 3.1 dataset + vision          -> plan/modules/12-dataset-vision.md
- |    |    +-- [⬜] 3.1.0 API 设计               -> plan/api/{dataset,vision}.md
- |    |    +-- [⬜] 3.0 前置:Insight7 axis 改 1-based  ★ 跨仓库,见 foundations §3.4
+ |    |    +-- [✅] 3.1.0 API 设计               -> plan/api/{dataset,vision}.md  ★已完成(2026-10-23)
+ |    |    +-- [✅] 3.0 前置:Insight7 axis 改 1-based  ★ 跨仓库,见 foundations §3.4  ★ 2026-10-27 已完成(insight7 647af07):**核实发现 native 层早已统一转换**(`lua_axis_to_cpp` insight_lua.cpp:408,reduction/manipulation/fft/argsort/sort/topk/slice 用户侧已 1-based),foundations §3.4 现状表已过时;实际漏网 3 处已全修:**① gather/scatter/scatter_add/scatter_reduce**(indexing.lua `dim_to_lua` +1 与 native -1 互相抵消 → 净 0-based,删 Lua 侧移位直通 native);**② take**(native 直绑 `&ins::take` 绕过转换 → 包 `lua_optional_axis_to_cpp`);**③ gradient**(`axis.value()` 未转换 → 包 `lua_axis_to_cpp`)。测试补固 39 断言:sum(a,1)=[5,7,9]、axis=0 报错、负数轴 -1 保持、gather 值序证明 dim=1=axis 0。**下一步 = 3.1 dataset+vision 本体(Q-08 已查:Paddle 无现成 HTTP 客户端可绑,走 §9.1 决策②)**,详见 status.md |
  |    +-- [⬜] 3.2 Lanes 多 worker           -> plan/modules/13-lanes.md
  |    +-- [⬜] 3.3 GC 九层机制               -> plan/modules/14-gc.md
  |    +-- [⬜] 3.4 M2 验收:CIFAR + 吞吐 3×  -> plan/roadmap.md §1
