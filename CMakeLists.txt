@@ -82,6 +82,20 @@ if(MSVC)
   target_compile_options(paddle_capi PRIVATE /bigobj /W0)
 endif()
 
+# ---- zlib for pd_gzip_inflate (M2 3.1.2, 12-dataset-vision.md sec.4.2)
+# Paddle ships no bindable inflate; its build tree bundles zlib
+# (third_party/install/zlib). Link static -- no runtime DLL dependency.
+set(ZLIB_INCLUDE_DIR
+  "${LibPaddle_BUILD_DIR}/third_party/install/zlib/include")
+set(ZLIB_STATIC_LIB
+  "${LibPaddle_BUILD_DIR}/third_party/install/zlib/lib/zlibstatic.lib")
+if(EXISTS "${ZLIB_STATIC_LIB}")
+  target_include_directories(paddle_capi SYSTEM PUBLIC "${ZLIB_INCLUDE_DIR}")
+  # PUBLIC so it propagates to paddle_core (gzip.o lives in paddle_capi
+  # static lib; symbols must resolve in the final MODULE link).
+  target_link_libraries(paddle_capi PUBLIC "${ZLIB_STATIC_LIB}")
+endif()
+
 # ---- paddle_core: sol2 binding, one per Lua version ------------------
 add_library(paddle_core MODULE ${_sol_srcs})
 target_include_directories(paddle_core PUBLIC

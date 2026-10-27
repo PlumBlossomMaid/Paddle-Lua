@@ -300,6 +300,21 @@ pd_status  pd_tensor_save(const pd_tensor t, const char* path, int overwrite);
  * Source: paddle/fluid/framework/io/save_load_tensor.h:24. */
 pd_status  pd_tensor_load(const char* path, pd_tensor* out);
 
+/* ------------------------------------------------------------------ */
+/* Group 8: gzip decompression (1 fn, 12-dataset-vision.md sec.4.2)   */
+/* ------------------------------------------------------------------ */
+
+/* Decompress a gzip stream in memory. Two-pass protocol (mirrors
+ * pd_jit_layer_function_names):
+ *   pass 1: out=NULL, cap=0 -> *out_len = required byte count
+ *   pass 2: out=buffer, cap>=*out_len -> decompressed bytes written
+ * Paddle ships no bindable inflate (grepped paddle/ for gzopen/inflate
+ * Init/uncompress: zero hits), so this links zlib (zlib.h:1113-1116
+ * inflateInit2 windowBits 15+16 auto-detect gzip). Used by
+ * paddle.vision.datasets.MNIST to read the .gz IDX files. */
+pd_status  pd_gzip_inflate(const unsigned char* src, size_t src_len,
+                           unsigned char* out, size_t cap, size_t* out_len);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif

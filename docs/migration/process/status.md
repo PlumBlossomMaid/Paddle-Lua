@@ -26,7 +26,7 @@ G2  ✅ 已通过(2026-10-27)  M1 验收:MNIST 训练收敛(lua examples/mnist.l
 |---|---|
 | 阶段 | **M2(已开闸,2026-10-27)** —— 3.1 dataset+vision / 3.2 Lanes 多 worker / 3.3 GC 九层 / 3.4 CIFAR 验收 |
 | 工程树位置 | `WORKPLAN.md` 节点 **3. M2 可用**(🔵;2.12 M1 验收 ✅ G2 已开) |
-| 下一个动作 | **3.1.1 下载底座完成(2026-10-27,WORKPLAN 3.1.1 ✅)**:x64 版 luasocket 3.1.0 + luasec 1.3.2 编译部署(openssl 3.6.2 经 vcpkg,手动 curl 走代理入缓存突破 error56)+ `paddle.utils.download{url,path,md5}` + 纯 Lua MD5,**UTILS_DOWNLOAD_SMOKE PASS(8 断言)**。**下一步 = 3.1.2 MNIST dataset 适配**(URL/MD5 已核 mnist.py:33-37;从 io.Dataset 形态走,reader 生成器不搬,见 status.md 3.0 前置段的 4 个收获) |
+| 下一个动作 | **3.1.3 transforms(ToTensor/Resize/Normalize,Insight 层)+ FashionMNIST 顺手**(2026-10-28:3.1.2 MNIST dataset ✅,WORKPLAN 3.1.2)——`pd_gzip_inflate`(C ABI Group 8 链 zlibstatic)+ `paddle.vision.datasets.MNIST`(argrule,io.Dataset,insight.Array 图像 + 1-based label),**VISION_MNIST_SMOKE PASS(20 断言)**。下一步按 vision.md §2.2/§6③:transforms 大部分在 Insight 层做,ToTensor 是 Insight→Tensor 边界 |
 | 人点名的三件调研 | **① Q-22** phi 层有没有不依赖 pybind 的 DLPack 通道(决定 Insight7 内存协议怎么定);**② 数出「跑通 MNIST 训练,Insight7 至少要哪些函数」**(从上游代码里数,不凭感觉 —— 已知 `python/paddle` 全层只用 132 个 `np.*` 符号、真函数约 15 个,见 `research/ecosystem.md` §5.1);**③ Q-23** Array API Standard 是否如记忆所述(要走代理核实)。三件都**不阻塞** `WORKPLAN` 主线 |
 | 全部 ⛔ 阻塞节点 | `WORKPLAN.md` 4.3 distributed —— 无多卡环境(待拍板 P2) |
 | 待人拍板 | 剩余待拍板:P3 / P4 / P6 / P7(改写)+ 1.7 的 P9(Penlight 分发)与 luarocks 占位 —— 见 `process/decisions.md` §3 §4 |

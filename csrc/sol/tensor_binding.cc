@@ -323,6 +323,27 @@ void register_tensor(lua_State* L, int module_index) {
   register_slice(mod);          // slice.cc: core.slice_spec (D14 string transform)
   register_autograd_fns(mod);   // 2.6: core.backward/grad/has_grad/set_has_grad
   register_serialize_fns(mod);  // 2.7: core.save_tensor/load_tensor (Group 7)
+
+  /* 3.1.2: core.gzip_inflate(str) -> str -- in-memory gzip decompress
+   * (paddle_c.h Group 8). Two-pass: query size, then decompress into a
+   * fresh buffer. Feeds paddle.vision.datasets.MNIST's .gz IDX files. */
+  mod.set_function(
+      "gzip_inflate",
+      [](sol::string_view src) -> std::string {
+        size_t need = 0;
+        pd_status st = pd_gzip_inflate(
+            reinterpret_cast<const unsigned char*>(src.data()), src.size(),
+            nullptr, 0, &need);
+        pd::check();
+        std::string out(need, '\0');
+        if (need > 0) {
+          st = pd_gzip_inflate(
+              reinterpret_cast<const unsigned char*>(src.data()), src.size(),
+              reinterpret_cast<unsigned char*>(&out[0]), need, &need);
+          pd::check();
+        }
+        return out;
+      });
 }
 
 }  // namespace pd

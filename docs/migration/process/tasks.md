@@ -154,3 +154,4 @@ egr::Backward({y}, {}, false);
 | T-M0-19 | 2026-10-23 | 0.5d | `SaveTensor`/`LoadTensor` 往返无损、重存字节一致;详见 `m0-report.md` §20 |
 | T-M1-20 | 2026-10-27 | 2d | `examples/mnist.lua` 2 epoch test accuracy **0.9869 > 0.95**,G2 闸门打开。三根因:生成器 predefined_out / 初始化 no_grad / 显式 GC |
 | T-M2-01 | 2026-10-27 | 1d | **3.1.1 下载底座完成**:x64 版 luasocket 3.1.0 + luasec 1.3.2 编译部署(openssl 3.6.2 via vcpkg)+ `paddle.utils.download{url,path,md5}`(argrule)+ 纯 Lua MD5,UTILS_DOWNLOAD_SMOKE PASS(8 断言:真实 HTTPS 下载 MNIST + MD5 + 缓存命中 + 篡改重下 + 404)。详见 WORKPLAN 3.1.1 |
+| T-M2-02 | 2026-10-28 | 1d | **3.1.2 MNIST dataset**:C ABI 加 `pd_gzip_inflate`(Group 8,链 Paddle 自带 zlibstatic,两遍协议)+ sol 绑定 `core.gzip_inflate`;Lua 侧 `paddle.vision.datasets.MNIST`(argrule,io.Dataset,insight.Array 图像 D26 + label 1-based C4),VISION_MNIST_SMOKE PASS(20 断言:len/逐字节对拍/max label 镜像 mnist_test.py)。详见 WORKPLAN 3.1.2 |
