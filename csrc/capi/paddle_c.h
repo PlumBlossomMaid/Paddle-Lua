@@ -335,6 +335,32 @@ pd_status  pd_image_resize(const unsigned char* src, size_t src_len,
                            unsigned char* out, size_t dst_cap,
                            size_t* dst_len);
 
+/* ------------------------------------------------------------------ */
+/* Group 10: cross-lane tensor registry (3 fns, 13-lanes.md sec.4.1)  */
+/* ------------------------------------------------------------------ */
+
+/* Locked process-wide registry holding paddle::Tensor by ID. This is the
+ * P13 handle-table fallback: Lanes cannot deep-copy a sol2 usertype
+ * (its metatable holds C functions registered under sol2-internal names
+ * like `_R/7/place_kind_index`, which Lanes' transfer database does not
+ * know; verified 2026-10-28, Q-02 closed). Instead the worker lane puts
+ * its batch tensors here, sends only the integer id through the Linda,
+ * and the main lane takes them back -- zero data copy (shared_ptr refcount
+ * +1), exactly the "只传一个整数" design of 13-lanes.md sec.4.1. */
+
+/* Insert a copy (shared_ptr +1) of the tensor; returns a unique positive
+ * id. Thread-safe; ids never reused within a process lifetime. */
+int64_t    pd_tensor_registry_put(const pd_tensor t);
+
+/* Remove id from the registry and return a NEW owning shell sharing the
+ * same storage (caller frees it). Returns NULL and sets the error slot if
+ * the id is absent. */
+pd_tensor  pd_tensor_registry_take(int64_t id);
+
+/* Drop every entry (worker teardown: unread tensors are deliberately
+ * discarded). No-op on an empty registry. */
+void       pd_tensor_registry_clear(void);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif

@@ -175,12 +175,12 @@ check(n2 == 1, "reopen: batch no restarts at 1")
 check(b2 ~= nil and (b2:numel() == 4), "reopen: first batch is a valid size-4 batch")
 
 -- ---------------------------------------------------------------------
--- 5. num_workers>0 报"尚未实现"而非静默降级
+-- 5. num_workers>0 且 dataset 是实例 -> 报错(需工厂函数,不静默降级)
 -- ---------------------------------------------------------------------
 local okn = pcall(function()
   io.DataLoader{ dataset = ds10, batch_size = 4, num_workers = 4 }
 end)
-check(not okn, "num_workers=4 must raise (not implemented, P13)")
+check(not okn, "num_workers=4 with a Dataset instance must raise (factory required)")
 
 -- ---------------------------------------------------------------------
 -- 6. IterableDataset 路径

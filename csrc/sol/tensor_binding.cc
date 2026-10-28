@@ -371,6 +371,41 @@ void register_tensor(lua_State* L, int module_index) {
         out.resize(written);
         return out;
       });
+  /* 3.2 (P13, 13-lanes.md sec.4.1): cross-lane tensor registry
+   * (core.tensor_registry_put/take/clear). Sol2 usertypes cannot cross a
+   * Lanes boundary (metatable C functions not in Lanes' transfer
+   * database), so DataLoader workers exchange only integer ids; tensors
+   * travel through this process-wide registry -- zero data copy. */
+  register_tensor_registry(mod);
+}
+
+/* 3.2: core.tensor_registry_put(t) -> id / take(id) -> t / clear().
+ * Cross-lane tensor exchange for the Lanes DataLoader (13-lanes.md
+ * sec.4.1 handle-table fallback). Lanes cannot deep-copy a sol2 usertype
+ * (its metatable holds C functions under sol2-internal registry names;
+ * verified FAILED 2026-10-28 with "function '_R/7/place_kind_index' not
+ * found in main origin transfer database"), so only integer ids cross the
+ * lane; tensors travel through the process-wide registry (zero data copy,
+ * shared_ptr refcount +1). */
+void register_tensor_registry(sol::table& mod) {
+  mod.set_function(
+      "tensor_registry_put",
+      [](const LuaTensor& t) -> int64_t {
+        int64_t id = pd_tensor_registry_put(t.h);
+        pd::check();
+        return id;
+      });
+  mod.set_function(
+      "tensor_registry_take",
+      [](int64_t id) -> LuaTensor {
+        pd_tensor h = pd_tensor_registry_take(id);
+        pd::check();
+        return LuaTensor(h);  // owns h; GC frees it
+      });
+  mod.set_function("tensor_registry_clear", []() {
+    pd_tensor_registry_clear();
+    return 0;
+  });
 }
 
 }  // namespace pd

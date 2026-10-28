@@ -95,6 +95,14 @@ void register_ops(lua_State* L, int module_index);
  * (jit_binding.cc, 2.8). Runs after register_ops. */
 void register_jit(lua_State* L, int module_index);
 
+/* Register the cross-lane tensor registry (core.tensor_registry_put /
+ * take / clear, tensor_binding.cc, 3.2). Handle-table fallback of
+ * 13-lanes.md sec.4.1: Lanes cannot deep-copy a sol2 usertype (its
+ * metatable holds C functions under sol2-internal registry names), so
+ * DataLoader workers exchange only integer ids and tensors travel
+ * through this process-wide registry (zero data copy). */
+void register_tensor_registry(sol::table& mod);
+
 }  // namespace pd
 
 #endif  // PADDLE_LUA_SOL_COMMON_H

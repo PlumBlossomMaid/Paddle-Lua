@@ -26,6 +26,22 @@ local rule = require "argrule.rule"
 local paddle_core = require "paddle_core"
 local unpack = table.unpack or unpack
 
+-- Lanes (P13 multi-worker; D8 hard dependency). Loaded lazily so that
+-- single-worker users never pay the price of starting lanes.core, but the
+-- error is actionable (rockspec declares lanes >= 3.16, C6).
+local LANES
+local function lanes()
+  if LANES == nil then
+    local ok, m = pcall(require, "lanes")
+    if not ok then
+      error("paddle.io: num_workers>0 needs Lua Lanes (C6; "
+            .. "luarocks install lanes)", 3)
+    end
+    LANES = m
+  end
+  return LANES
+end
+
 -- Shared LuaTensor metatable probe (same pattern as nn/functional.lua).
 local probe = paddle_core.tensor{1}
 local TENSOR_MT = getmetatable(probe)
@@ -102,6 +118,26 @@ end
 function Dataset:get(i)
   error(("'%s' not implement in class %s (must override :get)"
     ):format("get", self._name or "Dataset"), 2)
+end
+
+-- 多 worker(P13)工厂形态下的 len-only 占位数据集:工厂函数无法在主
+-- lane 获得真实 Dataset 实例去计算 len(实例在 worker 里才构造),但
+-- 采样器(SequenceSampler/RandomSampler)只需要 len() 来生成索引序列
+-- —— 它们从不调 get()。用户通过 DataLoader 的 dataset_len 提供长度,
+-- 与单 worker 的 sampler 行为逐位一致(api/io.md §6 坑②)。
+local LenOnlyDS = class(Dataset)
+LenOnlyDS._name = "LenOnlyDS"
+
+function LenOnlyDS:_init(n)
+  self._len = n
+end
+
+function LenOnlyDS:len()
+  return self._len
+end
+
+function LenOnlyDS:get(i)
+  error("LenOnlyDS:get should never be called (P13 placeholder)", 2)
 end
 
 local IterableDataset = class(Dataset)
@@ -581,7 +617,8 @@ DataLoader._name = "DataLoader"
 --   num_workers > 0 -> "尚未实现" (api/io.md §7, P13)
 DataLoader._init = rule {
   { name = "self", type = argrule.table, doc = "pl.class instance (auto)" },
-  { name = "dataset", type = Dataset, doc = "Dataset or IterableDataset" },
+  { name = "dataset", type = argrule.Union{ Dataset, argrule.func },
+    doc = "Dataset instance (num_workers=0) or pure factory fn (P13)" },
   { name = "batch_size", type = argrule.number, opt = true, default = 1,
     doc = "samples per batch" },
   { name = "shuffle", type = argrule.boolean, opt = true, default = false,
@@ -589,7 +626,11 @@ DataLoader._init = rule {
   { name = "drop_last", type = argrule.boolean, opt = true, default = false,
     doc = "drop the last incomplete batch" },
   { name = "num_workers", type = argrule.number, opt = true, default = 0,
-    doc = "P11 只支持 0;>0 报尚未实现" },
+    doc = "0 = single worker; >0 = Lanes worker pool (P13)" },
+  { name = "config", type = argrule.table, opt = true, default = nil,
+    doc = "pure-data config passed to the dataset factory (multi-worker)" },
+  { name = "dataset_len", type = argrule.number, opt = true, default = nil,
+    doc = "sample count for factory datasets (multi-worker; sampler needs it)" },
   { name = "collate_fn", type = argrule.func, opt = true,
     default = nil, doc = "default collate if nil" },
   { name = "sampler", type = Sampler, opt = true, default = nil,
@@ -601,16 +642,36 @@ DataLoader._init = rule {
   { name = "seed", type = argrule.number, opt = true, default = nil,
     doc = "reproducible shuffle seed (Insight/numpy aligned)" },
 }(function(self, dataset, batch_size, shuffle, drop_last, num_workers,
-          collate_fn, sampler, batch_sampler, prefetch, seed)
+          config, dataset_len, collate_fn, sampler, batch_sampler,
+          prefetch, seed)
   self._dataset = dataset
   self._prefetch = prefetch
+  self._config = config
 
   assert(num_workers >= 0, "num_workers should be a non-negative value")
-  assert(num_workers == 0,
-    "paddle.io: num_workers > 0 not implemented yet (P13, Lanes)")
+  self._num_workers = num_workers
+
+  -- P13 工厂形态:dataset 是函数(num_workers>0, worker 内构造)。
+  -- 主 lane 不执行工厂——采样器只需要 len,用 LenOnlyDS 占位。
+  local is_factory = type(dataset) == "function"
+  if is_factory then
+    assert(num_workers > 0,
+      "paddle.io: a dataset factory function requires num_workers > 0 "
+      .. "(P13 multi-worker; single worker takes a Dataset instance)")
+    assert(dataset_len ~= nil and dataset_len > 0,
+      "paddle.io: num_workers>0 with a dataset factory needs "
+      .. "dataset_len (sample count for the sampler)")
+    dataset = LenOnlyDS(dataset_len)
+  else
+    assert(num_workers == 0,
+      "paddle.io: num_workers>0 requires a dataset factory function "
+      .. "(P13; got a Dataset instance instead)")
+  end
 
   local is_iter = dataset:is_a(IterableDataset)
   if is_iter then
+    assert(num_workers == 0,
+      "paddle.io: IterableDataset does not support num_workers > 0")
     assert(not shuffle, "IterableDataset not support shuffle")
     assert(sampler == nil, "IterableDataset expect unspecified sampler")
     assert(batch_sampler == nil,
@@ -651,6 +712,15 @@ end
 -- :iter() 返回迭代器函数;第一返回值是 batch 序号(1-based,永不为 nil),
 -- 第二返回值是 batch(11-io.md §4 坑①)。
 function DataLoader:iter()
+  if self._num_workers > 0 then
+    if type(self._dataset) == "function" then
+      -- factory dataset:worker 内构造,主 lane 不检查类型
+    elseif self._dataset:is_a(IterableDataset) then
+      error("paddle.io: IterableDataset does not support num_workers > 0",
+            2)
+    end
+    return self:_make_multiworker_iter()
+  end
   if self._dataset:is_a(IterableDataset) then
     return self:_make_iterable_iter()
   end
@@ -700,6 +770,221 @@ function DataLoader:_make_iterable_iter()
     batch_no = batch_no + 1
     return batch_no, collate_fn(samples)
   end
+end
+
+-- ---------------------------------------------------------------------
+-- DataLoader 多 worker 协议(P13 / M2 3.2,13-lanes.md §4.2)
+--
+-- 数据流(主 lane 采样器保持不变 → 顺序一致):
+--   主 lane 把 batch_sampler 产出的每个批次索引表经 Linda "index"
+--   分发给 worker;worker 在新 lua_State 里重新 require paddle,构造
+--   dataset(工厂函数 + 纯数据 config,见下),对每个索引 ds:get(i),
+--   collate 成一个 batch,把 batch 里的每个 Tensor registry_put 换
+--   成整数 id,经 Linda "batch" 送回主 lane 有序收集;主 lane
+--   registry_take 还原 Tensor。
+--
+-- 跨 lane 传什么(13-lanes.md §4.2/§4.3):
+--   数字/字符串/纯数据表   ✅
+--   Tensor              ✅ 句柄表退路(只传整数 id,registry.cc Group10)
+--   Lua 函数             ✅ 仅 string.dump 可序列化(工厂函数禁止 upvalue)
+--   pl.class 实例        ❌ metatable 复杂对象(文档禁止)
+--   Insight Array       ❌ userdata(文档禁止 → transform 留在 get 内)
+--
+-- worker 节点本身是 string.dump 序列化进 lane 的纯函数,禁止引用本
+-- 模块任何局部变量;一切依赖(package 路径、工厂、config、linda)都从
+-- 参数进。const/参数名带 _ 前缀,避免 5.1 的 upvalue 捕获歧义。
+-- ---------------------------------------------------------------------
+
+-- worker 数量上限与超时(秒),避免毫秒级 busy-loop
+local _WORKER_STOP_TIMEOUT = 5.0
+
+-- worker 节点:在 lane 的全新 lua_State 里运行。函数体经 Lanes
+-- string.dump 传输到 lane,因此不能引用本模块任何 upvalue —— 所有
+-- 外部依赖都从参数进,辅助函数定义在函数体内(运行时创建,不参与
+-- dump)。collate_fn 为 nil 时用 worker 内 require 的
+-- paddle.io.default_collate(io.lua 是同一份源码,行为与主 lane 一致)。
+--
+-- 协议:
+--   linda:receive 等 "index" (主 lane 发 {batch_no, indices})
+--   batch_no = 主 lane 的批序号(顺序一致性的锚点)
+--   成功后 linda:send("batch", { batch_no=.., packed=.. })
+--   失败后 linda:send("batch", { batch_no=.., err=.. })
+--   收到 "stop" 则退出
+local function _worker_node(ppath, pcpath, factory, config, collate_fn,
+                            linda)
+  package.path = ppath
+  package.cpath = pcpath
+  local core = require "paddle_core"
+  core.init()
+  -- 构造 dataset;factory 必须是无 upvalue 的纯函数(用户契约,
+  -- dataloader.md §4),这样它的字节码可被 Lanes 序列化跨 state 执行。
+  local ds = factory(config)
+  -- collate:传 nil 时用默认(worker 内重新 require paddle.io,拿默认
+  -- collate;不从主 lane 带,避免 dump 时 upvalue 断裂)
+  local collate = collate_fn
+  if collate == nil then
+    collate = require("paddle.io").default_collate
+  end
+  -- 递归 pack:LuaTensor -> registry id;表 -> 逐键递归;其余原样。
+  -- 定义在函数体内:递归 self-reference 是运行期闭包,不经 dump。
+  local function pack(v)
+    local t = type(v)
+    if t == "userdata" then
+      local id = core.tensor_registry_put(v)  -- 非 Tensor 在此抛错
+      return { __t = id }
+    elseif t == "table" then
+      local out = {}
+      for k, sub in pairs(v) do
+        out[k] = pack(sub)
+      end
+      return out
+    end
+    return v
+  end
+  while true do
+    local key, msg = linda:receive(nil, "index", "stop")
+    if key == nil or key == "stop" then return end
+    local batch_no, indices = msg[1], msg[2]
+    local ok, batch = pcall(function()
+      local samples = {}
+      for k = 1, #indices do
+        local fields = { ds:get(indices[k]) }
+        if #fields == 1 then
+          samples[k] = fields[1]
+        else
+          samples[k] = fields
+        end
+      end
+      return collate(samples)
+    end)
+    if not ok then
+      linda:send("batch", { batch_no = batch_no, err = tostring(batch) })
+    else
+      local ok2, packed = pcall(pack, batch)
+      if not ok2 then
+        linda:send("batch",
+                   { batch_no = batch_no, err = tostring(packed) })
+      else
+        linda:send("batch", { batch_no = batch_no, packed = packed })
+      end
+    end
+  end
+end
+
+-- 主 lane 收包还原:pack 的逆映射(id -> registry_take)。
+-- 只在主 lane 用,不需 dump,可以引用本模块 upvalue。
+local function _unpack_batch(packed)
+  if type(packed) == "table" then
+    if packed.__t ~= nil then
+      local t = paddle_core.tensor_registry_take(packed.__t)
+      if t == nil then
+        error("paddle.io: multi-worker batch id " .. tostring(packed.__t)
+              .. " already taken", 3)
+      end
+      return t
+    end
+    local out = {}
+    for k, v in pairs(packed) do
+      out[k] = _unpack_batch(v)
+    end
+    return out
+  end
+  return packed
+end
+
+-- 多 worker 迭代器:主 lane 侧。每轮 iter() 清理旧池再建新池。
+-- 顺序保证:batch_no 由主 lane 从 1 递增分配,收集后按 batch_no
+-- 缓存、按序产出 —— 与单 worker 路径产出顺序逐位一致
+-- (api/io.md §6 坑②)。
+function DataLoader:_make_multiworker_iter()
+  local lns = lanes()
+  if self._lanes then
+    self._lanes.shutdown()
+    self._lanes = nil
+  end
+  local nw = self._num_workers
+  local linda = lns.linda()
+  local factory = self._dataset
+  assert(type(factory) == "function",
+    "paddle.io: num_workers>0 requires dataset to be a factory function "
+    .. "taking a pure-data config (dataloader.md §4); got "
+    .. type(factory))
+  local config = self._config or {}
+  local ppath, pcpath = package.path, package.cpath
+
+  -- 默认 collate 不跨 lane 传(_worker_node 契约:传 nil -> worker 内
+  -- require paddle.io 拿默认 collate;带 paddle_core C 函数 upvalue 的
+  -- 函数无法按名跨 state 传 —— 目标 lane 尚未 require paddle_core)。
+  local collate_arg = self._collate_fn
+  if collate_arg == default_collate then collate_arg = nil end
+  local handles = {}
+  for w = 1, nw do
+    handles[w] = lns.gen("*", _worker_node)(ppath, pcpath, factory,
+                                            config, collate_arg, linda)
+  end
+
+  local bs_iter = self._batch_sampler:iter()
+  local expected, pending = 1, {}
+  local sent = 0          -- 已发出的批数(也是下一个 batch_no)
+  local in_flight = 0     -- 已发出未回收的批数
+  local exhausted = false
+
+  local function shutdown()
+    for _ = 1, nw do linda:send("stop", true) end
+    for w = 1, nw do
+      pcall(function() handles[w]:join(_WORKER_STOP_TIMEOUT) end)
+    end
+    self._lanes = nil
+  end
+
+  -- 从 pending 按 expected 序取一包,返回 (batch_no, batch) 或 nil
+  local function drain()
+    local p = pending[expected]
+    if p == nil then return nil end
+    pending[expected] = nil
+    expected = expected + 1
+    if p.err then
+      error(("paddle.io: worker error at batch %s: %s"):format(
+        tostring(p.batch_no), p.err), 2)
+    end
+    return p.batch_no, _unpack_batch(p.packed)
+  end
+
+  local next_batch
+  next_batch = function()
+    while true do
+      -- 补发直到窗口满或耗尽(窗口 = nw*2,防主 lane 空等)
+      if not exhausted then
+        while in_flight < nw * 2 do
+          local indices = bs_iter()
+          if indices == nil then
+            exhausted = true
+            break
+          end
+          sent = sent + 1
+          linda:send("index", { sent, indices })
+          in_flight = in_flight + 1
+        end
+      end
+      local bno, batch = drain()
+      if bno then return bno, batch end
+      if exhausted and in_flight == 0 then
+        shutdown()
+        self._lanes = nil
+        return nil
+      end
+      -- 收一个 worker 结果
+      local key, res = linda:receive(_WORKER_STOP_TIMEOUT, "batch")
+      if key == nil or res == nil then
+        error("paddle.io: worker lane timed out (no batch reply)", 2)
+      end
+      in_flight = in_flight - 1
+      pending[res.batch_no] = res   -- {batch_no=, packed=|err=}
+    end
+  end
+
+  self._lanes = { shutdown = shutdown }
+  return next_batch
 end
 
 -- ---------------------------------------------------------------------

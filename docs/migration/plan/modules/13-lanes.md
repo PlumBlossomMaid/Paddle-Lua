@@ -215,6 +215,6 @@ Torch7 的堆追踪用 `__thread` 存储(见 `research/_ref/THGeneral.c`),
 
 ## 7. 未解问题
 
-- Q-02 Lanes 版本差异:`__lanesclone` 的可用性与签名(原 deep API 差异问题的收窄版)
-- Q-03 `on_state_create` 钩子是否存在
-- M0 第 3 项(kernel 多线程安全)的结论会**决定本方案是否需要重做**
+- Q-02 ~~Lanes 版本差异:`__lanesclone` 的可用性与签名~~ ❌ **已证伪关闭(2026-10-29,M2 3.2 实测)**:`__lanesclone` 两版都有且调用约定一致(T-M0-04 已核,v3.17 `tools.c:1616-1618`),**但 sol2 usertype 走不通**——Lanes 先复制 userdata 的 metatable(`tools.c:1581-1601` `inter_copy_one(mt)`),而 sol2 usertype metatable 持 C 函数、注册在 sol2 内部 `_R/7/...` 名下且不在 Lanes transfer database → 运行报 `function '_R/7/place_kind_index' not found in main origin transfer database`。**已按 §4.1 句柄表退路落地**(C ABI Group 10 `pd_tensor_registry_put/take/clear`,registry.cc),不再依赖 `__lanesclone`。
+- Q-03 ~~`on_state_create` 钩子是否存在~~ ✅ **已核实存在(2026-10-22,T-M0-06)**:v3.17.2 `src/state.h:19-20` + `universe.h:60`;语义 = 每个新 lane 创建由 keeper 调一次。**落地形态(2026-10-29,M2 3.2)**:未用该钩子——worker 节点函数体首行 `package.path=ppath; package.cpath=pcpath; require "paddle_core"`(路径经参传入 `lanes.gen("*", ...)`),因为 worker 需要主 lane 当时的 package.path/cpath(lane 的 searchpath 与 master 不同源),钩子拿不到动态路径。
+- M0 第 3 项(kernel 多线程安全)的结论会**决定本方案是否需要重做** ✅ **已闭环(2026-10-29,M2 3.2 实测)**:worker 在全新 lua_State 里 `require "paddle_core"` + `core.init()`,实际跑通了 collate(paddle_core 张量运算)与 `registry_put`,**多 worker 并发构造/传输 tensor 无崩溃**——Lanes 的 lane = OS 线程,能共享进程内 Paddle 全局(DeviceContext 池等),本方案不需要重做。
