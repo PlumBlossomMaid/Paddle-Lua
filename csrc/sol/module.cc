@@ -67,14 +67,68 @@ int l_place_kind_name(lua_State* L) {
   return 1;
 }
 
+/* ---- 3.3 GC heap tracking (14-gc.md sec.3.1, layers 1-3) ----------
+ * pd_gc_account / pd_gc_set_enabled / pd_gc_enabled / pd_gc_set_softmax /
+ * pd_gc_set_handler / pd_gc_tracked_bytes live in gc.cc (a faithful port
+ * of Torch7 THGeneral.c:134-238). Default ON per D6; the switch here is
+ * what paddle.set_heap_tracking(false) reaches (14-gc.md 坑④). */
+
+/* Enable/disable heap tracking (D6: defaults ON). Disabling resets the
+ * global ledger (gc.cc pd_gc_set_enabled). */
+int l_set_heap_tracking(lua_State* L) {
+  int on = lua_toboolean(L, 1) ? 1 : 0;
+  pd_gc_set_enabled(on);
+  return 0;
+}
+
+/* Current tracking state (0/1). */
+int l_heap_tracking(lua_State* L) {
+  lua_pushboolean(L, pd_gc_enabled() != 0);
+  return 1;
+}
+
+/* Sum of live tensor bytes across all lanes (diagnostic; smoke asserts
+ * on it). */
+int l_tracked_bytes(lua_State* L) {
+  lua_pushinteger(L, static_cast<lua_Integer>(pd_gc_tracked_bytes()));
+  return 1;
+}
+
+/* Adjust the thread-local softmax cap (default 300MB). A tuning knob for
+ * small machines (earlier = cheaper collects) and the smoke sets 1MB to
+ * drive the softmax path deterministically. */
+int l_set_heap_softmax(lua_State* L) {
+  int64_t bytes = static_cast<int64_t>(luaL_checkinteger(L, 1));
+  pd_gc_set_softmax(bytes);
+  return 0;
+}
+
 const luaL_Reg kModuleFns[] = {
     {"version", l_version},
     {"init", l_init},
     {"device_count", l_device_count},
     {"memory_allocated", l_memory_allocated},
     {"place_kind_name", l_place_kind_name},
+    {"set_heap_tracking", l_set_heap_tracking},
+    {"heap_tracking", l_heap_tracking},
+    {"tracked_bytes", l_tracked_bytes},
+    {"set_heap_softmax", l_set_heap_softmax},
     {nullptr, nullptr},
 };
+
+/* 3.3: bridge the C-side softmax trigger to a full Lua GC on THIS
+ * thread's state. LUA_GCCOLLECT (2) exists on every targeted Lua version;
+ * LUA_GCSTEP is 5.2+ only, and 14-gc.md's LUA_GCSTEP sketch is adjusted
+ * here for the 5.1 surface (C5). Each lane registers its OWN lua_State at
+ * luaopen time (the handler slot in gc.cc is thread-local), so the
+ * collect always runs on the lane that crossed its softmax -- never
+ * another lane's state (14-gc.md sec.4 坑②). extern "C" so the function
+ * pointer has C language linkage, matching the C ABI's parameter type
+ * (language linkage is part of the function type in C++). */
+extern "C" static void gc_softmax_bridge(void* data) {
+  lua_State* L = static_cast<lua_State*>(data);
+  lua_gc(L, LUA_GCCOLLECT, 0);
+}
 
 }  // namespace
 
@@ -119,5 +173,11 @@ extern "C" PD_LUAOPEN_EXPORT int luaopen_paddle_core(lua_State* L) {
   // jit_binding.cc: LuaLayer usertype + core.jit_load (2.8). Runs last:
   // load needs the op registry (InterpreterCore) already in place.
   pd::register_jit(L, -1);
+  // 3.3 GC: bind THIS thread's lua_State to the C-side softmax trigger.
+  // Each lane registers its own state here (handler slot is thread-local
+  // in gc.cc), so a collect always runs on the lane that crossed its own
+  // softmax -- never another lane's state (14-gc.md sec.4 坑②). The
+  // bridge is a plain C function; e.g. no C++ exceptions can cross.
+  pd_gc_set_handler(&gc_softmax_bridge, L);
   return 1;
 }

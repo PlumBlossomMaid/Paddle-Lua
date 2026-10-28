@@ -35,21 +35,71 @@ inline void check() {
   }
 }
 
+/* 3.3 GC layer 1: bytes a LuaTensor shell claims against the heap-tracking
+ * ledger (14-gc.md sec.3.1). Zero when tracking is disabled -- one atomic
+ * read, keeping the disabled path inside the <5% on/off budget (14-gc.md
+ * sec.5) -- or when the handle is null. Claim = numel x dtype_sizeof. */
+inline int64_t track_claim(pd_tensor h) {
+  if (pd_gc_enabled() == 0 || h == nullptr) {
+    return 0;
+  }
+  int64_t n = pd_tensor_numel(h);
+  size_t esize = pd_dtype_sizeof(pd_tensor_dtype(h));
+  return n * static_cast<int64_t>(esize);
+}
+
 /* One Lua-visible Tensor (02-binding.md sec.3.2). Ownership is
  * transfer-on-create, release on GC. The struct lives HERE, not in
  * tensor_binding.cc, because the generated gen_ops_*.cc must construct
  * and unwrap it (AGENTS sec.8.3) -- both TUs include sol_common.hpp.
  *
  * Copy shares storage via pd_tensor_retain (new shell, same data);
- * required by the __lanesclone slot and by sol2 value returns. */
+ * required by the __lanesclone slot and by sol2 value returns.
+ *
+ * 3.3 GC hooks (14-gc.md sec.3.1 layer 1): every shell that lives on the
+ * Lua side accounts numel*dtype_sizeof bytes against the C-side ledger
+ * (pd_gc_account, gc.cc). +bytes at birth, -bytes at death, so the
+ * ledger equals "sum of live Lua-visible tensor bytes" -- the signal the
+ * softmax path (=collectgarbage bridge) reacts to. A retain-created
+ * shell re-accounts the same storage (2x while both live): that is the
+ * conservative direction (GC pressure earlier, never OOM), the lifecycle
+ * sum is still exactly zero per underlying tensor, and the disabled
+ * path costs one pd_gc_enabled() atomic read only (<5% on/off
+ * acceptance, 14-gc.md sec.5).
+ *
+ * Finalizer safety: ~LuaTensor runs inside Lua GC. pd_gc_account(-bytes)
+ * only merges into the atomic ledger, it can never invoke the handler
+ * (gc.cc only fires it when bytes>0, Torch7 THGeneral.c:219 `if (size>0)`
+ * -- calling collectgarbage from a finalizer would re-enter the
+ * collector). Zero accounting for h==nullptr (moved-from shells). */
 struct LuaTensor {
-  pd_tensor h;                        // opaque C ABI handle
+  pd_tensor h;      // opaque C ABI handle
+  int64_t tracked;  // bytes this shell claims (0 when tracking off)
 
-  explicit LuaTensor(pd_tensor handle) : h(handle) {}
-  ~LuaTensor() { pd_tensor_free(h); }
+  explicit LuaTensor(pd_tensor handle)
+      : h(handle), tracked(track_claim(handle)) {
+    if (tracked != 0) {
+      pd_gc_account(tracked);
+    }
+  }
+  ~LuaTensor() {
+    if (tracked != 0) {
+      pd_gc_account(-tracked);
+    }
+    pd_tensor_free(h);
+  }
 
-  LuaTensor(const LuaTensor& other) : h(pd_tensor_retain(other.h)) {}
-  LuaTensor(LuaTensor&& other) noexcept : h(other.h) { other.h = nullptr; }
+  LuaTensor(const LuaTensor& other)
+      : h(pd_tensor_retain(other.h)), tracked(track_claim(other.h)) {
+    if (tracked != 0) {
+      pd_gc_account(tracked);
+    }
+  }
+  LuaTensor(LuaTensor&& other) noexcept
+      : h(other.h), tracked(other.tracked) {
+    other.h = nullptr;
+    other.tracked = 0;
+  }
   LuaTensor& operator=(const LuaTensor&) = delete;
 };
 

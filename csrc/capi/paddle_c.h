@@ -361,6 +361,63 @@ pd_tensor  pd_tensor_registry_take(int64_t id);
  * discarded). No-op on an empty registry. */
 void       pd_tensor_registry_clear(void);
 
+/* ------------------------------------------------------------------ */
+/* Group 11: GC heap tracking (6 fns, 14-gc.md sec.3.1; layers 1-3)   */
+/* ------------------------------------------------------------------ */
+
+/* Torch7-style heap tracking (port of THGeneral.c:134-238, verified
+ * against research/_ref/THGeneral.c). Lua's mark-sweep keys off its OWN
+ * allocated bytes, so a 64-byte userdata holding a 300MB tensor never
+ * triggers GC -- the tensor memory dies only when the shell happens to
+ * be swept. Layers 1-3 (account / 1MB batch / x1.4 softmax growth) make
+ * Lua GC pressure proportional to the real backing bytes.
+ *
+ *   pd_gc_account(bytes): bytes>0 = tensor allocated, bytes<0 = freed.
+ *     Per-thread `heapDelta` accumulates; when |delta| crosses the
+ *     +/-1MB batch (THGeneral.c heapMaxDelta=1e6), the delta is merged
+ *     into the global atomic heapSize AND -- ONLY for positive flushes
+ *     (THGeneral.c `if (size > 0)`), so a LuaTensor destructor running
+ *     inside a Lua GC finalizer can never re-enter lua_gc -- the
+ *     thread-local softmax is consulted. When heapSize exceeds
+ *     heapSoftmax (init 300MB), the registered handler runs once and,
+ *     if the post-GC heap is still > 80% of the softmax, the softmax
+ *     grows x1.4 (layers 2-3, THGeneral.c:141-157).
+ *
+ * Thread-local state (THGeneral.c:134-140): each Lanes lane keeps its
+ * own delta + softmax + handler and registers its own lua_State-bound
+ * bridge in luaopen_paddle_core; the C ABI never sees a lua_State.
+ * Default ON per D6; pd_gc_set_enabled(0) turns it off (14-gc.md 坑④;
+ * the Lua surface is paddle.set_heap_tracking). */
+
+/* Account bytes. Handler (if any) may run when a positive flush crosses
+ * the softmax. Cheap: two adds + one branch when within the batch. */
+void       pd_gc_account(int64_t bytes);
+
+/* Enable/disable tracking for the whole process (default ON, D6).
+ * Returns the previous state. Disabling makes later accounts no-ops. */
+int        pd_gc_set_enabled(int on);
+
+/* Current tracking state (0/1). Cheap: one atomic load. Lets the sol
+ * layer skip byte-computation entirely when tracking is off (the
+ * <5% on/off training-speed acceptance, 14-gc.md sec.5). */
+int        pd_gc_enabled(void);
+
+/* Adjust the thread-local softmax cap (bytes) at which the handler is
+ * triggered. Default 300MB (THGeneral.c:140). Smaller machines may want
+ * an earlier -- and therefore cheaper -- collect; the smoke uses 1MB to
+ * trigger the handler deterministically. Thread-local, so each lane
+ * keeps its own cap (14-gc.md sec.4 坑②). */
+void       pd_gc_set_softmax(int64_t bytes);
+
+/* Register the per-thread bridge called when heapSize > heapSoftmax.
+ * `data` is passed through untouched (the sol layer binds lua_State*).
+ * Thread-local: each lane registers its own in luaopen_paddle_core. */
+void       pd_gc_set_handler(void (*handler)(void* data), void* data);
+
+/* Current global tracked heap size (sum of live tensor bytes across all
+ * lanes). Diagnostic / smoke surface, never blocks. */
+int64_t    pd_gc_tracked_bytes(void);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif

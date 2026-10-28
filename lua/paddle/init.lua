@@ -77,6 +77,17 @@ local serialization = require "paddle.serialization"
 M.save = serialization.save
 M.load = serialization.load
 
+-- ---- 3.3 GC heap tracking (top-level switch, 14-gc.md 坑④/D6) -------
+-- Default ON (D6); paddle.set_heap_tracking{on=false} turns it off. The
+-- nine-layer scheme drives pressure from the C-side ledger (pd_gc_account,
+-- gc.cc); this is the only user-facing switch, plus diagnostics for smoke
+-- and tuning. Eager like serialization: gc.lua is a tiny hard-dep module
+-- (paddle_core + argrule, both already required).
+local gclib = require "paddle.gc"
+M.set_heap_tracking = gclib.set_heap_tracking
+M.heap_tracking = gclib.heap_tracking
+M.tracked_bytes = gclib.tracked_bytes
+
 -- ---- lazy submodule skeleton ----------------------------------------
 -- Keys resolve to module names; first access requires + caches. Populate
 -- as each stage lands: device (P5), autograd (P6), nn (P9), optimizer
