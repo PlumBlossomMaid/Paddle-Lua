@@ -6,5 +6,6 @@
 local M = {}
 
 M.datasets = require "paddle.vision.datasets"
+M.transforms = require "paddle.vision.transforms"
 
 return M

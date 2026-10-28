@@ -344,6 +344,33 @@ void register_tensor(lua_State* L, int module_index) {
         }
         return out;
       });
+
+  /* 3.1.3: core.image_resize(bytes, src_h, src_w, channels, dtype,
+   * dst_h, dst_w, interp) -> bytes -- 2D image resize on raw HWC bytes
+   * (paddle_c.h Group 9). Insight7 has no 2D resize and Paddle's interp
+   * ops are Tensor-level, so transforms (which must stay on
+   * insight.Array, 12-dataset-vision.md sec.3.2) call this directly:
+   *   arr:to_dlpack().bytes -> core.image_resize -> ins.from_dlpack.
+   * dtype is the pd_dtype enum (UINT8/FLOAT32 only); interp 0=nearest,
+   * 1=bilinear. Output size is computable, single call. */
+  mod.set_function(
+      "image_resize",
+      [](const std::string& src, int src_h, int src_w, int channels,
+         int dtype, int dst_h, int dst_w, int interpolation)
+          -> std::string {
+        size_t itemsize = (dtype == PD_DTYPE_UINT8) ? 1 : 4;
+        size_t need =
+            static_cast<size_t>(dst_h) * dst_w * channels * itemsize;
+        std::string out(need, '\0');
+        size_t written = 0;
+        pd_status st = pd_image_resize(
+            reinterpret_cast<const unsigned char*>(src.data()), src.size(),
+            src_h, src_w, channels, dtype, dst_h, dst_w, interpolation,
+            reinterpret_cast<unsigned char*>(&out[0]), out.size(), &written);
+        pd::check();
+        out.resize(written);
+        return out;
+      });
 }
 
 }  // namespace pd

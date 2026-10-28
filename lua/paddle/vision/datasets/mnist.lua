@@ -26,6 +26,9 @@ local paddle_core = require "paddle_core"
 local M = {}
 
 -- ---- constants (python/paddle/vision/datasets/mnist.py:112-120) ------
+-- Class fields (not upvalues) so subclasses override them wholesale --
+-- FashionMNIST (mnist.py:333-340) replaces URL_PREFIX + the four
+-- URL/MD5 pairs on the subclass, exactly like the Python class attrs.
 local URL_PREFIX = "https://dataset.bj.bcebos.com/mnist/"
 local FILES = {
   train = {
@@ -44,13 +47,15 @@ local FILES = {
 
 -- Default cache root mirrors python/paddle/dataset/common.py:51-55
 -- (DATA_HOME = ~/.cache/paddle/dataset, plus the module subdir).
-local function default_cache_dir()
+-- NAME is a class field (mnist.py:141-158 _check_exists_and_download
+-- keys on self.NAME); FashionMNIST overrides it to "fashion-mnist".
+local function default_cache_dir(self)
   local home = os.getenv("USERPROFILE") or os.getenv("HOME") or "."
   local custom = os.getenv("PADDLE_LUA_DATASET_HOME")
   if custom and custom ~= "" then
-    return custom .. "/mnist"
+    return custom .. "/" .. self.NAME
   end
-  return home .. "/.cache/paddle/dataset/mnist"
+  return home .. "/.cache/paddle/dataset/" .. self.NAME
 end
 
 -- read a whole file as a binary string
@@ -110,6 +115,12 @@ end
 
 local MNIST = class(require("paddle.io").Dataset)
 MNIST._name = "MNIST"
+-- Class fields (FashionMNIST overrides wholesale, mnist.py:333-340):
+-- the Python class attrs (URL_PREFIX + four URL/MD5 pairs) live on the
+-- subclass; pl.class __index chain resolves getmetatable(self).FILES.
+MNIST.URL_PREFIX = URL_PREFIX
+MNIST.FILES = FILES
+MNIST.NAME = "mnist"
 
 MNIST._init = rule {
   { name = "self", type = argrule.table, doc = "pl.class instance (auto)" },
@@ -127,8 +138,12 @@ MNIST._init = rule {
   if mode ~= "train" and mode ~= "test" then
     error("MNIST: mode must be 'train' or 'test', got " .. tostring(mode), 3)
   end
-  local files = FILES[mode]
-  local cache = default_cache_dir()
+  -- Class fields (layer.lua:180 pattern: getmetatable(self)._name):
+  -- subclasses (FashionMNIST) override FILES / NAME on their own class
+  -- table and the lookup lands there first (pl.class __index chain).
+  local cls = getmetatable(self)
+  local files = cls.FILES[mode]
+  local cache = default_cache_dir(self)
 
   local dl = make_downloader(download)
   local function ensure(p, spec)
@@ -164,18 +179,19 @@ function MNIST:len()
   return self._num
 end
 
--- x = insight.Array [28,28] (D26). Insight7 feeds transforms / ToTensor
--- (vision.md sec 6.3). Build from a flat byte table, then reshape.
+-- x = insight.Array [28,28] uint8 (mirror upstream DEFAULT backend:
+-- get_image_backend() default is 'pil', mnist.py:262-266 astype
+-- 'uint8'). D26: Insight7 replaces numpy's position. Build straight
+-- from the raw bytes via DLPack import -- no per-byte Lua loop, and the
+-- dtype is genuinely uint8 so ToTensor's /255 (only uint8) fires,
+-- exactly like upstream MNIST(pil) + ToTensor.
 local function image_to_array(self, bytes)
   local ok, insight = pcall(require, "insight")
   if not ok then
     error("MNIST: got image bytes but no insight.Array producer -- "
           .. "install Insight7 (D26) to use this dataset", 3)
   end
-  local t = {}
-  for i = 1, #bytes do t[i] = bytes:byte(i) end
-  local flat = insight.Array(t)             -- 1-D F64
-  return flat:reshape{ self._rows, self._cols }
+  return insight.from_dlpack({ self._rows, self._cols }, "u1", bytes)
 end
 
 function MNIST:get(i)

@@ -70,11 +70,13 @@ for i = 9, #lab_payload do
 end
 check(max_label == 9, ("train max raw label == 9 (got %d)"):format(max_label))
 
--- 2) get(i): x is insight.Array [28,28], label 1-based == refbyte+1
+-- 2) get(i): x is insight.Array [28,28] uint8 (mirror upstream default
+-- 'pil' backend, mnist.py:262-266; ToTensor's /255 keys off uint8),
+-- label 1-based == refbyte+1
 local x, y = train:get(1)
 check(type(x) == "userdata", "get(1) x is userdata (insight.Array)")
 check(x.shape[1] == 28 and x.shape[2] == 28, "x shape {28,28}")
-check(x.nbytes == 784 * 8, "x holds 784 F64 samples")
+check(x.nbytes == 784 * 1, "x holds 784 uint8 samples")
 check(y == ref_lab:byte(9) + 1, ("train label[1] 1-based (got %d)"):format(y))
 
 -- spot check 3 more samples at boundaries

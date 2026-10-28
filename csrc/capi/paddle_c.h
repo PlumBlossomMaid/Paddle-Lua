@@ -315,6 +315,26 @@ pd_status  pd_tensor_load(const char* path, pd_tensor* out);
 pd_status  pd_gzip_inflate(const unsigned char* src, size_t src_len,
                            unsigned char* out, size_t cap, size_t* out_len);
 
+/* ------------------------------------------------------------------ */
+/* Group 9: image ops (2 fn, 12-dataset-vision.md sec.3.2/4.2)        */
+/* ------------------------------------------------------------------ */
+
+/* Resize an image buffer (H,W,C) row-major, mirroring the OpenCV
+ * coordinate mapping functional_cv2.py:59-120 delegates to (resize.cpp:
+ * nearest floor(dx*scale); bilinear (dx+0.5)*scale-0.5 + 4-neighbour).
+ * Insight7 has no 2D resize and Paddle's interp ops are Tensor-level,
+ * so transforms (which must stay on insight.Array, 12-dataset-vision.md
+ * sec.3.2) call this directly.
+ *   interp: 0=nearest, 1=bilinear
+ *   dtype:  PD_DTYPE_UINT8 or PD_DTYPE_FLOAT32 only
+ * Output size is computable, so one call with dst_cap >=
+ * dst_h*dst_w*channels*itemsize suffices; *dst_len gets the count. */
+pd_status  pd_image_resize(const unsigned char* src, size_t src_len,
+                           int src_h, int src_w, int channels, int dtype,
+                           int dst_h, int dst_w, int interpolation,
+                           unsigned char* out, size_t dst_cap,
+                           size_t* dst_len);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif
