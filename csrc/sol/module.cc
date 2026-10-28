@@ -103,6 +103,18 @@ int l_set_heap_softmax(lua_State* L) {
   return 0;
 }
 
+/* 3.3 layer 6-8 TEST HOOK: drive the registered OOM callback once with a
+ * synthetic failure and return the bytes it freed (pd_gc_fire_oom in
+ * gc.cc). On CPU-only builds real allocation failures never route through
+ * RetryAllocator (allocator_facade.cc wraps only GPU/XPU at
+ * :403/:979/:987/:1408), so the smoke proves the callback+lua_gc+retry
+ * plumbing deterministically through this entry. */
+int l_gc_fire_oom(lua_State* L) {
+  int64_t fake_bytes = static_cast<int64_t>(luaL_optinteger(L, 1, 0));
+  lua_pushinteger(L, static_cast<lua_Integer>(pd_gc_fire_oom(fake_bytes)));
+  return 1;
+}
+
 const luaL_Reg kModuleFns[] = {
     {"version", l_version},
     {"init", l_init},
@@ -113,6 +125,7 @@ const luaL_Reg kModuleFns[] = {
     {"heap_tracking", l_heap_tracking},
     {"tracked_bytes", l_tracked_bytes},
     {"set_heap_softmax", l_set_heap_softmax},
+    {"gc_fire_oom", l_gc_fire_oom},
     {nullptr, nullptr},
 };
 
@@ -179,5 +192,13 @@ extern "C" PD_LUAOPEN_EXPORT int luaopen_paddle_core(lua_State* L) {
   // softmax -- never another lane's state (14-gc.md sec.4 坑②). The
   // bridge is a plain C function; e.g. no C++ exceptions can cross.
   pd_gc_set_handler(&gc_softmax_bridge, L);
+  // 3.3 layers 6-8: register the OOM rescue callback (idempotent; the
+  // singleton in retry_allocator.cc:26 is just overwritten on reload, and
+  // the callback picks up THIS thread's handler from the thread_local in
+  // gc.cc at fire time, so every lane gets its own lua_gc on its own
+  // state). offload_retry_times is forced >0 inside pd_gc_register_oom
+  // (common/flags.cc:2363 default -1 skips the callback, retry_allocator
+  // .cc:67).
+  pd_gc_register_oom();
   return 1;
 }

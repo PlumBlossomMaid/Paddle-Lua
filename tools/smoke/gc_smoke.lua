@@ -105,4 +105,39 @@ alive = nil
 core.set_heap_softmax(300 * 1024 * 1024)       -- restore default
 collectgarbage("collect")
 
+-- --- 7: layers 6-8 -- OOM rescue callback (14-gc.md sec.3.2) ----------
+-- The callback is registered at luaopen (module.cc pd_gc_register_oom ->
+-- RegisterOOMCallback, retry_allocator.h:32). On a CPU-only build real
+-- allocation failures never route through RetryAllocator (it wraps only
+-- GPU/XPU -- allocator_facade.cc:403/979/987/1408), so pd_gc_fire_oom
+-- drives the SAME registered callback deterministically; the smoke proves
+-- the callback -> per-thread bridge -> lua_gc(LUA_GCCOLLECT) -> LuaTensor
+-- dtor -> -bytes -> freed-byte-retry plumbing end to end.
+core.set_heap_softmax(300 * 1024 * 1024)
+paddle.set_heap_tracking{ on = true }
+collectgarbage("collect")
+local base7 = core.tracked_bytes()
+local oom_a = core.pd_op_full({1024, 1024}, 1.0, F32, cpu)  -- 4MB
+local oom_b = core.pd_op_full({1024, 1024}, 1.0, F32, cpu)  -- 4MB
+local held = core.tracked_bytes()
+check(held >= base7 + 2 * 1024 * 1024 * 4,
+      "oom: 8MB dead-able tensors allocated")
+-- Drop both WITHOUT manual collect: shells become unreachable but the
+-- ledger still holds their bytes until the callback's lua_gc runs.
+oom_a, oom_b = nil, nil
+local freed = core.gc_fire_oom(0)   -- drive callback; fake_bytes unused
+check(freed > 0,
+      ("oom: callback lua_gc freed %d bytes (dead shells reclaimed)"):format(freed))
+local after_oom = core.tracked_bytes()
+check(after_oom <= base7 + 1024 * 1024 * 4,
+      ("oom: ledger back to ~base after callback (was %d now %d)")
+        :format(held, after_oom))
+-- Reentry safety + no-crash: a second fire with nothing to reclaim must
+-- return a small/zero freed count without crashing or recursing
+-- (thread_local g_in_oom_callback guard, 14-gc.md 坑①).
+local freed2 = core.gc_fire_oom(0)
+check(freed2 < 1024 * 1024,
+      ("oom: second fire mostly idempotent (freed2=%d)"):format(freed2))
+collectgarbage("collect")
+
 print(("GC_SMOKE PASS: %d assertions"):format(n_asserts))

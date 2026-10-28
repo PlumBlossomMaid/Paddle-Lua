@@ -418,6 +418,32 @@ void       pd_gc_set_handler(void (*handler)(void* data), void* data);
  * lanes). Diagnostic / smoke surface, never blocks. */
 int64_t    pd_gc_tracked_bytes(void);
 
+/* ---- layer 6-8: OOM rescue via RegisterOOMCallback (14-gc.md 3.2) ----
+ *
+ * Register Paddle's OOM callback (retry_allocator.h:32) so a FAILED
+ * allocation triggers a full lua_gc before giving up: the callback runs
+ * on the failing thread, invokes that thread's registered bridge (the
+ * same one the softmax path uses -- never another lane's lua_State,
+ * 14-gc.md 坑②) and returns the RELEASED byte count; Paddle's
+ * RetryAllocator retries and only propagates BadAlloc when the callback
+ * frees nothing (retry_allocator.cc:60-87).
+ *
+ * Also forces FLAGS_offload_retry_times > 0: its default is -1, which
+ * makes RetryAllocator skip the callback entirely (common/flags.cc:2363,
+ * checked at retry_allocator.cc:56).
+ *
+ * Idempotent; call once from luaopen_paddle_core (module.cc). */
+pd_status  pd_gc_register_oom(void);
+
+/* Test hook: invoke the registered OOM callback once, as if an
+ * allocation of `fake_bytes` just failed, and return the bytes the
+ * callback released (>= 0). Lets the smoke drive the layer 6-8 path
+ * deterministically without waiting for a real OOM -- on the CPU-only
+ * build, RetryAllocator wraps GPU/XPU allocators only
+ * (allocator_facade.cc:403/979/987/1408), so a real BadAlloc here is
+ * not routed through the callback. */
+int64_t    pd_gc_fire_oom(int64_t fake_bytes);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif
