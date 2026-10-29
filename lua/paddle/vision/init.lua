@@ -7,5 +7,7 @@ local M = {}
 
 M.datasets = require "paddle.vision.datasets"
 M.transforms = require "paddle.vision.transforms"
+-- 3.4 (T-M2-05): paddle.vision.models (ResNet family, roadmap.md §1 M2)
+M.models = require "paddle.vision.models.resnet"
 
 return M
