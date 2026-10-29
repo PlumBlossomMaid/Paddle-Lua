@@ -92,9 +92,12 @@ check(close_to(n:get(2), 0.5, 1e-9), "Normalize ch3 (0.75-0.5)/0.5 == 0.5")
 local xhwc = insight.Array{ 0.1, 0.2, 0.3 }:reshape{ 1, 1, 3 }
 local nh = T.Normalize{ mean = { 0.0, 0.1, 0.2 }, std = 1.0,
                         data_format = "HWC" }(xhwc)
-check(close_to(nh:get(0), 0.1, 1e-9), "Normalize HWC ch1 == 0.1")
-check(close_to(nh:get(1), 0.1, 1e-9), "Normalize HWC ch2 == 0.1")
-check(close_to(nh:get(2), 0.1, 1e-9), "Normalize HWC ch3 == 0.1")
+-- Tolerance 1e-6, not 1e-9: mean/std are float32 (upstream
+-- functional_cv2.py:699-704 casts np.float32), so (0.2 - f32(0.1))
+-- carries ~1.5e-9 quantization -- same deviation upstream numpy has.
+check(close_to(nh:get(0), 0.1, 1e-6), "Normalize HWC ch1 == 0.1")
+check(close_to(nh:get(1), 0.1, 1e-6), "Normalize HWC ch2 == 0.1")
+check(close_to(nh:get(2), 0.1, 1e-6), "Normalize HWC ch3 == 0.1")
 
 -- =====================================================================
 -- Resize: nearest + bilinear vs hand-computed reference
@@ -163,6 +166,29 @@ check(out:ndim() == 3, "Compose output is a tensor (boundary)")
 check(out:numel() == 1, "Compose keeps single element")
 check(close_to(out:item(), 1.0, 1e-6),
   ("Compose normalize+tensor [[1.0]] == 1.0 (got %s)"):format(out:item()))
+
+-- Regression (3.4.3): Normalize on a TRUE uint8 array must NOT promote
+-- the chain to float64. Upstream casts mean/std to float32
+-- (functional_cv2.py:699-704); ins.Array() of Lua numbers defaults to
+-- float64, and a resulting float64 Tensor is rejected by conv2d with
+-- float32 weights (measured dtype mismatch 2026-10-30, examples/
+-- cifar10.lua conv1 crash). uint8 255 -> (255-127.5)/127.5 == 1.0, and
+-- the ToTensor output dtype must be FLOAT32.
+local pipe_u8 = T.Compose{ transforms = {
+  T.Normalize{ mean = { 127.5 }, std = { 127.5 } },
+  T.ToTensor{},
+} }
+-- TRUE uint8 input, exactly as Cifar10:get builds it (from_dlpack "u1").
+-- ins.Array(string) is NOT a valid constructor -- arrays from raw bytes
+-- go through from_dlpack(shape, dtype, bytes).
+local u8one = insight.from_dlpack({ 1, 1, 1 }, "u1", string.char(255))
+local out_u8 = pipe_u8(u8one)
+check(out_u8:dtype() == core.PD_DTYPE_FLOAT32,
+  ("Compose uint8 normalize+tensor dtype FLOAT32 (got %s)")
+    :format(tostring(out_u8:dtype())))
+check(close_to(out_u8:item(), 1.0, 1e-6),
+  ("Compose uint8 normalize+tensor (255-127.5)/127.5 == 1.0 (got %s)")
+    :format(out_u8:item()))
 
 -- =====================================================================
 -- FashionMNIST: subclass overrides FILES/NAME; parse path identical to

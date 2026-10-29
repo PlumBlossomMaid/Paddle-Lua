@@ -174,8 +174,13 @@ Normalize.__call = function(self, x)
     mdim = { 1, 1, m }
     sdim = { 1, 1, s }
   end
-  local mean_arr = ins.Array(self.mean):reshape(mdim)
-  local std_arr  = ins.Array(self.std):reshape(sdim)
+  -- Upstream functional_cv2.py:699-704 casts mean/std to np.float32 so
+  -- (uint8 - mean) promotes to float32, not float64. Ins.Array() of a Lua
+  -- number table defaults to float64 (dtype 10); without this, the whole
+  -- tensor pipeline becomes float64 and conv2d (float32 weights) rejects
+  -- it with a dtype mismatch. Mirror the cast here.
+  local mean_arr = ins.Array(self.mean):to(ins.float32):reshape(mdim)
+  local std_arr  = ins.Array(self.std):to(ins.float32):reshape(sdim)
   return (x - mean_arr) / std_arr
 end
 
