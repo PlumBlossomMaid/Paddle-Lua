@@ -191,6 +191,52 @@ check(close_to(out_u8:item(), 1.0, 1e-6),
     :format(out_u8:item()))
 
 -- =====================================================================
+-- RandomHorizontalFlip (transforms.py:757-817): prob=1 always flips
+-- (row-major HWC [1,2,3] -> [3,2,1]); prob=0 never.
+-- =====================================================================
+local img231 = insight.from_dlpack({ 1, 3, 1 }, "u1", string.char(1, 2, 3))
+local fl1 = T.RandomHorizontalFlip{ prob = 1 }(img231)
+check(fl1:get(0) == 3 and fl1:get(1) == 2 and fl1:get(2) == 1,
+  ("RandomHorizontalFlip prob=1 flips W (got %d %d %d)")
+    :format(fl1:get(0), fl1:get(1), fl1:get(2)))
+local fl0 = T.RandomHorizontalFlip{ prob = 0 }(img231)
+check(fl0:get(0) == 1 and fl0:get(2) == 3, "RandomHorizontalFlip prob=0 keeps")
+local okp = pcall(function() T.RandomHorizontalFlip{ prob = 1.5 } end)
+check(not okp, "RandomHorizontalFlip prob>1 raises")
+
+-- =====================================================================
+-- RandomCrop (transforms.py:1311-1445): shape contract + deterministic
+-- crop window via padding. Insight pad_width is
+-- {before_H, after_H, before_W, after_W, 0, 0} (manipulation.cpp:380).
+-- =====================================================================
+-- no pad, exact size: identity shape
+local rc0 = T.RandomCrop{ size = 3 }(insight.from_dlpack(
+  { 3, 4, 1 }, "u1", string.char(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)))
+check(rc0.shape[1] == 3 and rc0.shape[2] == 3 and rc0.shape[3] == 1,
+  ("RandomCrop size==h keeps shape (got %d %d)")
+    :format(rc0.shape[1], rc0.shape[2]))
+-- pad=1 on a 2x3 -> 4x5 padded, crop 2x3 back: output always 2x3
+local rc1 = T.RandomCrop{ size = { 2, 3 }, padding = 1 }(
+  insight.from_dlpack({ 2, 3, 1 }, "u1", string.char(1, 2, 3, 4, 5, 6)))
+check(rc1.shape[1] == 2 and rc1.shape[2] == 3,
+  ("RandomCrop pad+crop output shape (got %d %d)")
+    :format(rc1.shape[1], rc1.shape[2]))
+-- deterministic window: prob=0 flip analog -- pad(1) then crop at the
+-- known interior: emulate by checking pad math directly (Insight pad
+-- is already probed); here just check the padded-crop values are a
+-- subset of {0..6} (padded border = 0 fill)
+local vals_ok = true
+for k = 0, 5 do
+  local v = rc1:get(k)
+  if v < 0 or v > 6 then vals_ok = false end
+end
+check(vals_ok, "RandomCrop crop values within padded range")
+local okm = pcall(function()
+  T.RandomCrop{ size = 2, padding_mode = "reflect" }
+end)
+check(not okm, "RandomCrop reflect padding_mode raises (v1 constant-only)")
+
+-- =====================================================================
 -- FashionMNIST: subclass overrides FILES/NAME; parse path identical to
 -- MNIST (IDX), so feed the local MNIST .gz to prove inheritance.
 -- =====================================================================
