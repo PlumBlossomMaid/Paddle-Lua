@@ -6,5 +6,6 @@ local M = {}
 
 M.MNIST = require("paddle.vision.datasets.mnist").MNIST
 M.FashionMNIST = require("paddle.vision.datasets.fashion_mnist").FashionMNIST
+M.Cifar10 = require("paddle.vision.datasets.cifar10").Cifar10
 
 return M
