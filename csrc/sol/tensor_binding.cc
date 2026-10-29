@@ -315,6 +315,14 @@ void register_tensor(lua_State* L, int module_index) {
         pd::check();
         return 0;
       },
+      /* 3.3 layer 5 (14-gc.md sec.3): explicit release. Drops this
+       * shell's handle NOW so the C-side heap ledger is charged
+       * -tracked bytes immediately (no waiting for Lua GC to reclaim).
+       * Idempotent + null-safe: a second free() is a no-op, and a
+       * moved-from shell (h==nullptr) is already dead. Mirrors Torch7's
+       * tensor:free(). */
+      "free",
+      [](LuaTensor& t) { t.free(); },
       /* reserved now for P13 (02-binding.md sec.3.2) */
       "__lanesclone",
       [](void* dst, const LuaTensor& src) { new (dst) LuaTensor(src); });

@@ -83,10 +83,31 @@ struct LuaTensor {
     }
   }
   ~LuaTensor() {
+    // free() is null/idempotent: moved-from shells (h==nullptr) and
+    // shells already released by the user's explicit t:free() reach here
+    // as no-ops (pd_tensor_free(NULL) = delete nullptr, tensor.cc:229).
+    free();
+  }
+
+  /* 3.3 GC layer 5 (14-gc.md sec.3): explicit release. Drops this
+   * shell's handle NOW -- ledger is charged -tracked immediately and
+   * pd_tensor_free(h) releases this shell's reference to the underlying
+   * storage (paddle::Tensor shared_ptr; other retain-created shells
+   * stay alive). After free() the shell is DEAD: h==nullptr, so the
+   * destructor is a no-op (no double free, no double charge). Idempotent
+   * -- a second free() on the same shell does nothing. Mirrors Torch7's
+   * tensor:free() (user says "I am done with this tensor early", the
+   * memory returns without waiting for Lua GC). */
+  void free() {
+    if (h == nullptr) {
+      return;
+    }
     if (tracked != 0) {
       pd_gc_account(-tracked);
+      tracked = 0;
     }
     pd_tensor_free(h);
+    h = nullptr;
   }
 
   LuaTensor(const LuaTensor& other)

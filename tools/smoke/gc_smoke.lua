@@ -140,4 +140,33 @@ check(freed2 < 1024 * 1024,
       ("oom: second fire mostly idempotent (freed2=%d)"):format(freed2))
 collectgarbage("collect")
 
+-- --- 8: layer 5 -- t:free() explicit release (14-gc.md sec.3) --------
+-- The user says "I am done with this tensor early"; the C-side heap
+-- ledger must be charged -bytes IMMEDIATELY (no waiting for Lua GC to
+-- reach the shell). Mirrors Torch7's tensor:free().
+paddle.set_heap_tracking{ on = true }
+collectgarbage("collect")
+local base8 = core.tracked_bytes()
+local free_t = core.pd_op_full({512, 512}, 1.0, F32, cpu)  -- 1MB
+local held8 = core.tracked_bytes()
+check(held8 >= base8 + 512 * 512 * 4,
+      ("free: 1MB tensor accounted (base=%d held=%d)"):format(base8, held8))
+-- Explicit release WITHOUT collectgarbage: ledger must drop now.
+free_t:free()
+local after_free = core.tracked_bytes()
+check(after_free == base8,
+      ("free: ledger dropped immediately (was %d now %d, no GC wait)")
+        :format(held8, after_free))
+-- Idempotent + null-safe: a second free() is a no-op, no double free,
+-- no double charge. The shell is dead (h==nullptr) but still a valid
+-- Lua object, so calling free() again must not crash.
+free_t:free()
+check(core.tracked_bytes() == base8,
+      "free: second free() idempotent (no double charge)")
+-- Drop the dead shell + collect: destructor sees h==nullptr and is a
+-- no-op (pd_tensor_free(NULL) = delete nullptr, tensor.cc:229). No
+-- crash, no double free on the underlying storage.
+free_t = nil
+collectgarbage("collect")
+
 print(("GC_SMOKE PASS: %d assertions"):format(n_asserts))
