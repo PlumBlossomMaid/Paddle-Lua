@@ -47,6 +47,77 @@ PyTorch 的 `torch.jit.trace` 也是这样。
 P14 那套堆追踪机制在这条路径上根本用不上。
 对显存敏感的用户,"用 `jit.trace` 包一下"本身就是一个可推荐的优化手段。
 
+### 2.2 `pir::Program` 构造接口(2026-10-31 开工前专项调研,已核实)
+
+> §3.2 的"具体 API 未核实"已关闭。以下全部出自 Paddle 源码
+> `E:\code\paddle`(分支 `windows_dataloader_multiprocess`,HEAD 2bfeb115b0)。
+
+**① Program 根结构** —— `pir::Program(IrContext*)`(program.h:44)内部
+`module_ = ModuleOp::Create(context, this)`(program.cc:55-57),即根 op
+是 `builtin.module`(builtin_op.h:31-44)。关键成员:
+`module_op()`(program.h:52)、`block()`(顶 Block,program.h:66-68)、
+`SetParameter(name, shared_ptr<Parameter>)` / `parameters()`(program.h:60-77,
+权重挂 Program 层的 *parameter map*)。Program 禁拷贝/移动构造
+(program.h:45-46),`~Program` 内部 `module_.Destroy()`(program.cc:60-62)。
+
+**② 组算子** —— 走 `pir::Builder`(builder.h:59):
+`Builder(IrContext*, Block*)` 默认插到 block 末尾(builder.h:70-71);
+`Build(const vector<Value>&, const AttributeMap&, const vector<Type>&, OpInfo)`
+(builder.h:139-141)或 `Build(OperationArgument&&)`(builder.h:136-137);
+`Insert(op)`(builder.h:143)。底层等价物 `Operation::Create(inputs, attrs,
+output_types, op_info, num_regions=0, successors={}, verify=true)`
+(operation.h:73-78)。`AttributeMap = unordered_map<string, Attribute>`
+(operation_utils.h:30)。**按名动态建 op**:`IrContext::GetRegisteredOpInfo(name)`
+(ir_context.h:124),构造 `OperationArgument(op_info)`(builder.h:200 模板路径
+证实该构造形态)。方言名 `pd_op`(op_dialect.h:34),op 经 `RegisterOps<>`
+静态注册(op_dialect.cc:387-435)。
+
+**③ builin op 族(builtin_op.h,组装图的胶水全部现成)**:`builtin.module` /
+`builtin.parameter`(ParameterOp,声明参数,builtin_op.h:46-69)/
+`builtin.set_parameter`(SetParameterOp,把 Value 写入 Program 参数表,
+builtin_op.h:71-92)/ `builtin.shadow_output`(ShadowOutputOp,标记输出,
+builtin_op.h:94-115)/ `builtin.combine` / `builtin.slice` / `builtin.split`
+(CombineOp/SliceOp/SplitOp,builtin_op.h:117-196)/ `builtin.constant`
+(ConstantOp,builtin_op.h:220-247)。
+
+**④ 张量类型** —— `pir::DenseTensorType::get(IrContext*, Type dtype,
+const DDim&, DataLayout=..., const LegacyLoD&={}, size_t offset=0)`
+(builtin_type.h:78-86);失败路径类型工厂全在 builder.h:148-186
+(float32_type / int32_type / vec_type 等)与属性工厂(builder.h:189-203:
+str_attr / int32_attr / index_attr / int64_attr / array_attr / bool_attr)。
+
+**⑤ 执行入口 `run_program_ad_func`(run_program_func.h:23-28)**:
+`run_program_ad_func(x, params, step_scope, prog_attrs, cuda_graph_attrs)`。
+`prog_attrs` 消费键集(run_program_impl.cc:448-500):
+`is_test`(bool,可选)/ `program_id`(int64)/ `in_sot_mode`(bool,可选)/
+`fx_names` `fp_names` `fo_names`(`vector<string>`)/ `no_need_buffers_names`/
+`fo_values`(`vector<pir::Value>`)/ **`forward_program` `backward_program`
+(`shared_ptr<pir::Program>` 直接放进 AttributeMap,run_program_impl.cc:498-500)**。
+前向在 RunProgramImpl 里 `ShareTensorsIntoScopeWithName(x, fx_names,...)`
+(run_program_impl.cc:530)后交 InterpreterCore 执行(:556 起)。
+
+**⑥ 反向的真面目(工期评估的关键修正)**:
+- 反向执行免费:D17 成立 —— `run_program_ad_func` 内部创建
+  `GradNodeRunProgram`(run_program_func.cc:286-317)挂进 eager 图,
+  `loss:backward()` 时 GradNode::operator() 执行 backward program
+  (run_program_node.cc:120 起)。
+- **但反向程序不免费**:`run_program_func.cc:296` 对
+  `prog_attrs.at("backward_program")` 是 `.at()` 硬读 —— 调用方必须在
+  prog_attrs 里给一个 `shared_ptr<pir::Program>`。
+- C++ 侧 pybind 只暴露 `split_program`(SplitForwardBackward,
+  pybind/pir.cc:2287,导出 :2568)等**拆分工具**;backward program 的
+  **生成**在 Python `paddle.autograd.ir_backward.grad`(纯 Python,
+  基于 yaml vjp 信息遍历前向图插反向 op)。
+- **`backward_program` 缺失时怎么办**:
+  - **推理路径安全**:Python 推理时显式传空 backward program
+    (`partial_program.py:427 _empty_backward_program_for_eval`);
+    `require_any_grad` 为 false 时不建 GradNode(run_program_func.cc:239-243)。
+  - **训练路径才是 8 周风险点**:需要真实 backward program,而"从 forward
+    Program 生成 backward Program"无单一 C++ 入口 —— 需要移植
+    ir_backward.grad 的核心(yaml vjp 语义遍历)或退回 §4 坑① 的"自建反向"。
+- **T-M0-18 已证可行性基座**:手工构造 AttributeMap 喂该函数可达 C++
+  逻辑(smoke_run_program.cc PASS,2026-10-23)——只是当时给的是空 program。
+
 ---
 
 ## 3. 设计
