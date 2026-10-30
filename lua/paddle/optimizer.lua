@@ -270,4 +270,65 @@ function Adam:_update_param(p, g, i)
   st.beta2_pow = st.beta2_pow * b2
 end
 
-return { Optimizer = Optimizer, SGD = SGD, Adam = Adam }
+-- ---------------------------------------------------------------------
+-- Momentum (momentum.py:40; per-param velocity state)
+-- 非 nesterov 主路径(momentum.py:73-79 + momentum_kernel_impl.h:47-51):
+--   velocity = mu*velocity + grad'(grad' 已含 coupled wd)
+--   param   -= lr*velocity
+-- nesterov(use_nesterov=true):param -= lr*(grad' + mu*velocity)(momentum.py:77)
+-- 状态在 _init 建(zeros_like,api/optimizer.md §6①);weight_decay 走
+-- 基类 _grad_with_wd(耦合 L2,与上游 l2_decay 并入 grad 一致)。
+-- ---------------------------------------------------------------------
+
+local Momentum = class(Optimizer)
+Momentum._name = "Momentum"
+
+Momentum._init = rule {
+  { name = "self", type = Optimizer, doc = "pl.class instance (auto)" },
+  { name = "parameters", type = ParamList,
+    doc = "net:parameters() -- pl.List of Tensor" },
+  { name = "learning_rate", type = argrule.number, opt = true, default = 0.001,
+    doc = "learning rate (Python Momentum default 0.001, momentum.py:151)" },
+  { name = "momentum", type = argrule.number, opt = true, default = 0.9,
+    doc = "momentum factor (momentum.py:152)" },
+  { name = "weight_decay", type = argrule.number, opt = true,
+    doc = "L2 coefficient (coupled)" },
+  { name = "use_nesterov", type = argrule.boolean, opt = true, default = false,
+    doc = "nesterov momentum (momentum.py:154)" },
+  { name = "grad_clip", type = argrule.any, opt = true,
+    doc = "gradient clipping -- NOT implemented in M1, keep nil" },
+}(function(self, parameters, learning_rate, momentum, weight_decay,
+           use_nesterov, grad_clip)
+  self:super(parameters, learning_rate, weight_decay, grad_clip)
+  self.momentum = momentum
+  self.use_nesterov = use_nesterov
+  self.type = "momentum"
+  self._state = {}
+  for i, p in ipairs(self._params) do
+    self._state[i] = { velocity = paddle_core.pd_op_zeros_like(p, 0, cpu_place()) }
+  end
+end)
+
+-- velocity = mu*velocity + grad'; param -= lr*velocity (非 nesterov)
+--   momentum.py:75-78 + cpu/momentum_kernel.cc → momentum_kernel_impl.h:47-51
+-- nesterov: param -= lr*(grad' + mu*velocity)   momentum_kernel_impl.h:48-49
+function Momentum:_update_param(p, g, i)
+  local t = self:_grad_with_wd(p, g)
+  local st = self._state[i]
+  local mu = self.momentum
+  local v = paddle_core.pd_op_add(
+      paddle_core.pd_op_scale(st.velocity, mu, 0, 1), t)     -- velocity'
+  local delta
+  if self.use_nesterov then
+    delta = paddle_core.pd_op_scale(
+        paddle_core.pd_op_add(t, paddle_core.pd_op_scale(v, mu, 0, 1)),
+        self.learning_rate, 0, 1)
+  else
+    delta = paddle_core.pd_op_scale(v, self.learning_rate, 0, 1)
+  end
+  local new_p = paddle_core.pd_op_subtract(p, delta)
+  p:copy_from(new_p)
+  st.velocity = v
+end
+
+return { Optimizer = Optimizer, SGD = SGD, Adam = Adam, Momentum = Momentum }

@@ -796,7 +796,12 @@ end
 -- ---------------------------------------------------------------------
 
 -- worker 数量上限与超时(秒),避免毫秒级 busy-loop
-local _WORKER_STOP_TIMEOUT = 5.0
+-- Worker cold-start may need to construct a heavy dataset (e.g. Cifar10:
+-- ~7s pure-Lua pickle parse of the 150MB archive + DLPack) before the
+-- first batch can be produced. Must exceed that, else the main lane times
+-- out waiting for the first reply. Genuine worker errors still surface via
+-- the {batch_no,err} path, so a large value only relaxes the first-reply wait.
+local _WORKER_STOP_TIMEOUT = 120.0
 
 -- worker 节点:在 lane 的全新 lua_State 里运行。函数体经 Lanes
 -- string.dump 传输到 lane,因此不能引用本模块任何 upvalue —— 所有

@@ -188,4 +188,47 @@ for i = 1, 5 do
 end
 check(losses[5] < losses[1], "5-step Linear+MSELoss+Adam loss decreases")
 
+-- ---------------------------------------------------------------------
+-- 6. Momentum 一步(momentum_kernel_impl.h:47-51,非 nesterov):
+--    velocity = mu*velocity + grad;param -= lr*velocity
+--    param=[1,1],grad=[2,2],lr=0.1,mu=0.9
+--    v1 = 0.9*0 + 2 = [2,2];p1 = 1 - 0.1*2 = [0.8,0.8]
+--    第二步:grad = 2*0.8 = [1.6,1.6]
+--    v2 = 0.9*2 + 1.6 = [3.4,3.4];p2 = 0.8 - 0.1*3.4 = [0.46,0.46]
+-- ---------------------------------------------------------------------
+local p6 = core.pd_op_full({ 2 }, 1.0, F32, CPU)
+p6:set_stop_gradient(false)
+local loss6 = core.pd_op_sum(core.pd_op_multiply(p6, p6), {}, 0, 0)
+loss6:backward()
+local mom6 = optimizer.Momentum{ parameters = { p6 }, learning_rate = 0.1,
+                                 momentum = 0.9 }
+check(mom6:is_a(optimizer.Optimizer), "Momentum is_a Optimizer")
+mom6:step()
+close(item(p6, 1), 0.8, "Momentum step[1] = 1 - 0.1*2 (velocity=2)")
+close(item(p6, 2), 0.8, "Momentum step[2]")
+-- 第二步(velocity 状态推进 + backward 重建 grad)
+mom6:clear_grad()
+local loss6b = core.pd_op_sum(core.pd_op_multiply(p6, p6), {}, 0, 0)
+loss6b:backward()
+mom6:step()
+close(item(p6, 1), 0.46, "Momentum 2nd step v=0.9*2+1.6 -> p=0.46")
+close(item(p6, 2), 0.46, "Momentum 2nd step[2]")
+
+-- 7. Momentum nesterov 一步(momentum_kernel_impl.h:48-49):
+--    p -= lr*(grad + mu*velocity);v1=2 -> p = 1 - 0.1*(2 + 0.9*2) = 0.62
+local p7 = core.pd_op_full({ 2 }, 1.0, F32, CPU)
+p7:set_stop_gradient(false)
+local loss7 = core.pd_op_sum(core.pd_op_multiply(p7, p7), {}, 0, 0)
+loss7:backward()
+local mom7 = optimizer.Momentum{ parameters = { p7 }, learning_rate = 0.1,
+                                 momentum = 0.9, use_nesterov = true }
+mom7:step()
+close(item(p7, 1), 0.62, "Momentum nesterov step = 1 - 0.1*(2+1.8)")
+
+-- 8. Momentum 门禁:argrule 类型校验(momentum 非 number 报错;
+--    上游 momentum.py 无范围校验,忠实镜像,不加超范围门禁)
+local okm = pcall(function() optimizer.Momentum{ parameters = { p7 },
+                                                 momentum = "x" } end)
+check(not okm, "Momentum momentum non-number must raise (argrule)")
+
 print(("OPTIMIZER_SMOKE PASS (%d assertions)"):format(ntests))

@@ -1,10 +1,14 @@
 -- examples/cifar10.lua -- M2 验收(roadmap.md §1 M2: P12 + P13)
 -- 判据:
---   P12: ResNet18 在 CIFAR-10 上 10 epoch 测试集准确率 > 80%
---        (roadmap.md:239; 12-dataset-vision.md §5)
+--   P12: ResNet18 在 CIFAR-10 上 10 epoch 测试集准确率 > 78%
+--        (2026-10-30 用户拍板由 80% 放宽:官方 Python Paddle 3.5.0.dev
+--        同配方参考仅 0.7613,四跑 Lua 0.7905/0.7943/0.7559/0.7886 证明
+--        0.80 对无预训练 ImageNet 结构 ResNet18(conv1 7x7 s2,32x32→8x8)
+--        本身不可达;0.78 是四跑最优 0.7943 有余量的值。roadmap.md:239)
 --   P13: num_workers=4 吞吐 >= num_workers=0 的 3 倍 (roadmap.md:249)
 -- 用 CIFAR_EPOCHS 环境变量覆盖 epoch 数(默认 10),CIFAR_BATCH 覆盖
--- batch 大小(默认 128),CIFAR_SKIP_TP=1 跳过吞吐段(快速验证训练时)。
+-- batch 大小(默认 128),CIFAR_SKIP_TP=1 跳过吞吐段(快速验证训练时),
+-- CIFAR_TP_ONLY=1 跳过训练与测试段直达 P13 吞吐(P12 另验,4 分钟)。
 --
 -- 数据:paddle.vision.datasets.Cifar10(bcebos tar.gz → 纯 Lua tar
 -- walk → lua-pickle Python2 pickle;缓存 ~/.cache/paddle/dataset/cifar)。
@@ -28,6 +32,9 @@
 --
 -- Run (repo root, x64 env):
 --   PATH=<smoke 同款完整 dll 路径>;$PATH
+--   set OMP_NUM_THREADS=1   （必须:P13 多 worker 下 Insight7 kernel 内层
+--     OpenMP 与 Lanes 形成线程风暴,4 worker 反比 1 worker 慢;OMP=1 让
+--     Lanes 成为唯一并行层,P13 实测 nw=0=4.5 / nw=4=13.8 = 3.07x 达标）
 --   E:\code\vcpkg\installed\x64-windows\tools\luajit\luajit.exe examples/cifar10.lua
 
 package.path = "./lua/?.lua;./lua/?/init.lua;" .. package.path
@@ -54,6 +61,9 @@ local io = paddle.io
 local EPOCHS = tonumber(os.getenv("CIFAR_EPOCHS")) or 10
 local BATCH = tonumber(os.getenv("CIFAR_BATCH")) or 128
 local SKIP_TP = os.getenv("CIFAR_SKIP_TP") == "1"
+-- P12 已另验(四跑最优 0.7943 / 第四跑 0.7886 > 0.78)时设 1:跳过
+-- 3.7h 重训直达 P13 吞吐段,省一轮完整训练成本。
+local TP_ONLY = os.getenv("CIFAR_TP_ONLY") == "1"
 
 -- CIFAR-10 统计(上游 Paddle 惯用值,用于归一化;mean/std 是 0-1 标度,
 -- transform 里 Normalize 作用于 uint8(0-255)Array → 乘 255 还原标度,
@@ -123,17 +133,26 @@ end
 core.set_has_grad(old_g)
 
 local criterion = nn.CrossEntropyLoss{ reduction = "mean" }
+-- 2026-10-30 三跑实测:
+--   Adam 1-5:1e-3/6-8:3e-4/9-10:1e-4  -> 0.7905
+--   Adam 1-7:1e-3/8-9:3e-4/10:1e-4     -> 0.7943 (基线)
+--   SGDM 0.1阶梯 (第三跑)               -> 0.7559 (证伪:lr 0.1 无
+--   warmup 起步过猛 + 尾段 0.001 失活;Momentum 实现本身正确但本
+--   结构不适合该配方——ImageNet 结构 ResNet18 conv1 7x7 stride2 把
+--   CIFAR 32x32 压到 8x8,10-epoch 无预训练对 0.80 本就临界)
+--   → 回 Adam 基线方向:1e-3 保持 7 epoch(lr_for),尾段全给 3e-4
+--   (实测 3e-4 段最有效:ep8 0.81→0.66 大跳),砍掉几乎不起作用的 1e-4。
 local opt = paddle.optimizer.Adam{
   parameters = net:parameters(),
   learning_rate = 1e-3,
   weight_decay = 5e-4,
 }
 
--- step 调度表(epoch -> lr)
+-- step 调度表(epoch -> lr)。1e-3 ×7 → 3e-4 ×3(无 1e-4 尾段,
+-- 见上注释的实测依据)。
 local function lr_for(epoch)
-  if epoch <= 5 then return 1e-3 end
-  if epoch <= 8 then return 3e-4 end
-  return 1e-4
+  if epoch <= 7 then return 1e-3 end
+  return 3e-4
 end
 
 -- ---- 训练循环 ------------------------------------------------------
@@ -142,6 +161,11 @@ local function train_loader(shuffle)
                         shuffle = shuffle and true or false,
                         num_workers = 0 }
 end
+
+-- 训练 + 测试段:TP_ONLY 时跳过(P12 已另验最优 0.7943,省 3.7h 重训)。
+if TP_ONLY then
+  print("M2 P12 SKIP (CIFAR_TP_ONLY=1): 0.78 判据最优 0.7943 已验收")
+else
 
 for epoch = 1, EPOCHS do
   opt.learning_rate = lr_for(epoch)
@@ -191,9 +215,11 @@ core.set_has_grad(true)
 
 local acc = correct / total
 print(("test accuracy %.4f (%d/%d)"):format(acc, correct, total))
-assert(acc > 0.80,
-       ("M2 P12 验收失败:test accuracy %.4f <= 0.80"):format(acc))
-print("M2 P12 ACCEPT: ResNet18 CIFAR-10 test accuracy > 80%")
+assert(acc > 0.78,
+       ("M2 P12 验收失败:test accuracy %.4f <= 0.78"):format(acc))
+print("M2 P12 ACCEPT: ResNet18 CIFAR-10 test accuracy > 78%")
+
+end -- TP_ONLY
 
 -- ---- P13 吞吐:num_workers=4 >= num_workers=0 的 3 倍 ----------------
 -- 用真实 CIFAR 负载(每样本 insight 转换 + ToTensor + collate)。
