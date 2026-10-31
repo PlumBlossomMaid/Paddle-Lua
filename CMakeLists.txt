@@ -148,3 +148,24 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/csrc/capi/test_c_only.c")
     "${CMAKE_CURRENT_SOURCE_DIR}/csrc/capi")
   target_link_libraries(smoke_capi PRIVATE paddle_capi)
 endif()
+
+# ---- smoke_static_trace: P15 inference-first polish probe ------------
+# Hand-built pir::Program -> run_program_ad_func (15-to-static.md sec.2.2).
+# Standalone EXE: links the full 483-lib component baseline and hits the
+# PHI_INNER duplicate-definition quirk, so it needs /FORCE:MULTIPLE
+# (m0-report.md sec.4.1); the binding DLL path does not.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/smoke/smoke_static_trace.cc")
+  add_executable(smoke_static_trace
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/smoke/smoke_static_trace.cc")
+  target_include_directories(smoke_static_trace SYSTEM PRIVATE
+    "${LibPaddle_INCLUDE_DIRS}")
+  target_compile_definitions(smoke_static_trace PRIVATE ${LibPaddle_DEFINES})
+  target_link_libraries(smoke_static_trace PRIVATE ${LibPaddle_LINK_LIBRARIES})
+  if(WIN32)
+    target_link_directories(smoke_static_trace PRIVATE "${LibPaddle_BUILD_DIR}")
+    target_link_options(smoke_static_trace PRIVATE /FORCE:MULTIPLE)
+  endif()
+  if(MSVC)
+    target_compile_options(smoke_static_trace PRIVATE /bigobj /W0)
+  endif()
+endif()
