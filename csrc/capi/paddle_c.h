@@ -444,6 +444,44 @@ pd_status  pd_gc_register_oom(void);
  * not routed through the callback. */
 int64_t    pd_gc_fire_oom(int64_t fake_bytes);
 
+/* ------------------------------------------------------------------ */
+/* Group 12: static-graph trace recorder (P15-A, 15-to-static.md)      */
+/* ------------------------------------------------------------------ */
+
+/* Opaque trace-recorder handle (see trace.cc). eager-record: while a
+ * trace is active, each generated pd_op_* wrapper ALSO builds the same
+ * op into a pir::Program via the typed <Op>Op::Build wrapper (the typed
+ * Build owns per-op structure, e.g. scalar attrs become FullOp inputs --
+ * pd_op4.cc:4360; a bare Operation::Create would mis-shape the op).
+ * pd_trace_run replays the recorded program through run_program_ad_func
+ * in inference mode (empty backward_program + is_test, mirroring the
+ * Python eval path at partial_program.py:427).
+ *
+ * One active trace per thread; P15-A traces run on the main lane only.
+ * begin -> (feed inputs via pd_trace_input; generated wrappers record)
+ *        -> pd_trace_output per fetch -> pd_trace_run -> pd_trace_free. */
+typedef struct pd_trace_s* pd_trace;
+
+pd_trace   pd_trace_begin(void);
+
+/* Abandon a trace without running (also safe after pd_trace_run). */
+void       pd_trace_free(pd_trace t);
+
+/* Declare `tensor` (a real eager tensor) as a trace input under `name`:
+ * emits pd_op.data and makes the tensor a feed for pd_trace_run. The
+ * name joins fx_names; run feeds it back under the same name. */
+pd_status  pd_trace_input(pd_trace t, pd_tensor tensor, const char* name);
+
+/* Mark `tensor` (a previously-recorded op output) as a fetch under
+ * `name`: emits builtin.shadow_output and joins fo_names/fo_values
+ * (output lookup by name must match, run_program_impl.cc:225). */
+pd_status  pd_trace_output(pd_trace t, pd_tensor tensor, const char* name);
+
+/* Replay the recorded program. Writes up to nout NEW pd_tensor handles
+ * the caller owns into outs[]. Returns the produced count, or -1 on
+ * error (pd_last_error). */
+int        pd_trace_run(pd_trace t, pd_tensor* outs, int nout);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif

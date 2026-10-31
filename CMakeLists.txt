@@ -169,3 +169,28 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/smoke/smoke_static_trace.cc")
     target_compile_options(smoke_static_trace PRIVATE /bigobj /W0)
   endif()
 endif()
+
+# ---- smoke_trace_ctx: P15-A trace-context smoke ------------------------
+# Drives the pd_trace_* C ABI + a manual typed-Build record, then replays
+# via run_program_ad_func and compares to the eager op (tools/smoke/
+# smoke_trace_ctx.cc). Standalone EXE -> /FORCE:MULTIPLE (m0-report 4.1).
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/smoke/smoke_trace_ctx.cc")
+  add_executable(smoke_trace_ctx
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/smoke/smoke_trace_ctx.cc")
+  target_include_directories(smoke_trace_ctx PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/csrc/capi"
+    "${CMAKE_CURRENT_SOURCE_DIR}/csrc/capi_gen")
+  target_include_directories(smoke_trace_ctx SYSTEM PRIVATE
+    "${LibPaddle_INCLUDE_DIRS}")
+  target_compile_definitions(smoke_trace_ctx PRIVATE ${LibPaddle_DEFINES})
+  target_link_libraries(smoke_trace_ctx PRIVATE
+    paddle_capi
+    ${LibPaddle_LINK_LIBRARIES})
+  if(WIN32)
+    target_link_directories(smoke_trace_ctx PRIVATE "${LibPaddle_BUILD_DIR}")
+    target_link_options(smoke_trace_ctx PRIVATE /FORCE:MULTIPLE)
+  endif()
+  if(MSVC)
+    target_compile_options(smoke_trace_ctx PRIVATE /bigobj /W0)
+  endif()
+endif()
