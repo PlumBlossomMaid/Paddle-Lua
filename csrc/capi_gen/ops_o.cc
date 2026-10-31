@@ -4,6 +4,9 @@
  */
 #include "capi_impl.h"
 #include "paddle/fluid/eager/api/generated/eager_generated/forwards/dygraph_functions.h"
+#include "trace_ctx.h"
+#include "paddle/fluid/pir/dialect/operator/ir/pd_op.h"
+#include "paddle/fluid/pir/dialect/operator/ir/op_attribute.h"
 
 /* 1-based index conversion (conventions.md sec.5.1):
  * takes_index tensors get elementwise -1 before the ad_func
@@ -30,8 +33,9 @@ pd_tensor pd_op_one_hot(pd_tensor x, double num_classes) {
   paddle::Tensor x_1b = pd_idx_minus1(x_t);
   paddle::Tensor out = one_hot_ad_func(
       x_1b /* Tensor index 1-based -> 0-based */, paddle::experimental::Scalar(static_cast<int64_t>(num_classes)) /* Scalar(int) constructed as int64 */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -40,8 +44,9 @@ pd_tensor pd_op_ones(const int64_t* shape, int64_t shape_n, pd_dtype dtype, pd_p
   PD_GUARD_BEGIN;
   paddle::Tensor out = ones_ad_func(
       paddle::experimental::IntArray(shape, shape_n) /* paddle::experimental::IntArray */, static_cast<phi::DataType>(dtype) /* phi::DataType */, reinterpret_cast<pd_place_t*>(place)->value /* paddle::Place */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -50,8 +55,14 @@ pd_tensor pd_op_ones_like(pd_tensor x, pd_dtype dtype, pd_place place) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = ones_like_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, static_cast<phi::DataType>(dtype) /* phi::DataType */, reinterpret_cast<pd_place_t*>(place)->value /* paddle::Place */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::OnesLikeOp>(_tv0, static_cast<phi::DataType>(dtype), reinterpret_cast<pd_place_t*>(place)->value);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -60,7 +71,16 @@ pd_tensor pd_op_overlap_add(pd_tensor x, int hop_length, int axis) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = overlap_add_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, hop_length /* int */, axis /* int */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["hop_length"] = pir::Int32Attribute::get(pd_trace_ir(), hop_length);
+    _ta["axis"] = pir::Int32Attribute::get(pd_trace_ir(), axis);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::OverlapAddOp>(_tv0, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }

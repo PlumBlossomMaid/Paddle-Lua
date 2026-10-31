@@ -4,6 +4,9 @@
  */
 #include "capi_impl.h"
 #include "paddle/fluid/eager/api/generated/eager_generated/forwards/dygraph_functions.h"
+#include "trace_ctx.h"
+#include "paddle/fluid/pir/dialect/operator/ir/pd_op.h"
+#include "paddle/fluid/pir/dialect/operator/ir/op_attribute.h"
 
 /* 1-based index conversion (conventions.md sec.5.1):
  * takes_index tensors get elementwise -1 before the ad_func
@@ -41,8 +44,14 @@ pd_tensor pd_op_unfold(pd_tensor x, const int* kernel_sizes, int64_t kernel_size
   PD_GUARD_BEGIN;
   paddle::Tensor out = unfold_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, std::vector<int>(kernel_sizes, kernel_sizes + kernel_sizes_n) /* std::vector<int> */, std::vector<int>(strides, strides + strides_n) /* std::vector<int> */, std::vector<int>(paddings, paddings + paddings_n) /* std::vector<int> */, std::vector<int>(dilations, dilations + dilations_n) /* std::vector<int> */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::UnfoldOp>(_tv0, std::vector<int>(kernel_sizes, kernel_sizes + kernel_sizes_n), std::vector<int>(strides, strides + strides_n), std::vector<int>(paddings, paddings + paddings_n), std::vector<int>(dilations, dilations + dilations_n));
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -51,8 +60,20 @@ pd_tensor pd_op_uniform(const int64_t* shape, int64_t shape_n, pd_dtype dtype, d
   PD_GUARD_BEGIN;
   paddle::Tensor out = uniform_ad_func(
       paddle::experimental::IntArray(shape, shape_n) /* paddle::experimental::IntArray */, static_cast<phi::DataType>(dtype) /* phi::DataType */, paddle::experimental::Scalar(min) /* paddle::experimental::Scalar */, paddle::experimental::Scalar(max) /* paddle::experimental::Scalar */, seed /* int */, reinterpret_cast<pd_place_t*>(place)->value /* paddle::Place */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::AttributeMap _ta;
+    _ta["shape"] = paddle::dialect::IntArrayAttribute::get(pd_trace_ir(), paddle::experimental::IntArray(shape, shape_n));
+    _ta["dtype"] = paddle::dialect::DataTypeAttribute::get(pd_trace_ir(), static_cast<phi::DataType>(dtype));
+    _ta["min"] = paddle::dialect::ScalarAttribute::get(pd_trace_ir(), paddle::experimental::Scalar(min));
+    _ta["max"] = paddle::dialect::ScalarAttribute::get(pd_trace_ir(), paddle::experimental::Scalar(max));
+    _ta["seed"] = pir::Int32Attribute::get(pd_trace_ir(), seed);
+    _ta["place"] = paddle::dialect::PlaceAttribute::get(pd_trace_ir(), reinterpret_cast<pd_place_t*>(place)->value);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::UniformOp>(_ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -62,8 +83,9 @@ pd_tensor pd_op_uniform_inplace(pd_tensor x, float min, float max, int seed, int
   paddle::Tensor& x_ip = reinterpret_cast<pd_tensor_t*>(x)->value;
   paddle::Tensor out = uniform_inplace_ad_func(
       x_ip /* Tensor (in-place) */, min /* float */, max /* float */, seed /* int */, diag_num /* int */, diag_step /* int */, diag_val /* float */, paddle::make_optional(&x_ip) /* predefined_out: in-place write-back */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -72,8 +94,14 @@ pd_tensor pd_op_uniform_random_batch_size_like(pd_tensor input, const int* shape
   PD_GUARD_BEGIN;
   paddle::Tensor out = uniform_random_batch_size_like_ad_func(
       reinterpret_cast<pd_tensor_t*>(input)->value /* Tensor */, std::vector<int>(shape, shape + shape_n) /* std::vector<int> */, input_dim_idx /* int */, output_dim_idx /* int */, min /* float */, max /* float */, seed /* int */, diag_num /* int */, diag_step /* int */, diag_val /* float */, static_cast<phi::DataType>(dtype) /* phi::DataType */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(input);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::UniformRandomBatchSizeLikeOp>(_tv0, std::vector<int>(shape, shape + shape_n), input_dim_idx, output_dim_idx, min, max, seed, diag_num, diag_step, diag_val, static_cast<phi::DataType>(dtype));
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -112,8 +140,9 @@ pd_tensor pd_op_unpool(pd_tensor x, pd_tensor indices, const int* ksize, int64_t
   paddle::Tensor indices_1b = pd_idx_minus1(indices_t);
   paddle::Tensor out = unpool_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, indices_1b /* Tensor index 1-based -> 0-based */, std::vector<int>(ksize, ksize + ksize_n) /* std::vector<int> */, std::vector<int>(strides, strides + strides_n) /* std::vector<int> */, std::vector<int>(padding, padding + padding_n) /* std::vector<int> */, paddle::experimental::IntArray(output_size, output_size_n) /* paddle::experimental::IntArray */, data_format /* std::string */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -124,8 +153,9 @@ pd_tensor pd_op_unpool3d(pd_tensor x, pd_tensor indices, const int* ksize, int64
   paddle::Tensor indices_1b = pd_idx_minus1(indices_t);
   paddle::Tensor out = unpool3d_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, indices_1b /* Tensor index 1-based -> 0-based */, std::vector<int>(ksize, ksize + ksize_n) /* std::vector<int> */, std::vector<int>(strides, strides + strides_n) /* std::vector<int> */, std::vector<int>(paddings, paddings + paddings_n) /* std::vector<int> */, std::vector<int>(output_size, output_size + output_size_n) /* std::vector<int> */, data_format /* std::string */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -134,8 +164,16 @@ pd_tensor pd_op_unsqueeze(pd_tensor x, const int64_t* axis, int64_t axis_n) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = unsqueeze_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, paddle::experimental::IntArray(axis, axis_n) /* paddle::experimental::IntArray */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["axis"] = paddle::dialect::IntArrayAttribute::get(pd_trace_ir(), paddle::experimental::IntArray(axis, axis_n));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::UnsqueezeOp>(_tv0, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 

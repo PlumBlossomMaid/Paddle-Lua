@@ -4,6 +4,9 @@
  */
 #include "capi_impl.h"
 #include "paddle/fluid/eager/api/generated/eager_generated/forwards/dygraph_functions.h"
+#include "trace_ctx.h"
+#include "paddle/fluid/pir/dialect/operator/ir/pd_op.h"
+#include "paddle/fluid/pir/dialect/operator/ir/op_attribute.h"
 
 /* 1-based index conversion (conventions.md sec.5.1):
  * takes_index tensors get elementwise -1 before the ad_func
@@ -28,8 +31,14 @@ pd_tensor pd_op_l1_norm(pd_tensor x) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = l1_norm_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::L1NormOp>(_tv0);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -40,8 +49,9 @@ pd_tensor pd_op_label_smooth(pd_tensor label, pd_tensor prior_dist, float epsilo
   paddle::Tensor label_1b = pd_idx_minus1(label_t);
   paddle::Tensor out = label_smooth_ad_func(
       label_1b /* Tensor index 1-based -> 0-based */, prior_dist ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(prior_dist)->value) : paddle::none /* Tensor? */, epsilon /* float */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -50,8 +60,9 @@ pd_tensor pd_op_layer_norm(pd_tensor x, pd_tensor scale, pd_tensor bias, double 
   PD_GUARD_BEGIN;
   paddle::Tensor out = layer_norm_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, scale ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(scale)->value) : paddle::none /* Tensor? */, bias ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(bias)->value) : paddle::none /* Tensor? */, epsilon /* double */, begin_norm_axis /* int */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -60,8 +71,16 @@ pd_tensor pd_op_leaky_relu(pd_tensor x, double negative_slope) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = leaky_relu_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, negative_slope /* double */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["negative_slope"] = pir::DoubleAttribute::get(pd_trace_ir(), negative_slope);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::LeakyReluOp>(_tv0, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -70,8 +89,16 @@ pd_tensor pd_op_lerp(pd_tensor x, pd_tensor y, pd_tensor weight) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = lerp_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(y)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(weight)->value /* Tensor */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = pd_trace_value_or_feed(y);
+    pir::Value _tv2 = pd_trace_value_or_feed(weight);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::LerpOp>(_tv0, _tv1, _tv2);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -80,8 +107,15 @@ pd_tensor pd_op_less_equal(pd_tensor x, pd_tensor y) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = less_equal_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(y)->value /* Tensor */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = pd_trace_value_or_feed(y);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::LessEqualOp>(_tv0, _tv1);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -90,8 +124,15 @@ pd_tensor pd_op_less_than(pd_tensor x, pd_tensor y) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = less_than_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(y)->value /* Tensor */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = pd_trace_value_or_feed(y);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::LessThanOp>(_tv0, _tv1);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -100,8 +141,14 @@ pd_tensor pd_op_lgamma(pd_tensor x) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = lgamma_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::LgammaOp>(_tv0);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -110,8 +157,17 @@ pd_tensor pd_op_limit_by_capacity(pd_tensor expert_count, pd_tensor capacity, in
   PD_GUARD_BEGIN;
   paddle::Tensor out = limit_by_capacity_ad_func(
       reinterpret_cast<pd_tensor_t*>(expert_count)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(capacity)->value /* Tensor */, n_worker /* int */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(expert_count);
+    pir::Value _tv1 = pd_trace_value_or_feed(capacity);
+    pir::AttributeMap _ta;
+    _ta["n_worker"] = pir::Int32Attribute::get(pd_trace_ir(), n_worker);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::LimitByCapacityOp>(_tv0, _tv1, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -126,8 +182,9 @@ pd_tensor pd_op_linear_interp(pd_tensor x, pd_tensor out_size, const pd_tensor* 
   }
   paddle::Tensor out = linear_interp_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, out_size ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(out_size)->value) : paddle::none /* Tensor? */, size_tensor ? paddle::make_optional(size_tensor_tmp) : paddle::none /* std::vector<Tensor>? */, scale_tensor ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(scale_tensor)->value) : paddle::none /* Tensor? */, data_format /* std::string */, out_d /* int */, out_h /* int */, out_w /* int */, std::vector<double>(scale, scale + scale_n) /* std::vector<double> */, interp_method /* std::string */, align_corners != 0 /* bool */, align_mode /* int */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -136,8 +193,18 @@ pd_tensor pd_op_linear_v2(pd_tensor input, pd_tensor weight, pd_tensor bias, int
   PD_GUARD_BEGIN;
   paddle::Tensor out = linear_v2_ad_func(
       reinterpret_cast<pd_tensor_t*>(input)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(weight)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(bias)->value /* Tensor */, transpose_weight != 0 /* bool */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(input);
+    pir::Value _tv1 = pd_trace_value_or_feed(weight);
+    pir::Value _tv2 = pd_trace_value_or_feed(bias);
+    pir::AttributeMap _ta;
+    _ta["transpose_weight"] = pir::BoolAttribute::get(pd_trace_ir(), transpose_weight != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::LinearV2Op>(_tv0, _tv1, _tv2, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -146,8 +213,19 @@ pd_tensor pd_op_linspace(pd_tensor start, pd_tensor stop, pd_tensor number, pd_d
   PD_GUARD_BEGIN;
   paddle::Tensor out = linspace_ad_func(
       reinterpret_cast<pd_tensor_t*>(start)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(stop)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(number)->value /* Tensor */, static_cast<phi::DataType>(dtype) /* phi::DataType */, reinterpret_cast<pd_place_t*>(place)->value /* paddle::Place */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(start);
+    pir::Value _tv1 = pd_trace_value_or_feed(stop);
+    pir::Value _tv2 = pd_trace_value_or_feed(number);
+    pir::AttributeMap _ta;
+    _ta["dtype"] = paddle::dialect::DataTypeAttribute::get(pd_trace_ir(), static_cast<phi::DataType>(dtype));
+    _ta["place"] = paddle::dialect::PlaceAttribute::get(pd_trace_ir(), reinterpret_cast<pd_place_t*>(place)->value);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::LinspaceOp>(_tv0, _tv1, _tv2, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -156,8 +234,9 @@ pd_tensor pd_op_llm_int8_linear(pd_tensor x, pd_tensor weight, pd_tensor bias, p
   PD_GUARD_BEGIN;
   paddle::Tensor out = llm_int8_linear_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(weight)->value /* Tensor */, bias ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(bias)->value) : paddle::none /* Tensor? */, reinterpret_cast<pd_tensor_t*>(weight_scale)->value /* Tensor */, threshold /* float */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -166,8 +245,14 @@ pd_tensor pd_op_log(pd_tensor x) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = log_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::LogOp>(_tv0);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -176,8 +261,14 @@ pd_tensor pd_op_log10(pd_tensor x) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = log10_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::Log10Op>(_tv0);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -186,8 +277,14 @@ pd_tensor pd_op_log1p(pd_tensor x) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = log1p_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::Log1pOp>(_tv0);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -196,8 +293,14 @@ pd_tensor pd_op_log2(pd_tensor x) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = log2_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::Log2Op>(_tv0);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -206,8 +309,17 @@ pd_tensor pd_op_log_loss(pd_tensor input, pd_tensor label, float epsilon) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = log_loss_ad_func(
       reinterpret_cast<pd_tensor_t*>(input)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(label)->value /* Tensor */, epsilon /* float */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(input);
+    pir::Value _tv1 = pd_trace_value_or_feed(label);
+    pir::AttributeMap _ta;
+    _ta["epsilon"] = pir::FloatAttribute::get(pd_trace_ir(), epsilon);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::LogLossOp>(_tv0, _tv1, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -216,8 +328,16 @@ pd_tensor pd_op_log_softmax(pd_tensor x, int axis) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = log_softmax_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, axis /* int */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["axis"] = pir::Int32Attribute::get(pd_trace_ir(), axis);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::LogSoftmaxOp>(_tv0, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -226,8 +346,19 @@ pd_tensor pd_op_logcumsumexp(pd_tensor x, int axis, int flatten, int exclusive, 
   PD_GUARD_BEGIN;
   paddle::Tensor out = logcumsumexp_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, axis /* int */, flatten != 0 /* bool */, exclusive != 0 /* bool */, reverse != 0 /* bool */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["axis"] = pir::Int32Attribute::get(pd_trace_ir(), axis);
+    _ta["flatten"] = pir::BoolAttribute::get(pd_trace_ir(), flatten != 0);
+    _ta["exclusive"] = pir::BoolAttribute::get(pd_trace_ir(), exclusive != 0);
+    _ta["reverse"] = pir::BoolAttribute::get(pd_trace_ir(), reverse != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::LogcumsumexpOp>(_tv0, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -236,8 +367,15 @@ pd_tensor pd_op_logical_and(pd_tensor x, pd_tensor y) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = logical_and_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(y)->value /* Tensor */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = pd_trace_value_or_feed(y);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::LogicalAndOp>(_tv0, _tv1);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -246,8 +384,14 @@ pd_tensor pd_op_logical_not(pd_tensor x) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = logical_not_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::LogicalNotOp>(_tv0);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -256,8 +400,15 @@ pd_tensor pd_op_logical_or(pd_tensor x, pd_tensor y) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = logical_or_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(y)->value /* Tensor */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = pd_trace_value_or_feed(y);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::LogicalOrOp>(_tv0, _tv1);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -266,8 +417,15 @@ pd_tensor pd_op_logical_xor(pd_tensor x, pd_tensor y) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = logical_xor_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(y)->value /* Tensor */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = pd_trace_value_or_feed(y);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::LogicalXorOp>(_tv0, _tv1);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -276,8 +434,16 @@ pd_tensor pd_op_logit(pd_tensor x, double eps) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = logit_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, eps /* double */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["eps"] = pir::DoubleAttribute::get(pd_trace_ir(), eps);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::LogitOp>(_tv0, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -286,8 +452,14 @@ pd_tensor pd_op_logsigmoid(pd_tensor x) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = logsigmoid_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::LogsigmoidOp>(_tv0);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -296,8 +468,20 @@ pd_tensor pd_op_logspace(pd_tensor start, pd_tensor stop, pd_tensor num, pd_tens
   PD_GUARD_BEGIN;
   paddle::Tensor out = logspace_ad_func(
       reinterpret_cast<pd_tensor_t*>(start)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(stop)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(num)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(base)->value /* Tensor */, static_cast<phi::DataType>(dtype) /* phi::DataType */, reinterpret_cast<pd_place_t*>(place)->value /* paddle::Place */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(start);
+    pir::Value _tv1 = pd_trace_value_or_feed(stop);
+    pir::Value _tv2 = pd_trace_value_or_feed(num);
+    pir::Value _tv3 = pd_trace_value_or_feed(base);
+    pir::AttributeMap _ta;
+    _ta["dtype"] = paddle::dialect::DataTypeAttribute::get(pd_trace_ir(), static_cast<phi::DataType>(dtype));
+    _ta["place"] = paddle::dialect::PlaceAttribute::get(pd_trace_ir(), reinterpret_cast<pd_place_t*>(place)->value);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::LogspaceOp>(_tv0, _tv1, _tv2, _tv3, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -306,8 +490,14 @@ pd_tensor pd_op_logsumexp(pd_tensor x, const int* axis, int64_t axis_n, int keep
   PD_GUARD_BEGIN;
   paddle::Tensor out = logsumexp_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, std::vector<int>(axis, axis + axis_n) /* std::vector<int> */, keepdim != 0 /* bool */, reduce_all != 0 /* bool */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::LogsumexpOp>(_tv0, std::vector<int>(axis, axis + axis_n), keepdim != 0, reduce_all != 0);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -318,8 +508,9 @@ pd_tensor pd_op_lookup_table_dequant(pd_tensor w, pd_tensor ids, int64_t padding
   paddle::Tensor ids_1b = pd_idx_minus1(ids_t);
   paddle::Tensor out = lookup_table_dequant_ad_func(
       reinterpret_cast<pd_tensor_t*>(w)->value /* Tensor */, ids_1b /* Tensor index 1-based -> 0-based */, padding_idx /* int64_t */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -328,8 +519,9 @@ pd_tensor pd_op_lp_pool2d(pd_tensor x, const int64_t* kernel_size, int64_t kerne
   PD_GUARD_BEGIN;
   paddle::Tensor out = lp_pool2d_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, paddle::experimental::IntArray(kernel_size, kernel_size_n) /* paddle::experimental::IntArray */, std::vector<int64_t>(strides, strides + strides_n) /* std::vector<int64_t> */, std::vector<int64_t>(paddings, paddings + paddings_n) /* std::vector<int64_t> */, ceil_mode != 0 /* bool */, exclusive != 0 /* bool */, data_format /* std::string */, pooling_type /* std::string */, global_pooling != 0 /* bool */, adaptive != 0 /* bool */, padding_algorithm /* std::string */, norm_type /* float */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -374,8 +566,18 @@ pd_tensor pd_op_lu_solve(pd_tensor b, pd_tensor lu, pd_tensor pivots, const char
   PD_GUARD_BEGIN;
   paddle::Tensor out = lu_solve_ad_func(
       reinterpret_cast<pd_tensor_t*>(b)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(lu)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(pivots)->value /* Tensor */, trans /* std::string */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(b);
+    pir::Value _tv1 = pd_trace_value_or_feed(lu);
+    pir::Value _tv2 = pd_trace_value_or_feed(pivots);
+    pir::AttributeMap _ta;
+    _ta["trans"] = pir::StrAttribute::get(pd_trace_ir(), std::string(trans));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::LuSolveOp>(_tv0, _tv1, _tv2, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 

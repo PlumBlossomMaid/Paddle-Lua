@@ -4,6 +4,9 @@
  */
 #include "capi_impl.h"
 #include "paddle/fluid/eager/api/generated/eager_generated/forwards/dygraph_functions.h"
+#include "trace_ctx.h"
+#include "paddle/fluid/pir/dialect/operator/ir/pd_op.h"
+#include "paddle/fluid/pir/dialect/operator/ir/op_attribute.h"
 
 /* 1-based index conversion (conventions.md sec.5.1):
  * takes_index tensors get elementwise -1 before the ad_func
@@ -40,8 +43,18 @@ pd_tensor pd_op_nansum(pd_tensor x, const int64_t* axis, int64_t axis_n, pd_dtyp
   PD_GUARD_BEGIN;
   paddle::Tensor out = nansum_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, paddle::experimental::IntArray(axis, axis_n) /* paddle::experimental::IntArray */, static_cast<phi::DataType>(dtype) /* phi::DataType */, keepdim != 0 /* bool */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["axis"] = paddle::dialect::IntArrayAttribute::get(pd_trace_ir(), paddle::experimental::IntArray(axis, axis_n));
+    _ta["dtype"] = paddle::dialect::DataTypeAttribute::get(pd_trace_ir(), static_cast<phi::DataType>(dtype));
+    _ta["keepdim"] = pir::BoolAttribute::get(pd_trace_ir(), keepdim != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::NansumOp>(_tv0, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -56,8 +69,9 @@ pd_tensor pd_op_nearest_interp(pd_tensor x, pd_tensor out_size, const pd_tensor*
   }
   paddle::Tensor out = nearest_interp_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, out_size ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(out_size)->value) : paddle::none /* Tensor? */, size_tensor ? paddle::make_optional(size_tensor_tmp) : paddle::none /* std::vector<Tensor>? */, scale_tensor ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(scale_tensor)->value) : paddle::none /* Tensor? */, data_format /* std::string */, out_d /* int */, out_h /* int */, out_w /* int */, std::vector<double>(scale, scale + scale_n) /* std::vector<double> */, interp_method /* std::string */, align_corners != 0 /* bool */, align_mode /* int */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -66,8 +80,15 @@ pd_tensor pd_op_nextafter(pd_tensor x, pd_tensor y) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = nextafter_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(y)->value /* Tensor */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = pd_trace_value_or_feed(y);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::NextafterOp>(_tv0, _tv1);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -89,8 +110,16 @@ pd_tensor pd_op_nms(pd_tensor x, float threshold) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = nms_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, threshold /* float */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["threshold"] = pir::FloatAttribute::get(pd_trace_ir(), threshold);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::NmsOp>(_tv0, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -100,8 +129,9 @@ pd_tensor pd_op_nonzero(pd_tensor condition) {
   paddle::Tensor out = nonzero_ad_func(
       reinterpret_cast<pd_tensor_t*>(condition)->value /* Tensor */);
   out = pd_idx_plus1(out);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -121,8 +151,15 @@ pd_tensor pd_op_not_equal(pd_tensor x, pd_tensor y) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = not_equal_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(y)->value /* Tensor */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = pd_trace_value_or_feed(y);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::NotEqualOp>(_tv0, _tv1);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -131,8 +168,16 @@ pd_tensor pd_op_npu_identity(pd_tensor x, int format) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = npu_identity_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, format /* int */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["format"] = pir::Int32Attribute::get(pd_trace_ir(), format);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::NpuIdentityOp>(_tv0, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -141,8 +186,16 @@ pd_tensor pd_op_number_count(pd_tensor numbers, int upper_range) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = number_count_ad_func(
       reinterpret_cast<pd_tensor_t*>(numbers)->value /* Tensor */, upper_range /* int */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(numbers);
+    pir::AttributeMap _ta;
+    _ta["upper_range"] = pir::Int32Attribute::get(pd_trace_ir(), upper_range);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::NumberCountOp>(_tv0, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -151,7 +204,13 @@ pd_tensor pd_op_numel(pd_tensor x) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = numel_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::NumelOp>(_tv0);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }

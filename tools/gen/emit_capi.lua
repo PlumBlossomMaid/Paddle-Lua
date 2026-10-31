@@ -469,6 +469,206 @@ local function single_vec_output(ir)
   return #eff == 1 and eff[1].type == "std::vector<Tensor>"
 end
 
+-- ---------------------------------------------------------------------------
+-- P15 trace branch (15-to-static.md sec.3 eager-record): while a trace
+-- context is active (pd_trace_begin), each generated wrapper executes the
+-- op eagerly AND, in the same call, builds the matching pir op via the
+-- op's typed <Op>Op::Build. Bare Operation::Create mis-shapes ops
+-- (ScaleOp::Build converts the scalar `scale` attr into a pd_op.full
+-- INPUT, pd_op4.cc:4386); the typed Build owns per-op structure and
+-- InferMeta computes output types for free.
+--
+-- The Build OVERLOAD SHAPE VARIES PER OP and is never guessed (sec.4):
+-- ScaleOp has (Value, AttributeMap); ArangeOp's AttributeMap overload
+-- takes NO inputs, its input-carrying form is (Value,Value,Value,
+-- phi::DataType, const phi::Place&) (pd_op.h:47674-47677). Class names
+-- likewise come from the header (snake->Pascal breaks, e.g. div_scale).
+-- tools/gen/pd_op_builds.lua (produced by tools/gen/scan_pd_op.lua from
+-- the build-tree pd_op.h, committed like index_semantics.lua) records
+-- per-op overload shapes; ops without a usable form get NO branch
+-- (untraceable for now -- silent mis-recording is worse than an honest
+-- gap). Optional inputs, takes_index inputs, *_inplace ops and
+-- returns_index outputs are also gated out (conditional feed / recorded
+-- -1 shift / predefined_out / output-value shift all need design).
+-- ---------------------------------------------------------------------------
+
+local pd_op_builds = {}
+do
+  local f = io.open("tools/gen/pd_op_builds.lua", "rb")
+  if f then
+    f:close()
+    pd_op_builds = assert(loadfile("tools/gen/pd_op_builds.lua"))()
+  end
+end
+
+-- Attr cpp_types the attrmap trace form can turn into a dialect Attribute.
+local TRACE_SCALAR = {
+  ["bool"] = true, ["int"] = true, ["int64_t"] = true,
+  ["float"] = true, ["double"] = true, ["std::string"] = true,
+  ["phi::DataType"] = true, ["paddle::Place"] = true,
+  ["paddle::experimental::Scalar"] = true,
+  ["paddle::experimental::IntArray"] = true,
+}
+
+-- C++ expression building the dialect Attribute for one attr from its C
+-- ABI param(s) (v = the param name; IntArray also has <v>_n).
+-- Attribute classes per the typed Build raw overloads (pd_op4.cc:4386
+-- scale ScalarAttribute, pd_pir_op.cc:13420 matmul BoolAttribute) and
+-- trace.cc add_feed (Str/IntArray/DataType/Place).
+local function trace_attr_expr(a, v)
+  local t = a.type
+  if t == "bool" then
+    return "pir::BoolAttribute::get(pd_trace_ir(), " .. v .. " != 0)"
+  elseif t == "int" then
+    return "pir::Int32Attribute::get(pd_trace_ir(), " .. v .. ")"
+  elseif t == "int64_t" then
+    return "pir::Int64Attribute::get(pd_trace_ir(), " .. v .. ")"
+  elseif t == "float" then
+    return "pir::FloatAttribute::get(pd_trace_ir(), " .. v .. ")"
+  elseif t == "double" then
+    return "pir::DoubleAttribute::get(pd_trace_ir(), " .. v .. ")"
+  elseif t == "std::string" then
+    return "pir::StrAttribute::get(pd_trace_ir(), std::string(" .. v .. "))"
+  elseif t == "phi::DataType" then
+    return "paddle::dialect::DataTypeAttribute::get(pd_trace_ir(), "
+      .. "static_cast<phi::DataType>(" .. v .. "))"
+  elseif t == "paddle::Place" then
+    return "paddle::dialect::PlaceAttribute::get(pd_trace_ir(), "
+      .. "reinterpret_cast<pd_place_t*>(" .. v .. ")->value)"
+  elseif t == "paddle::experimental::Scalar" then
+    if a.sub == "int" or a.sub == "int64_t" then
+      return "paddle::dialect::ScalarAttribute::get(pd_trace_ir(), "
+        .. "paddle::experimental::Scalar(static_cast<int64_t>(" .. v .. ")))"
+    end
+    return "paddle::dialect::ScalarAttribute::get(pd_trace_ir(), "
+      .. "paddle::experimental::Scalar(" .. v .. "))"
+  elseif t == "paddle::experimental::IntArray" then
+    return "paddle::dialect::IntArrayAttribute::get(pd_trace_ir(), "
+      .. "paddle::experimental::IntArray(" .. v .. ", " .. v .. "_n))"
+  end
+  assert(false, "emit_capi: trace_attr_expr on ungated attr type '" .. t .. "'")
+end
+
+-- C++ expression for one TRAILING typed-Build argument (attrmap-free
+-- overload form, e.g. ArangeOp's (Value..., phi::DataType, phi::Place)).
+-- ty = the scanned pd_op.h C++ type; a = the yaml attr mapped positionally
+-- (its ABI param is <a.name> plus <a.name>_n for arrays). nil = unusable.
+local function trace_typed_expr(ty, a)
+  local v = a.name
+  if ty == "double" or ty == "float" or ty == "int" or ty == "int64_t" then
+    return v
+  elseif ty == "bool" then
+    return v .. " != 0"
+  elseif ty == "std::string" then
+    return "std::string(" .. v .. ")"
+  elseif ty == "phi::DataType" then
+    return "static_cast<phi::DataType>(" .. v .. ")"
+  elseif ty == "phi::Place" then
+    return "reinterpret_cast<pd_place_t*>(" .. v .. ")->value"
+  elseif ty == "paddle::experimental::Scalar" then
+    if a.sub == "int" or a.sub == "int64_t" then
+      return "paddle::experimental::Scalar(static_cast<int64_t>(" .. v .. "))"
+    end
+    return "paddle::experimental::Scalar(" .. v .. ")"
+  elseif ty == "paddle::experimental::IntArray" then
+    return "paddle::experimental::IntArray(" .. v .. ", " .. v .. "_n)"
+  elseif ty == "std::vector<int>" or ty == "std::vector<int64_t>"
+      or ty == "std::vector<float>" or ty == "std::vector<double>" then
+    return ty .. "(" .. v .. ", " .. v .. " + " .. v .. "_n)"
+  end
+  return nil
+end
+
+-- Trailing pd_op.h type must line up with the yaml attr type (naming
+-- differs for Place only); otherwise the positional mapping is suspect
+-- and the op stays untraceable.
+local function typed_compatible(ty, at)
+  if ty == at then return true end
+  if ty == "phi::Place" and at == "paddle::Place" then return true end
+  return false
+end
+
+-- The op's trace call form, or nil = no trace branch. Returns
+-- { cls = <class>, form = "attrmap" }            -- Build(values..., _ta)
+-- { cls = <class>, form = "typed", trailing }    -- Build(values..., exprs)
+local function trace_form(ir)
+  if string.find(ir.op, "_inplace$") then return nil end
+  if returns_index_set(ir)[1] then return nil end
+  local opt = optional_set(ir)
+  local takes = takes_index_set(ir)
+  for _, in_ in ipairs(ir.inputs or {}) do
+    if in_.type ~= "Tensor" or opt[in_.name] or takes[in_.name] then
+      return nil
+    end
+  end
+  local b = pd_op_builds[ir.op]
+  if not b then return nil end
+  local I = #(ir.inputs or {})
+  local A = #(ir.attrs or {})
+  -- prefer the AttributeMap form (all yaml attrs must be TRACE_SCALAR)
+  local attr_ok = true
+  for _, a in ipairs(ir.attrs or {}) do
+    if not TRACE_SCALAR[a.type] then attr_ok = false break end
+  end
+  if attr_ok then
+    for _, bd in ipairs(b.builds) do
+      if bd.attrmap and bd.values == I then
+        return { cls = b.cls, form = "attrmap" }
+      end
+    end
+  end
+  -- typed form: trailing args map positionally onto the yaml attrs
+  for _, bd in ipairs(b.builds) do
+    if not bd.attrmap and bd.values == I and #(bd.trailing or {}) == A then
+      local tr = {}
+      local ok = true
+      for i, ty in ipairs(bd.trailing or {}) do
+        if not typed_compatible(ty, ir.attrs[i].type) then
+          ok = false
+          break
+        end
+        local e = trace_typed_expr(ty, ir.attrs[i])
+        if not e then ok = false break end
+        tr[i] = e
+      end
+      if ok then
+        return { cls = b.cls, form = "typed", trailing = tr }
+      end
+    end
+  end
+  return nil
+end
+
+-- Emit the trace branch for one single-output op (caller has checked
+-- trace_form). Runs after `pd_tensor _th` is created.
+local function emit_trace_branch(ir, sel, out)
+  out[#out + 1] = "  if (pd_trace_active()) {"
+  local inlist = {}
+  for i, in_ in ipairs(ir.inputs or {}) do
+    local nm = "_tv" .. (i - 1)
+    inlist[#inlist + 1] = nm
+    out[#out + 1] = "    pir::Value " .. nm
+      .. " = pd_trace_value_or_feed(" .. in_.name .. ");"
+  end
+  local args = table.concat(inlist, ", ")
+  if sel.form == "attrmap" then
+    out[#out + 1] = "    pir::AttributeMap _ta;"
+    for _, a in ipairs(ir.attrs or {}) do
+      out[#out + 1] = "    _ta[\"" .. a.name .. "\"] = "
+        .. trace_attr_expr(a, a.name) .. ";"
+    end
+    args = (args ~= "" and (args .. ", ") or "") .. "_ta"
+  else
+    for _, e in ipairs(sel.trailing) do
+      args = (args ~= "" and (args .. ", ") or "") .. e
+    end
+  end
+  out[#out + 1] = "    auto _top = pd_trace_builder()->Build<paddle::dialect::"
+    .. sel.cls .. ">(" .. args .. ");"
+  out[#out + 1] = "    pd_trace_map_output(_th, _top->result(0));"
+  out[#out + 1] = "  }"
+end
+
 -- Emit one single-output wrapper body for the op.
 local function emit_op(ir, out)
   -- op name -> C function name: pd_op_<name>
@@ -490,8 +690,15 @@ local function emit_op(ir, out)
     -- bump to 1-based before handing to Lua (conventions.md 5.1).
     out[#out + 1] = "  out = pd_idx_plus1(out);"
   end
-  out[#out + 1] = "  return reinterpret_cast<pd_tensor>("
+  -- create the output handle BEFORE the trace branch: the branch binds
+  -- the handle to the recorded op result (pd_trace_map_output).
+  out[#out + 1] = "  pd_tensor _th = reinterpret_cast<pd_tensor>("
   out[#out + 1] = "      new pd_tensor_t{std::move(out)});"
+  local tf = trace_form(ir)
+  if tf then
+    emit_trace_branch(ir, tf, out)
+  end
+  out[#out + 1] = "  return _th;"
   out[#out + 1] = "  PD_GUARD_END(nullptr);"
   out[#out + 1] = "}"
   out[#out + 1] = ""
@@ -666,6 +873,16 @@ local function emit_all(ops, outdir, sha)
     for _, ir in ipairs(buckets[letter]) do
       if needs_index_helper(ir) then need_helper = true break end
     end
+    -- any op in this bucket that will carry a trace branch? (single-output
+    -- emit_op shape AND trace_form) -> needs trace_ctx.h + pd_op.h.
+    local need_trace = false
+    for _, ir in ipairs(buckets[letter]) do
+      if not single_vec_output(ir) and #effective_returns(ir) <= 1
+         and trace_form(ir) then
+        need_trace = true
+        break
+      end
+    end
     local cc = {}
     cc[#cc + 1] = "/* GENERATED BY tools/gen/emit_capi.lua"
     cc[#cc + 1] = " * FROM  paddle/phi/ops/yaml/{ops,backward,...}.yaml @ " .. sha
@@ -673,6 +890,11 @@ local function emit_all(ops, outdir, sha)
     cc[#cc + 1] = " */"
     cc[#cc + 1] = '#include "capi_impl.h"'
     cc[#cc + 1] = "#include \"paddle/fluid/eager/api/generated/eager_generated/forwards/dygraph_functions.h\""
+    if need_trace then
+      cc[#cc + 1] = '#include "trace_ctx.h"'
+      cc[#cc + 1] = "#include \"paddle/fluid/pir/dialect/operator/ir/pd_op.h\""
+      cc[#cc + 1] = "#include \"paddle/fluid/pir/dialect/operator/ir/op_attribute.h\""
+    end
     if need_helper then
       cc[#cc + 1] = ""
       cc[#cc + 1] = "/* 1-based index conversion (conventions.md sec.5.1):"

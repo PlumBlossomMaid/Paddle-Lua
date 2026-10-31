@@ -4,14 +4,18 @@
  */
 #include "capi_impl.h"
 #include "paddle/fluid/eager/api/generated/eager_generated/forwards/dygraph_functions.h"
+#include "trace_ctx.h"
+#include "paddle/fluid/pir/dialect/operator/ir/pd_op.h"
+#include "paddle/fluid/pir/dialect/operator/ir/op_attribute.h"
 
 /* zeros (yaml block line 6133) */
 pd_tensor pd_op_zeros(const int64_t* shape, int64_t shape_n, pd_dtype dtype, pd_place place) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = zeros_ad_func(
       paddle::experimental::IntArray(shape, shape_n) /* paddle::experimental::IntArray */, static_cast<phi::DataType>(dtype) /* phi::DataType */, reinterpret_cast<pd_place_t*>(place)->value /* paddle::Place */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -20,7 +24,13 @@ pd_tensor pd_op_zeros_like(pd_tensor x, pd_dtype dtype, pd_place place) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = zeros_like_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, static_cast<phi::DataType>(dtype) /* phi::DataType */, reinterpret_cast<pd_place_t*>(place)->value /* paddle::Place */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::ZerosLikeOp>(_tv0, static_cast<phi::DataType>(dtype), reinterpret_cast<pd_place_t*>(place)->value);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }

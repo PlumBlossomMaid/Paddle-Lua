@@ -4,6 +4,9 @@
  */
 #include "capi_impl.h"
 #include "paddle/fluid/eager/api/generated/eager_generated/forwards/dygraph_functions.h"
+#include "trace_ctx.h"
+#include "paddle/fluid/pir/dialect/operator/ir/pd_op.h"
+#include "paddle/fluid/pir/dialect/operator/ir/op_attribute.h"
 
 /* 1-based index conversion (conventions.md sec.5.1):
  * takes_index tensors get elementwise -1 before the ad_func
@@ -28,8 +31,14 @@ pd_tensor pd_op_var(pd_tensor x, const int64_t* axis, int64_t axis_n, int keepdi
   PD_GUARD_BEGIN;
   paddle::Tensor out = var_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, std::vector<int64_t>(axis, axis + axis_n) /* std::vector<int64_t> */, keepdim != 0 /* bool */, unbiased != 0 /* bool */, correction /* double */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::VarOp>(_tv0, std::vector<int64_t>(axis, axis + axis_n), keepdim != 0, unbiased != 0, correction);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -38,8 +47,14 @@ pd_tensor pd_op_variance(pd_tensor x, const int64_t* axis, int64_t axis_n, int k
   PD_GUARD_BEGIN;
   paddle::Tensor out = variance_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, std::vector<int64_t>(axis, axis + axis_n) /* std::vector<int64_t> */, keepdim != 0 /* bool */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::VarianceOp>(_tv0, std::vector<int64_t>(axis, axis + axis_n), keepdim != 0);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -48,8 +63,16 @@ pd_tensor pd_op_view_dtype(pd_tensor input, pd_dtype dtype) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = view_dtype_ad_func(
       reinterpret_cast<pd_tensor_t*>(input)->value /* Tensor */, static_cast<phi::DataType>(dtype) /* phi::DataType */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(input);
+    pir::AttributeMap _ta;
+    _ta["dtype"] = paddle::dialect::DataTypeAttribute::get(pd_trace_ir(), static_cast<phi::DataType>(dtype));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::ViewDtypeOp>(_tv0, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -58,8 +81,14 @@ pd_tensor pd_op_view_shape(pd_tensor input, const int64_t* dims, int64_t dims_n)
   PD_GUARD_BEGIN;
   paddle::Tensor out = view_shape_ad_func(
       reinterpret_cast<pd_tensor_t*>(input)->value /* Tensor */, std::vector<int64_t>(dims, dims + dims_n) /* std::vector<int64_t> */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(input);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::ViewShapeOp>(_tv0, std::vector<int64_t>(dims, dims + dims_n));
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -68,8 +97,17 @@ pd_tensor pd_op_view_slice(pd_tensor input, int64_t begin_idx, int64_t end_idx) 
   PD_GUARD_BEGIN;
   paddle::Tensor out = view_slice_ad_func(
       reinterpret_cast<pd_tensor_t*>(input)->value /* Tensor */, begin_idx /* int64_t */, end_idx /* int64_t */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(input);
+    pir::AttributeMap _ta;
+    _ta["begin_idx"] = pir::Int64Attribute::get(pd_trace_ir(), begin_idx);
+    _ta["end_idx"] = pir::Int64Attribute::get(pd_trace_ir(), end_idx);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::ViewSliceOp>(_tv0, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 

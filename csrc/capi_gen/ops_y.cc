@@ -4,6 +4,9 @@
  */
 #include "capi_impl.h"
 #include "paddle/fluid/eager/api/generated/eager_generated/forwards/dygraph_functions.h"
+#include "trace_ctx.h"
+#include "paddle/fluid/pir/dialect/operator/ir/pd_op.h"
+#include "paddle/fluid/pir/dialect/operator/ir/op_attribute.h"
 
 /* 1-based index conversion (conventions.md sec.5.1):
  * takes_index tensors get elementwise -1 before the ad_func
@@ -39,8 +42,14 @@ pd_tensor pd_op_yolo_box_head(pd_tensor x, const int* anchors, int64_t anchors_n
   PD_GUARD_BEGIN;
   paddle::Tensor out = yolo_box_head_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, std::vector<int>(anchors, anchors + anchors_n) /* std::vector<int> */, class_num /* int */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::YoloBoxHeadOp>(_tv0, std::vector<int>(anchors, anchors + anchors_n), class_num);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -62,7 +71,8 @@ pd_tensor pd_op_yolo_loss(pd_tensor x, pd_tensor gt_box, pd_tensor gt_label, pd_
   paddle::Tensor gt_label_1b = pd_idx_minus1(gt_label_t);
   paddle::Tensor out = yolo_loss_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(gt_box)->value /* Tensor */, gt_label_1b /* Tensor index 1-based -> 0-based */, gt_score ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(gt_score)->value) : paddle::none /* Tensor? */, std::vector<int>(anchors, anchors + anchors_n) /* std::vector<int> */, std::vector<int>(anchor_mask, anchor_mask + anchor_mask_n) /* std::vector<int> */, class_num /* int */, ignore_thresh /* float */, downsample_ratio /* int */, use_label_smooth != 0 /* bool */, scale_x_y /* float */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  return _th;
   PD_GUARD_END(nullptr);
 }

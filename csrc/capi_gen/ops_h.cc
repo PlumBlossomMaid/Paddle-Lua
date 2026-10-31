@@ -4,6 +4,9 @@
  */
 #include "capi_impl.h"
 #include "paddle/fluid/eager/api/generated/eager_generated/forwards/dygraph_functions.h"
+#include "trace_ctx.h"
+#include "paddle/fluid/pir/dialect/operator/ir/pd_op.h"
+#include "paddle/fluid/pir/dialect/operator/ir/op_attribute.h"
 
 /* 1-based index conversion (conventions.md sec.5.1):
  * takes_index tensors get elementwise -1 before the ad_func
@@ -28,8 +31,16 @@ pd_tensor pd_op_hardshrink(pd_tensor x, float threshold) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = hardshrink_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, threshold /* float */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["threshold"] = pir::FloatAttribute::get(pd_trace_ir(), threshold);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::HardshrinkOp>(_tv0, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -38,8 +49,17 @@ pd_tensor pd_op_hardsigmoid(pd_tensor x, float slope, float offset) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = hardsigmoid_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, slope /* float */, offset /* float */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["slope"] = pir::FloatAttribute::get(pd_trace_ir(), slope);
+    _ta["offset"] = pir::FloatAttribute::get(pd_trace_ir(), offset);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::HardsigmoidOp>(_tv0, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -48,8 +68,14 @@ pd_tensor pd_op_hardswish(pd_tensor x) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = hardswish_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::HardswishOp>(_tv0);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -58,8 +84,17 @@ pd_tensor pd_op_hardtanh(pd_tensor x, float t_min, float t_max) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = hardtanh_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, t_min /* float */, t_max /* float */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["t_min"] = pir::FloatAttribute::get(pd_trace_ir(), t_min);
+    _ta["t_max"] = pir::FloatAttribute::get(pd_trace_ir(), t_max);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::HardtanhOp>(_tv0, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -68,8 +103,15 @@ pd_tensor pd_op_heaviside(pd_tensor x, pd_tensor y) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = heaviside_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(y)->value /* Tensor */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = pd_trace_value_or_feed(y);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::HeavisideOp>(_tv0, _tv1);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -78,8 +120,15 @@ pd_tensor pd_op_hinge_loss(pd_tensor logits, pd_tensor labels) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = hinge_loss_ad_func(
       reinterpret_cast<pd_tensor_t*>(logits)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(labels)->value /* Tensor */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(logits);
+    pir::Value _tv1 = pd_trace_value_or_feed(labels);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::HingeLossOp>(_tv0, _tv1);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -88,8 +137,9 @@ pd_tensor pd_op_histogram(pd_tensor input, pd_tensor weight, int64_t bins, float
   PD_GUARD_BEGIN;
   paddle::Tensor out = histogram_ad_func(
       reinterpret_cast<pd_tensor_t*>(input)->value /* Tensor */, weight ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(weight)->value) : paddle::none /* Tensor? */, bins /* int64_t */, min /* float */, max /* float */, density != 0 /* bool */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -112,7 +162,16 @@ pd_tensor pd_op_huber_loss(pd_tensor input, pd_tensor label, float delta) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = huber_loss_ad_func(
       reinterpret_cast<pd_tensor_t*>(input)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(label)->value /* Tensor */, delta /* float */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(input);
+    pir::Value _tv1 = pd_trace_value_or_feed(label);
+    pir::AttributeMap _ta;
+    _ta["delta"] = pir::FloatAttribute::get(pd_trace_ir(), delta);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::HuberLossOp>(_tv0, _tv1, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }

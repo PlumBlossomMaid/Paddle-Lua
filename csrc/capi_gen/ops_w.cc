@@ -4,6 +4,9 @@
  */
 #include "capi_impl.h"
 #include "paddle/fluid/eager/api/generated/eager_generated/forwards/dygraph_functions.h"
+#include "trace_ctx.h"
+#include "paddle/fluid/pir/dialect/operator/ir/pd_op.h"
+#include "paddle/fluid/pir/dialect/operator/ir/op_attribute.h"
 
 /* 1-based index conversion (conventions.md sec.5.1):
  * takes_index tensors get elementwise -1 before the ad_func
@@ -30,8 +33,9 @@ pd_tensor pd_op_warpctc(pd_tensor logits, pd_tensor label, pd_tensor logits_leng
   paddle::Tensor label_1b = pd_idx_minus1(label_t);
   paddle::Tensor out = warpctc_ad_func(
       reinterpret_cast<pd_tensor_t*>(logits)->value /* Tensor */, label_1b /* Tensor index 1-based -> 0-based */, logits_length ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(logits_length)->value) : paddle::none /* Tensor? */, labels_length ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(labels_length)->value) : paddle::none /* Tensor? */, blank /* int */, norm_by_times != 0 /* bool */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -42,8 +46,9 @@ pd_tensor pd_op_warprnnt(pd_tensor input, pd_tensor label, pd_tensor input_lengt
   paddle::Tensor label_1b = pd_idx_minus1(label_t);
   paddle::Tensor out = warprnnt_ad_func(
       reinterpret_cast<pd_tensor_t*>(input)->value /* Tensor */, label_1b /* Tensor index 1-based -> 0-based */, reinterpret_cast<pd_tensor_t*>(input_lengths)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(label_lengths)->value /* Tensor */, blank /* int */, fastemit_lambda /* float */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -52,8 +57,18 @@ pd_tensor pd_op_weight_dequantize(pd_tensor x, pd_tensor scale, const char* algo
   PD_GUARD_BEGIN;
   paddle::Tensor out = weight_dequantize_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(scale)->value /* Tensor */, algo /* std::string */, group_size /* int */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = pd_trace_value_or_feed(scale);
+    pir::AttributeMap _ta;
+    _ta["algo"] = pir::StrAttribute::get(pd_trace_ir(), std::string(algo));
+    _ta["group_size"] = pir::Int32Attribute::get(pd_trace_ir(), group_size);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::WeightDequantizeOp>(_tv0, _tv1, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -62,8 +77,9 @@ pd_tensor pd_op_weight_only_linear(pd_tensor x, pd_tensor weight, pd_tensor bias
   PD_GUARD_BEGIN;
   paddle::Tensor out = weight_only_linear_ad_func(
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(weight)->value /* Tensor */, bias ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(bias)->value) : paddle::none /* Tensor? */, reinterpret_cast<pd_tensor_t*>(weight_scale)->value /* Tensor */, weight_dtype /* std::string */, arch /* int */, group_size /* int */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  return _th;
   PD_GUARD_END(nullptr);
 }
 
@@ -83,7 +99,15 @@ pd_tensor pd_op_where(pd_tensor condition, pd_tensor x, pd_tensor y) {
   PD_GUARD_BEGIN;
   paddle::Tensor out = where_ad_func(
       reinterpret_cast<pd_tensor_t*>(condition)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(y)->value /* Tensor */);
-  return reinterpret_cast<pd_tensor>(
+  pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(condition);
+    pir::Value _tv1 = pd_trace_value_or_feed(x);
+    pir::Value _tv2 = pd_trace_value_or_feed(y);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::WhereOp>(_tv0, _tv1, _tv2);
+    pd_trace_map_output(_th, _top->result(0));
+  }
+  return _th;
   PD_GUARD_END(nullptr);
 }
