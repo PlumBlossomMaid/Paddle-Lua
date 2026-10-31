@@ -166,6 +166,10 @@ void register_ops(lua_State* L, int module_index);
  * (jit_binding.cc, 2.8). Runs after register_ops. */
 void register_jit(lua_State* L, int module_index);
 
+/* Register the LuaTrace usertype + core.trace_begin / trace_is_active
+ * (trace_binding.cc, P15). The face behind paddle.jit.trace. */
+void register_trace(lua_State* L, int module_index);
+
 /* Register the cross-lane tensor registry (core.tensor_registry_put /
  * take / clear, tensor_binding.cc, 3.2). Handle-table fallback of
  * 13-lanes.md sec.4.1: Lanes cannot deep-copy a sol2 usertype (its

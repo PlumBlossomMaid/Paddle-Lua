@@ -186,6 +186,10 @@ extern "C" PD_LUAOPEN_EXPORT int luaopen_paddle_core(lua_State* L) {
   // jit_binding.cc: LuaLayer usertype + core.jit_load (2.8). Runs last:
   // load needs the op registry (InterpreterCore) already in place.
   pd::register_jit(L, -1);
+  // trace_binding.cc: LuaTrace usertype + core.trace_begin (P15). The
+  // generated op wrappers carry their own trace branches (emit_capi);
+  // this face just drives begin/input/output/run from Lua.
+  pd::register_trace(L, -1);
   // 3.3 GC: bind THIS thread's lua_State to the C-side softmax trigger.
   // Each lane registers its own state here (handler slot is thread-local
   // in gc.cc), so a collect always runs on the lane that crossed its own

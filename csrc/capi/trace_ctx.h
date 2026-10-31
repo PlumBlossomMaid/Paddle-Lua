@@ -37,8 +37,12 @@ struct PdTraceCtx {
   std::unique_ptr<pir::Builder> builder;
   /* tensor handle -> the pir::Value that produced it (feed or op result). */
   std::unordered_map<pd_tensor, pir::Value> value_of;
-  /* (name, tensor) feeds in declaration order; drives fx_names + run's x. */
+  /* (name, tensor) feeds in declaration order; drives fx_names + run's x.
+   * feeds[0 .. n_declared-1] are the pd_trace_input-declared inputs;
+   * the rest are auto-declared weights/constants (pd_trace_value_or_feed)
+   * that always keep their captured tensors on re-run. */
   std::vector<std::pair<std::string, pd_tensor>> feeds;
+  size_t n_declared = 0;
   int feed_counter = 0;
   /* fetch list: parallel fo_values / fo_names for run_program_ad_func. */
   std::vector<pir::Value> fo_values;

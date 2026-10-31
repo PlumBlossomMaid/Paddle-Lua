@@ -482,6 +482,26 @@ pd_status  pd_trace_output(pd_trace t, pd_tensor tensor, const char* name);
  * error (pd_last_error). */
 int        pd_trace_run(pd_trace t, pd_tensor* outs, int nout);
 
+/* pd_trace_run with NEW tensors for the DECLARED inputs (pd_trace_input
+ * order): xs[i] replaces declared input i, auto-declared feeds (weights
+ * met during the trace) keep their captured tensors. xs==NULL behaves
+ * exactly like pd_trace_run (replays the captured inputs); otherwise nx
+ * must equal the number of pd_trace_input calls. */
+int        pd_trace_run2(pd_trace t, const pd_tensor* xs, int nx,
+                         pd_tensor* outs, int nout);
+
+/* 1 while a trace is active on this thread, else 0. The sol layer gates
+ * Tensor:item() on it (15-to-static.md sec.4 pit 3: reading a value
+ * during trace silently freezes the control-flow branch). The C ABI
+ * needs its own name -- trace_ctx.h's pd_trace_active is C++-internal. */
+int        pd_trace_is_active(void);
+
+/* End the RECORDING phase (all pd_trace_output done): the thread's
+ * active-trace slot is cleared so later eager ops stop recording, but
+ * the program/handle stay alive for pd_trace_run2. The recorder itself
+ * is released by pd_trace_free. */
+void       pd_trace_end(pd_trace t);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif

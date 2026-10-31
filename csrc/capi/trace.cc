@@ -148,8 +148,18 @@ pd_status pd_trace_input(pd_trace t, pd_tensor tensor, const char* name) {
     return PD_INVALID_ARG;
   }
   PdTraceCtx& c = reinterpret_cast<pd_trace_t*>(t)->ctx;
+  if (c.feed_counter != 0) {
+    // Declared inputs must all precede the traced forward: auto-feeds
+    // (weights) are appended during it, and feeds[0..n_declared) must
+    // stay exactly the declared set for pd_trace_run2's xs replacement.
+    pd_set_error(PD_INVALID_ARG,
+                 "pd_trace_input: declare all inputs before running the "
+                 "traced function (an auto-feed already exists)");
+    return PD_INVALID_ARG;
+  }
   if (c.value_of.find(tensor) == c.value_of.end()) {
     add_feed(c, tensor, name);
+    c.n_declared++;
   }
   return PD_OK;
   PD_GUARD_END(PD_ERROR);
@@ -180,13 +190,21 @@ pd_status pd_trace_output(pd_trace t, pd_tensor tensor, const char* name) {
   PD_GUARD_END(PD_ERROR);
 }
 
-int pd_trace_run(pd_trace t, pd_tensor* outs, int nout) {
+int pd_trace_run2(pd_trace t, const pd_tensor* xs, int nx,
+                  pd_tensor* outs, int nout) {
   PD_GUARD_BEGIN;
-  if (t == nullptr || (nout > 0 && outs == nullptr)) {
-    pd_set_error(PD_INVALID_ARG, "pd_trace_run: null arg");
+  if (t == nullptr || (nout > 0 && outs == nullptr)
+      || (xs == nullptr && nx != 0)) {
+    pd_set_error(PD_INVALID_ARG, "pd_trace_run2: null arg");
     return -1;
   }
   PdTraceCtx& c = reinterpret_cast<pd_trace_t*>(t)->ctx;
+  if (xs != nullptr && static_cast<size_t>(nx) != c.n_declared) {
+    pd_set_error(PD_INVALID_ARG,
+                 "pd_trace_run2: xs count must equal the number of "
+                 "pd_trace_input declarations");
+    return -1;
+  }
 
   // prog_attrs key set per run_program_impl.cc:448-500.
   paddle::framework::AttributeMap prog_attrs;
@@ -197,9 +215,14 @@ int pd_trace_run(pd_trace t, pd_tensor* outs, int nout) {
   std::vector<paddle::Tensor> x;
   fx_names.reserve(c.feeds.size());
   x.reserve(c.feeds.size());
-  for (auto& pr : c.feeds) {
-    fx_names.push_back(pr.first);
-    x.push_back(reinterpret_cast<pd_tensor_t*>(pr.second)->value);
+  for (size_t i = 0; i < c.feeds.size(); ++i) {
+    fx_names.push_back(c.feeds[i].first);
+    // Declared inputs take the caller-supplied tensors when given;
+    // auto-feeds (weights) always replay their captured tensors.
+    pd_tensor h = (xs != nullptr && i < c.n_declared)
+                      ? xs[i]
+                      : c.feeds[i].second;
+    x.push_back(reinterpret_cast<pd_tensor_t*>(h)->value);
   }
   prog_attrs["fx_names"] = fx_names;
   prog_attrs["fp_names"] = std::vector<std::string>{};
@@ -227,6 +250,20 @@ int pd_trace_run(pd_trace t, pd_tensor* outs, int nout) {
   }
   return n;
   PD_GUARD_END(-1);
+}
+
+int pd_trace_run(pd_trace t, pd_tensor* outs, int nout) {
+  return pd_trace_run2(t, nullptr, 0, outs, nout);
+}
+
+int pd_trace_is_active(void) { return pd_trace_active() ? 1 : 0; }
+
+void pd_trace_end(pd_trace t) {
+  PD_GUARD_BEGIN;
+  if (t == nullptr) return;
+  PdTraceCtx* c = &reinterpret_cast<pd_trace_t*>(t)->ctx;
+  if (g_trace == c) g_trace = nullptr;
+  PD_GUARD_END_VOID;
 }
 
 }  // extern "C"

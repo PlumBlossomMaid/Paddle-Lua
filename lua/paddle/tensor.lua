@@ -414,6 +414,14 @@ end
 -- binding (tensor_binding.cc "item"), multi-element uses to_host_bytes
 -- (api/tensor.md sec.2.3; coordinate form lands with P6).
 M.item = function(t, ...)
+  -- 15-to-static.md sec.4 pit 3: reading a VALUE during paddle.jit.trace
+  -- would silently freeze the control-flow branch taken this run. Error
+  -- instead (eager-record gives a real value, which is exactly the trap).
+  if paddle_core.trace_is_active and paddle_core.trace_is_active() then
+    error("paddle: Tensor:item() during paddle.jit.trace freezes the "
+          .. "branch taken this run -- restructure so the branch does "
+          .. "not depend on tensor values", 2)
+  end
   local n = select("#", ...)
   if n == 0 then
     return rawget(orig_index, "item")(t)
