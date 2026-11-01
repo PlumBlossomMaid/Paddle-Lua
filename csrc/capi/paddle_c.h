@@ -523,6 +523,27 @@ void       pd_trace_end(pd_trace t);
  * name, mirroring save_vars_pir (pir_io.py:411-424). */
 pd_status  pd_trace_save(pd_trace t, const char* path_prefix);
 
+/* ------------------------------------------------------------------ */
+/* Group 13: custom op loading (P16, 16-cpp-extension.md)             */
+/* ------------------------------------------------------------------ */
+/* Load a user-compiled custom-operator DLL (PD_BUILD_OP, op_meta_info.h:
+ * 1164) and register every op into BOTH the PIR dialect (custom_op. prefix,
+ * custom_operator.cc:1285 -> CustomOpDialect::RegisterCustomOp, so the
+ * op participates in pir program assembly + PdOpLowerToKernelPass's
+ * HandleForCustomOp) and the legacy fluid OpInfo table (so kernels are
+ * reachable; custom_operator.cc:1279-1315). dso_path must be ABSOLUTE
+ * (phi::dynload::GetOpDsoHandle resolves against the loader's search
+ * path, relative names are a footgun).
+ *
+ * names receives the registered op names (one NUL-terminated string each,
+ * no custom_op. prefix), written consecutively; cap is the buffer size in
+ * bytes. Returns the TOTAL number of op names (regardless of cap); on
+ * error returns -1 with pd_last_error set. Pedantic callers use the
+ * returned count with a big-enough buffer; if count > cap the names are
+ * truncated but the op registration is already complete.
+ */
+int pd_load_op_meta_info(const char* dso_path, char* names, int cap);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif

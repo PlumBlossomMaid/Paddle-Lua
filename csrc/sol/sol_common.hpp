@@ -170,6 +170,12 @@ void register_jit(lua_State* L, int module_index);
  * (trace_binding.cc, P15). The face behind paddle.jit.trace. */
 void register_trace(lua_State* L, int module_index);
 
+/* Register core.load_custom_op (custom_op_binding.cc, P16): loads a
+ * user-compiled PD_BUILD_OP DLL and returns the registered op names.
+ * Execution of a loaded custom op is wired through the C ABI's
+ * pd_custom_op_run (custom_op.cc) by the Lua cpp_extension face. */
+void register_custom_op(lua_State* L, int module_index);
+
 /* Register the cross-lane tensor registry (core.tensor_registry_put /
  * take / clear, tensor_binding.cc, 3.2). Handle-table fallback of
  * 13-lanes.md sec.4.1: Lanes cannot deep-copy a sol2 usertype (its

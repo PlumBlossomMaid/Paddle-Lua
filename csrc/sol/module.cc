@@ -190,6 +190,10 @@ extern "C" PD_LUAOPEN_EXPORT int luaopen_paddle_core(lua_State* L) {
   // generated op wrappers carry their own trace branches (emit_capi);
   // this face just drives begin/input/output/run from Lua.
   pd::register_trace(L, -1);
+  // custom_op_binding.cc: core.load_custom_op(dso) -> {op_name -> fn}
+  // (P16). Loads a user-compiled PD_BUILD_OP DLL and returns a table of
+  // callables, one per registered op.
+  pd::register_custom_op(L, -1);
   // 3.3 GC: bind THIS thread's lua_State to the C-side softmax trigger.
   // Each lane registers its own state here (handler slot is thread-local
   // in gc.cc), so a collect always runs on the lane that crossed its own
