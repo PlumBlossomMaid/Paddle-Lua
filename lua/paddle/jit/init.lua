@@ -113,8 +113,13 @@ M.trace = rule {
   end
   t:finish()  -- recording ends; the program stays alive for run()
   local nin = #inps
-  -- The replayed callable: fresh inputs in, traced program out.
-  local traced = function(...)
+
+  -- The replayed callable (invoke via traced(x...)) -- plus a save()
+  -- method for the PIR inference artifact Python paddle.jit.load reads
+  -- (pd_trace_save: <prefix>.json + <prefix>.pdiparams, M3 gate).
+  -- Callable table instead of a bare function so methods can ride along.
+  local traced = {}
+  local function replay(...)
     local args = { ... }
     if #args ~= nin then
       error(("paddle.jit.trace: traced callable expects %d input(s), "
@@ -127,7 +132,15 @@ M.trace = rule {
     end
     return r
   end
-  return traced
+  traced.save = function(path_prefix)
+    if type(path_prefix) ~= "string" then
+      error("paddle.jit.trace: save expects a path prefix string", 2)
+    end
+    t:save(path_prefix)
+  end
+  return setmetatable(traced, { __call = function(_, ...)
+    return replay(...)
+  end })
 end)
 
 -- P18 script lands here later (D20; api/jit.md sec.2.3).

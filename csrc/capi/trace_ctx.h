@@ -22,6 +22,8 @@
 #include <utility>
 #include <vector>
 
+#include "paddle/fluid/framework/scope.h"
+#include "paddle/fluid/pir/dialect/operator/ir/op_dialect.h"
 #include "paddle/pir/include/core/builder.h"
 #include "paddle/pir/include/core/ir_context.h"
 #include "paddle/pir/include/core/program.h"
@@ -47,6 +49,14 @@ struct PdTraceCtx {
   /* fetch list: parallel fo_values / fo_names for run_program_ad_func. */
   std::vector<pir::Value> fo_values;
   std::vector<std::string> fo_names;
+  /* The run scope, created lazily and STABLE across pd_trace_run2 calls.
+   * run_program_impl's InterpreterCoreInfoCache keys the interpreter by
+   * (program_id, scope ptr, place...): a fresh scope per call frees the
+   * previous one, malloc reuses the address, the cache then serves a
+   * stale interpreter bound to a FREED scope -- garbage tensor shapes
+   * (nondeterministic matmul shape scramble). Holding it here keeps the
+   * cached interpreter + its re-shared feeds consistent. */
+  std::shared_ptr<paddle::framework::Scope> run_scope;
 };
 
 /* True while a trace is active on this thread. The generated wrappers

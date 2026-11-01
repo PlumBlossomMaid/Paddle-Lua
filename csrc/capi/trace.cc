@@ -28,6 +28,7 @@
 
 #include "trace_ctx.h"
 
+#include <algorithm>
 #include <string>
 #include <utility>
 #include <vector>
@@ -35,13 +36,17 @@
 #include "paddle/fluid/eager/to_static/run_program_func.h"
 #include "paddle/fluid/framework/scope.h"
 #include "paddle/fluid/framework/type_defs.h"
+#include "paddle/fluid/pir/dialect/operator/ir/manual_op.h"
 #include "paddle/fluid/pir/dialect/operator/ir/op_attribute.h"
 #include "paddle/fluid/pir/dialect/operator/ir/op_dialect.h"
 #include "paddle/fluid/pir/dialect/operator/utils/utils.h"
+#include "paddle/fluid/pir/serialize_deserialize/include/interface.h"
 #include "paddle/phi/core/dense_tensor.h"
 #include "paddle/pir/include/core/block.h"
 #include "paddle/pir/include/core/builtin_attribute.h"
+#include "paddle/pir/include/core/builtin_op.h"
 #include "paddle/pir/include/core/builtin_type.h"
+#include "paddle/pir/include/core/ir_mapping.h"
 #include "paddle/pir/include/core/operation.h"
 #include "paddle/pir/include/core/op_info.h"
 
@@ -236,9 +241,14 @@ int pd_trace_run2(pd_trace t, const pd_tensor* xs, int nx,
   cuda_graph_attrs["cuda_graph_state"] = static_cast<int64_t>(0);
   cuda_graph_attrs["cuda_graph_dispatch_key"] = static_cast<int64_t>(0);
 
-  // Single outer scope (run_program_impl.cc:466-473).
-  auto scope = std::make_shared<paddle::framework::Scope>();
-  std::vector<paddle::framework::Scope*> step_scope{scope.get()};
+  // Single outer scope (run_program_impl.cc:466-473). STABLE across runs:
+  // InterpreterCoreInfoCache keys by scope ptr -- a per-call fresh scope
+  // that dies at return lets malloc reuse the address and the cache serve
+  // an interpreter bound to a FREED scope (garbage shapes; trace_ctx.h).
+  if (!c.run_scope) {
+    c.run_scope = std::make_shared<paddle::framework::Scope>();
+  }
+  std::vector<paddle::framework::Scope*> step_scope{c.run_scope.get()};
 
   std::vector<paddle::Tensor> out = egr::to_static::run_program_ad_func(
       x, {}, step_scope, prog_attrs, cuda_graph_attrs);
@@ -264,6 +274,109 @@ void pd_trace_end(pd_trace t) {
   PdTraceCtx* c = &reinterpret_cast<pd_trace_t*>(t)->ctx;
   if (g_trace == c) g_trace = nullptr;
   PD_GUARD_END_VOID;
+}
+
+pd_status pd_trace_save(pd_trace t, const char* path_prefix) {
+  PD_GUARD_BEGIN;
+  if (t == nullptr || path_prefix == nullptr) {
+    pd_set_error(PD_INVALID_ARG, "pd_trace_save: null arg");
+    return PD_INVALID_ARG;
+  }
+  PdTraceCtx& c = reinterpret_cast<pd_trace_t*>(t)->ctx;
+  if (c.feeds.empty()) {
+    pd_set_error(PD_INVALID_ARG,
+                 "pd_trace_save: no feeds (nothing recorded)");
+    return PD_INVALID_ARG;
+  }
+
+  // Clone so the original program stays runnable after save.
+  pir::IrMapping mapping;
+  std::shared_ptr<pir::Program> saved = c.program->Clone(mapping);
+  pir::Block* block = saved->block();
+  pir::Builder builder(c.ir, block);
+
+  // Weight feeds = feeds[n_declared..]: pd_op.data discovered during the
+  // traced forward. They become builtin.parameter (the load path treats
+  // pd_op.data results as USER inputs, builtin.parameter as loaded params).
+  std::unordered_set<std::string> weight_names;
+  for (size_t i = c.n_declared; i < c.feeds.size(); ++i) {
+    weight_names.insert(c.feeds[i].first);
+  }
+
+  std::vector<std::pair<pir::Value, std::string>> fetches;
+  for (auto it = block->begin(); it != block->end();) {
+    pir::Operation* op = &*it;
+    std::string nm = op->name();
+    if (nm == "pd_op.data") {
+      auto name_attr = op->attribute<pir::StrAttribute>("name");
+      std::string vname =
+          name_attr ? name_attr.AsString() : std::string();
+      if (!weight_names.count(vname)) {
+        ++it;
+        continue;
+      }
+      // Replace the weight data op with a persistable builtin.parameter.
+      builder.set_insertion_point(block, it);
+      auto param = builder.Build<pir::ParameterOp>(
+          vname, op->result(0).type());  // builtin_op.h:73
+      param->result(0).set_attribute(
+          "persistable", pir::BoolAttribute::get(c.ir, true));
+      op->result(0).ReplaceAllUsesWith(param->result(0));
+      it = block->erase(it);
+    } else if (nm == "builtin.shadow_output") {
+      // Save-time: shadow_output -> pd_op.fetch (the load path removes
+      // fetch and re-adds shadow_output via set_persistable_value).
+      auto nm_attr = op->attribute<pir::StrAttribute>("output_name");
+      std::string oname =
+          nm_attr ? nm_attr.AsString() : std::string();
+      fetches.emplace_back(op->operand_source(0), oname);
+      it = block->erase(it);
+    } else {
+      ++it;
+    }
+  }
+  builder.set_insertion_point(block, block->end());
+  for (size_t i = 0; i < fetches.size(); ++i) {
+    builder.Build<paddle::dialect::FetchOp>(fetches[i].first, fetches[i].second,
+                                            static_cast<int>(i));
+  }
+
+  // Write the program (trainable=true so the persistable attr survives)
+  // and the combined weights.
+  pir::WriteModule(*saved, std::string(path_prefix) + ".json",
+                   /*overwrite=*/true, /*readable=*/false,
+                   /*trainable=*/true);
+
+  std::vector<std::pair<std::string, pd_tensor>> wf;
+  wf.reserve(c.feeds.size() - c.n_declared);
+  for (size_t i = c.n_declared; i < c.feeds.size(); ++i) {
+    wf.emplace_back(c.feeds[i].first, c.feeds[i].second);
+  }
+  std::sort(wf.begin(), wf.end(),
+            [](const std::pair<std::string, pd_tensor>& a,
+               const std::pair<std::string, pd_tensor>& b) {
+              return a.first < b.first;
+            });
+  std::vector<const phi::DenseTensor*> tensors;
+  std::vector<std::string> names;
+  for (auto& p : wf) {
+    const paddle::Tensor& tv =
+        reinterpret_cast<pd_tensor_t*>(p.second)->value;
+    auto dense = std::dynamic_pointer_cast<phi::DenseTensor>(tv.impl());
+    if (!dense) {
+      pd_set_error(PD_INVALID_ARG,
+                   "pd_trace_save: weight tensor has no DenseTensor impl");
+      return PD_INVALID_ARG;
+    }
+    tensors.push_back(dense.get());
+    names.push_back(p.first);
+  }
+  pir::SaveCombineFunction(tensors, names,
+                           std::string(path_prefix) + ".pdiparams",
+                           /*overwrite=*/true, /*save_as_fp16=*/false,
+                           /*save_to_memory=*/false);
+  return PD_OK;
+  PD_GUARD_END(PD_ERROR);
 }
 
 }  // extern "C"

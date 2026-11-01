@@ -502,6 +502,27 @@ int        pd_trace_is_active(void);
  * is released by pd_trace_free. */
 void       pd_trace_end(pd_trace t);
 
+/* Save the recorded program + weight tensors in the PIR inference format
+ * Python paddle.jit.load reads (M3 gate): <path_prefix>.json via
+ * pir::WriteModule(trainable=true, so the persistable opresult attr
+ * survives; interface.h:40) + <path_prefix>.pdiparams via
+ * pir::SaveCombineFunction (interface.h:107). Transform runs on a CLONE
+ * (program.h:58) so the trace stays runnable after save:
+ *   - weight feeds (pd_op.data discovered during trace) -> builtin.parameter
+ *     with persistable=true: the load path collects params via
+ *     get_pir_parameters (builtin.parameter branch, pir_io.py:62) and
+ *     only loads those -- _load_pir_parameter_vars filters
+ *     var.persistable (pir_translated_layer.py:199)
+ *   - builtin.shadow_output -> pd_op.fetch: the load path REMOVES fetch
+ *     ops and re-adds shadow_output via set_persistable_value
+ *     (pir_translated_layer.py:121-128); a bare shadow_output is never
+ *     recognized as an output (output_vars would stay empty)
+ * Declared inputs stay pd_op.data: they become the user feeds
+ * (_PirProgramHolder._preprocess collects pd_op.data results,
+ * pir_translated_layer.py:106). The .pdiparams entry order is sorted by
+ * name, mirroring save_vars_pir (pir_io.py:411-424). */
+pd_status  pd_trace_save(pd_trace t, const char* path_prefix);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif

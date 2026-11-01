@@ -50,7 +50,13 @@ local e2 = mlp(x2)
 
 -- 1. trace
 local traced = paddle.jit.trace(mlp, x1)
-check(type(traced) == "function", "trace returns a callable")
+local traced_mt = getmetatable(traced)
+check(type(traced) == "table" and type(traced.save) == "function"
+      and traced_mt ~= nil and traced_mt.__call ~= nil,
+      "trace returns a callable table with save()")
+
+-- 1b. save the PIR inference artifact (M3 gate: Python jit.load reads it)
+traced.save("build-test/lua_mlp")
 
 -- 2a. replay with the example input: bitwise == eager
 local r1 = traced(x1)
@@ -91,5 +97,18 @@ local traced2 = paddle.jit.trace(mlp, x1)
 local r3 = traced2(x2)
 check(r3:to_host_bytes() == e2:to_host_bytes(),
       "second trace disagrees with eager")
+
+-- 6. save artifact exists, and dump the reference output for the Python
+--    readback step (py_jit_readback.py loads build-test/lua_mlp and must
+--    reproduce exactly these bytes).
+local fjson = io.open("build-test/lua_mlp.json", "rb")
+local fparams = io.open("build-test/lua_mlp.pdiparams", "rb")
+check(fjson ~= nil and fparams ~= nil, "save() did not write both files")
+if fjson then fjson:close() end
+if fparams then fparams:close() end
+local out2 = traced(x2)
+local ref = io.open("build-test/lua_mlp.out.bin", "wb")
+ref:write(out2:to_host_bytes())
+ref:close()
 
 print(("JIT_TRACE_SMOKE PASS (%d assertions)"):format(ntests))

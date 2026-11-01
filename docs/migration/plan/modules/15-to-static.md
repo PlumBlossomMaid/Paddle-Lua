@@ -118,6 +118,63 @@ str_attr / int32_attr / index_attr / int64_attr / array_attr / bool_attr)。
 - **T-M0-18 已证可行性基座**:手工构造 AttributeMap 喂该函数可达 C++
   逻辑(smoke_run_program.cc PASS,2026-10-23)——只是当时给的是空 program。
 
+### 2.3 序列化与 Python `jit.load` 读回(2026-11-01 步骤 4 调研,已实证)
+
+**目标**:Lua trace 的 program 存盘后能被 Python `paddle.jit.load` 读回且
+推理一致(M3 判据 roadmap.md:85)。
+
+**Python 保存链**(全部已读源码):`jit.save`(api.py:1287)→
+`save_inference_model` → PIR 分支 `save_inference_model_pir`
+(pir_io.py:702):`normalize_pir_program`(pir_io.py:230 克隆+剪枝+
+`_inference_optimize`+append feed/fetch ops)→
+`paddle.core.serialize_pir_program(program, <prefix>.json, ...)`
+(pir_io.py:762)→ `save_vars_pir` 写 `<prefix>.pdiparams`(pir_io.py:774)。
+**PIR 模式模型文件后缀是 `.json` 不是 `.pdmodel`**;`load_inference_model_pir`
+读回路径 = `<prefix>.json` + `<prefix>.pdiparams`(pir_io.py:817-823)。
+
+**C++ 序列化入口**(Lua 侧直接可用):
+- `pir::WriteModule(program, file_path, overwrite, readable, trainable,
+  pir_version)`(paddle/fluid/pir/serialize_deserialize/include/interface.h:38-46;
+  pybind io.cc:165)。**trainable=true 才保留 persistable/stop_gradient 等
+  opresult 属性**。
+- `pir::SaveCombineFunction(x, names, file_path, overwrite, save_as_fp16,
+  save_to_memory)`(interface.h:107;io.cc:146)写组合参数文件。
+- 读回 `pir::ReadModule`(interface.h;io.cc:173)。
+
+**load 侧对 program 结构的三条硬要求**(pir_translated_layer.py,实测对照
+Python 自存模型 py_mlp.json 的 op 序列 `p b w data matmul add relu fetch`):
+1. **用户输入 = `pd_op.data`**:`_PirProgramHolder._preprocess` 收集
+   `pd_op.data` 结果为输入(pir_translated_layer.py:106)——Lua 声明的输入
+   data op 原样保留即符合。
+2. **权重 = `builtin.parameter`(不是 pd_op.data!)+ persistable=true**:
+   `get_pir_parameters` 只认 builtin.parameter / `builtin.parameter` 定义
+   (pir_io.py:62-70),且 `_load_pir_parameter_vars` 只加载
+   `var.persistable` 的参数(pir_translated_layer.py:199);pd_op.data 结果
+   会被当**用户输入**。
+   `ParameterOp::Build(builder, argument, name, type)`(builtin_op.h:73-82),
+   persistable 用 `Value::set_attribute("persistable", BoolAttribute)`
+   (value.h:119)。
+3. **输出 = `pd_op.fetch`(不是 builtin.shadow_output!)**:preprocess 收
+   `pd_op.fetch` 的 operand 为输出并删除该 op,再 `set_persistable_value`(=
+   `paddle::dialect::shadow_output`)恢复:
+   pir_translated_layer.py:121-128 + manual_static_op_function.h:118-134。
+   裸 shadow_output 不会被识别 → 输出列表空。`FetchOp::Build(builder,
+   argument, x, name, col)`(manual_op.h:317-322)。
+
+→ **Lua save 变换 = 克隆 program(保 trace 可重放)→ 权重 data op
+换 `builtin.parameter`+persistable → shadow_output 换 `pd_op.fetch` →
+WriteModule(.json, trainable=true)+ SaveCombineFunction(.pdiparams,
+按名 sorted,镜像 save_vars_pir pir_io.py:411-424)**。已全部落地实证:
+Python `jit.load` 读回与 Lua traced 输出**逐位一致**(PY_READBACK PASS)。
+
+**运行期坑(非确定性、最难查的一类)**:
+`run_program_ad_func` 的 InterpreterCoreInfoCache 以
+`(program_id, scope 指针, place...)` 为 key(run_program_impl.cc:505-515)。
+若每次 run 新建 Scope、返回即释放,堆复用地址后 cache 命中拿到绑在
+**已释放 scope** 上的旧 interpreter → 张量元数据变垃圾 → matmul 形状
+非确定性乱序(实测 7/8 失败率)。**scope 必须在 trace 上下文常驻、
+跨 run 复用**(PdTraceCtx::run_scope)。
+
 ---
 
 ## 3. 设计

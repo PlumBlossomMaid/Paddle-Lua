@@ -115,6 +115,16 @@ void register_trace(lua_State* L, int module_index) {
         pd_trace_free(tr.h);
         tr.h = nullptr;
         return 0;
+      },
+      /* trace:save(path_prefix) -- write <prefix>.json + <prefix>.pdiparams
+       * in the PIR inference format Python paddle.jit.load reads
+       * (pd_trace_save, paddle_c.h Group 12). */
+      "save",
+      [](const LuaTrace& tr, const std::string& path_prefix) {
+        pd_status st = pd_trace_save(tr.h, path_prefix.c_str());
+        (void)st;
+        pd::check();
+        return 0;
       });
 }
 
