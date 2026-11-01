@@ -71,6 +71,16 @@ int64_t pd_op_kthvalue(pd_tensor* outs, int64_t nout, pd_tensor x, int64_t k, in
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   std::get<1>(r) = pd_idx_plus1(std::get<1>(r));
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["k"] = pir::Int64Attribute::get(pd_trace_ir(), k);
+    _ta["axis"] = pir::Int32Attribute::get(pd_trace_ir(), axis);
+    _ta["keepdim"] = pir::BoolAttribute::get(pd_trace_ir(), keepdim != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::KthvalueOp>(_tv0, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }

@@ -35,7 +35,16 @@ pd_tensor pd_op_var(pd_tensor x, const int64_t* axis, int64_t axis_n, int keepdi
       new pd_tensor_t{std::move(out)});
   if (pd_trace_active()) {
     pir::Value _tv0 = pd_trace_value_or_feed(x);
-    auto _top = pd_trace_builder()->Build<paddle::dialect::VarOp>(_tv0, std::vector<int64_t>(axis, axis + axis_n), keepdim != 0, unbiased != 0, correction);
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_axis;
+    _tvattr_axis.reserve(axis_n);
+    for (int64_t _vi = 0; _vi < axis_n; ++_vi)
+      _tvattr_axis.push_back(pir::Int64Attribute::get(pd_trace_ir(), axis[_vi]));
+    _ta["axis"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_axis);
+    _ta["keepdim"] = pir::BoolAttribute::get(pd_trace_ir(), keepdim != 0);
+    _ta["unbiased"] = pir::BoolAttribute::get(pd_trace_ir(), unbiased != 0);
+    _ta["correction"] = pir::DoubleAttribute::get(pd_trace_ir(), correction);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::VarOp>(_tv0, _ta);
     pd_trace_map_output(_th, _top->result(0));
   }
   return _th;
@@ -51,7 +60,14 @@ pd_tensor pd_op_variance(pd_tensor x, const int64_t* axis, int64_t axis_n, int k
       new pd_tensor_t{std::move(out)});
   if (pd_trace_active()) {
     pir::Value _tv0 = pd_trace_value_or_feed(x);
-    auto _top = pd_trace_builder()->Build<paddle::dialect::VarianceOp>(_tv0, std::vector<int64_t>(axis, axis + axis_n), keepdim != 0);
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_axis;
+    _tvattr_axis.reserve(axis_n);
+    for (int64_t _vi = 0; _vi < axis_n; ++_vi)
+      _tvattr_axis.push_back(pir::Int64Attribute::get(pd_trace_ir(), axis[_vi]));
+    _ta["axis"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_axis);
+    _ta["keepdim"] = pir::BoolAttribute::get(pd_trace_ir(), keepdim != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::VarianceOp>(_tv0, _ta);
     pd_trace_map_output(_th, _top->result(0));
   }
   return _th;
@@ -85,7 +101,13 @@ pd_tensor pd_op_view_shape(pd_tensor input, const int64_t* dims, int64_t dims_n)
       new pd_tensor_t{std::move(out)});
   if (pd_trace_active()) {
     pir::Value _tv0 = pd_trace_value_or_feed(input);
-    auto _top = pd_trace_builder()->Build<paddle::dialect::ViewShapeOp>(_tv0, std::vector<int64_t>(dims, dims + dims_n));
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_dims;
+    _tvattr_dims.reserve(dims_n);
+    for (int64_t _vi = 0; _vi < dims_n; ++_vi)
+      _tvattr_dims.push_back(pir::Int64Attribute::get(pd_trace_ir(), dims[_vi]));
+    _ta["dims"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_dims);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::ViewShapeOp>(_tv0, _ta);
     pd_trace_map_output(_th, _top->result(0));
   }
   return _th;
@@ -119,6 +141,16 @@ int64_t pd_op_viterbi_decode(pd_tensor* outs, int64_t nout, pd_tensor potentials
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   std::get<1>(r) = pd_idx_plus1(std::get<1>(r));
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(potentials);
+    pir::Value _tv1 = pd_trace_value_or_feed(transition_params);
+    pir::Value _tv2 = pd_trace_value_or_feed(lengths);
+    pir::AttributeMap _ta;
+    _ta["include_bos_eos_tag"] = pir::BoolAttribute::get(pd_trace_ir(), include_bos_eos_tag != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::ViterbiDecodeOp>(_tv0, _tv1, _tv2, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }

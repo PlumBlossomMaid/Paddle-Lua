@@ -33,6 +33,26 @@ int64_t pd_op_yolo_box(pd_tensor* outs, int64_t nout, pd_tensor x, pd_tensor img
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(img_size)->value /* Tensor */, std::vector<int>(anchors, anchors + anchors_n) /* std::vector<int> */, class_num /* int */, conf_thresh /* float */, downsample_ratio /* int */, clip_bbox != 0 /* bool */, scale_x_y /* float */, iou_aware != 0 /* bool */, iou_aware_factor /* float */);
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = pd_trace_value_or_feed(img_size);
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_anchors;
+    _tvattr_anchors.reserve(anchors_n);
+    for (int64_t _vi = 0; _vi < anchors_n; ++_vi)
+      _tvattr_anchors.push_back(pir::Int32Attribute::get(pd_trace_ir(), anchors[_vi]));
+    _ta["anchors"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_anchors);
+    _ta["class_num"] = pir::Int32Attribute::get(pd_trace_ir(), class_num);
+    _ta["conf_thresh"] = pir::FloatAttribute::get(pd_trace_ir(), conf_thresh);
+    _ta["downsample_ratio"] = pir::Int32Attribute::get(pd_trace_ir(), downsample_ratio);
+    _ta["clip_bbox"] = pir::BoolAttribute::get(pd_trace_ir(), clip_bbox != 0);
+    _ta["scale_x_y"] = pir::FloatAttribute::get(pd_trace_ir(), scale_x_y);
+    _ta["iou_aware"] = pir::BoolAttribute::get(pd_trace_ir(), iou_aware != 0);
+    _ta["iou_aware_factor"] = pir::FloatAttribute::get(pd_trace_ir(), iou_aware_factor);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::YoloBoxOp>(_tv0, _tv1, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }
@@ -46,7 +66,14 @@ pd_tensor pd_op_yolo_box_head(pd_tensor x, const int* anchors, int64_t anchors_n
       new pd_tensor_t{std::move(out)});
   if (pd_trace_active()) {
     pir::Value _tv0 = pd_trace_value_or_feed(x);
-    auto _top = pd_trace_builder()->Build<paddle::dialect::YoloBoxHeadOp>(_tv0, std::vector<int>(anchors, anchors + anchors_n), class_num);
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_anchors;
+    _tvattr_anchors.reserve(anchors_n);
+    for (int64_t _vi = 0; _vi < anchors_n; ++_vi)
+      _tvattr_anchors.push_back(pir::Int32Attribute::get(pd_trace_ir(), anchors[_vi]));
+    _ta["anchors"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_anchors);
+    _ta["class_num"] = pir::Int32Attribute::get(pd_trace_ir(), class_num);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::YoloBoxHeadOp>(_tv0, _ta);
     pd_trace_map_output(_th, _top->result(0));
   }
   return _th;
@@ -60,6 +87,40 @@ int64_t pd_op_yolo_box_post(pd_tensor* outs, int64_t nout, pd_tensor boxes0, pd_
       reinterpret_cast<pd_tensor_t*>(boxes0)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(boxes1)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(boxes2)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(image_shape)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(image_scale)->value /* Tensor */, std::vector<int>(anchors0, anchors0 + anchors0_n) /* std::vector<int> */, std::vector<int>(anchors1, anchors1 + anchors1_n) /* std::vector<int> */, std::vector<int>(anchors2, anchors2 + anchors2_n) /* std::vector<int> */, class_num /* int */, conf_thresh /* float */, downsample_ratio0 /* int */, downsample_ratio1 /* int */, downsample_ratio2 /* int */, clip_bbox != 0 /* bool */, scale_x_y /* float */, nms_threshold /* float */);
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(boxes0);
+    pir::Value _tv1 = pd_trace_value_or_feed(boxes1);
+    pir::Value _tv2 = pd_trace_value_or_feed(boxes2);
+    pir::Value _tv3 = pd_trace_value_or_feed(image_shape);
+    pir::Value _tv4 = pd_trace_value_or_feed(image_scale);
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_anchors0;
+    _tvattr_anchors0.reserve(anchors0_n);
+    for (int64_t _vi = 0; _vi < anchors0_n; ++_vi)
+      _tvattr_anchors0.push_back(pir::Int32Attribute::get(pd_trace_ir(), anchors0[_vi]));
+    _ta["anchors0"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_anchors0);
+    std::vector<pir::Attribute> _tvattr_anchors1;
+    _tvattr_anchors1.reserve(anchors1_n);
+    for (int64_t _vi = 0; _vi < anchors1_n; ++_vi)
+      _tvattr_anchors1.push_back(pir::Int32Attribute::get(pd_trace_ir(), anchors1[_vi]));
+    _ta["anchors1"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_anchors1);
+    std::vector<pir::Attribute> _tvattr_anchors2;
+    _tvattr_anchors2.reserve(anchors2_n);
+    for (int64_t _vi = 0; _vi < anchors2_n; ++_vi)
+      _tvattr_anchors2.push_back(pir::Int32Attribute::get(pd_trace_ir(), anchors2[_vi]));
+    _ta["anchors2"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_anchors2);
+    _ta["class_num"] = pir::Int32Attribute::get(pd_trace_ir(), class_num);
+    _ta["conf_thresh"] = pir::FloatAttribute::get(pd_trace_ir(), conf_thresh);
+    _ta["downsample_ratio0"] = pir::Int32Attribute::get(pd_trace_ir(), downsample_ratio0);
+    _ta["downsample_ratio1"] = pir::Int32Attribute::get(pd_trace_ir(), downsample_ratio1);
+    _ta["downsample_ratio2"] = pir::Int32Attribute::get(pd_trace_ir(), downsample_ratio2);
+    _ta["clip_bbox"] = pir::BoolAttribute::get(pd_trace_ir(), clip_bbox != 0);
+    _ta["scale_x_y"] = pir::FloatAttribute::get(pd_trace_ir(), scale_x_y);
+    _ta["nms_threshold"] = pir::FloatAttribute::get(pd_trace_ir(), nms_threshold);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::YoloBoxPostOp>(_tv0, _tv1, _tv2, _tv3, _tv4, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }

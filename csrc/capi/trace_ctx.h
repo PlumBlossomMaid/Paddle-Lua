@@ -37,8 +37,16 @@ struct PdTraceCtx {
   pir::IrContext* ir = nullptr;
   std::shared_ptr<pir::Program> program;
   std::unique_ptr<pir::Builder> builder;
-  /* tensor handle -> the pir::Value that produced it (feed or op result). */
-  std::unordered_map<pd_tensor, pir::Value> value_of;
+  /* tensor -> the pir::Value that produced it (feed or op result).
+   * KEYED BY IMPL POINTER, not the handle: sol passes LuaTensor BY VALUE
+   * into op lambdas, and the LuaTensor copy ctor retains a NEW handle
+   * shell sharing the same impl (sol_common.hpp); handle addresses also
+   * get malloc-reused after Lua GC frees a temporary. Both break a
+   * handle-keyed map (miss -> duplicate feed, or stale-hit -> wrong
+   * graph, measured as nondeterministic wrong outputs on repeated
+   * traces). The impl (shared_ptr target of paddle::Tensor) is the one
+   * stable identity; feed/op retain-holders below keep it alive. */
+  std::unordered_map<const void*, pir::Value> value_of;
   /* (name, tensor) feeds in declaration order; drives fx_names + run's x.
    * feeds[0 .. n_declared-1] are the pd_trace_input-declared inputs;
    * the rest are auto-declared weights/constants (pd_trace_value_or_feed)
@@ -57,6 +65,18 @@ struct PdTraceCtx {
    * (nondeterministic matmul shape scramble). Holding it here keeps the
    * cached interpreter + its re-shared feeds consistent. */
   std::shared_ptr<paddle::framework::Scope> run_scope;
+  /* Every pd_trace_run2 replaces run_scope with a FRESH Scope and keeps
+   * the previous ones alive here. Two reasons, both measured:
+   *   1. InterpreterCoreInfoCache keys on (program_id, scope ptr, ...):
+   *      a freed scope's address gets malloc-reused, the cache then
+   *      serves an interpreter bound to a FREED scope (garbage tensor
+   *      shapes -- the nondeterministic matmul scramble).
+   *   2. A REUSED scope makes the interpreter's GC empty the input vars
+   *      after run 1 (holders released, scope["x1"] becomes a shells);
+   *      run 2 then re-feeds the SAME var object and the cached
+   *      interpreter keeps reading the emptied/stale binding. A fresh
+   *      scope forces a fresh interpreter that re-reads all feeds. */
+  std::vector<std::shared_ptr<paddle::framework::Scope>> retired_scopes;
 };
 
 /* True while a trace is active on this thread. The generated wrappers

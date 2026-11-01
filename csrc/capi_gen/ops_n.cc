@@ -34,6 +34,16 @@ int64_t pd_op_nanmedian(pd_tensor* outs, int64_t nout, pd_tensor x, const int64_
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   std::get<1>(r) = pd_idx_plus1(std::get<1>(r));
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["axis"] = paddle::dialect::IntArrayAttribute::get(pd_trace_ir(), paddle::experimental::IntArray(axis, axis_n));
+    _ta["keepdim"] = pir::BoolAttribute::get(pd_trace_ir(), keepdim != 0);
+    _ta["mode"] = pir::StrAttribute::get(pd_trace_ir(), std::string(mode));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::NanmedianOp>(_tv0, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }
@@ -142,6 +152,16 @@ int64_t pd_op_norm(pd_tensor* outs, int64_t nout, pd_tensor x, int axis, float e
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, axis /* int */, epsilon /* float */, is_test != 0 /* bool */);
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["axis"] = pir::Int32Attribute::get(pd_trace_ir(), axis);
+    _ta["epsilon"] = pir::FloatAttribute::get(pd_trace_ir(), epsilon);
+    _ta["is_test"] = pir::BoolAttribute::get(pd_trace_ir(), is_test != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::NormOp>(_tv0, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }

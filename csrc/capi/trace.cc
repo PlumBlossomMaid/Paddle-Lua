@@ -87,6 +87,15 @@ pir::Type dense_type_of(PdTraceCtx& c, pd_tensor h) {
 /* Emit pd_op.data for `h` under `name` and register it as a feed. Mirrors
  * the feed op a translated program carries (pir.cc:2621 docstring). */
 void add_feed(PdTraceCtx& c, pd_tensor h, const std::string& name) {
+  // OWN the handle: keep a retain-ed shell of our own, independent of the
+  // Lua-side LuaTensor's lifetime. The recording call sites pass a plain
+  // borrowed handle; if Lua GC collects that LuaTensor later (a weight
+  // whose last Lua use was the traced forward), its ~LuaTensor would
+  // pd_tensor_free the very pointer we cached -- use-after-free on the
+  // next run (measured: fresh exit 0xC0000005 reading feeds[i].second).
+  // pd_tensor_retain shares the underlying paddle::Tensor storage via
+  // shared_ptr, so the data stays alive as long as this trace does.
+  pd_tensor owned = pd_tensor_retain(h);
   const paddle::Tensor& t = reinterpret_cast<const pd_tensor_t*>(h)->value;
   auto dense = std::dynamic_pointer_cast<phi::DenseTensor>(t.impl());
   PADDLE_ENFORCE_NOT_NULL(
@@ -101,24 +110,26 @@ void add_feed(PdTraceCtx& c, pd_tensor h, const std::string& name) {
   };
   pir::Operation* op = c.builder->Build(
       {}, attrs, {dense_type_of(c, h)}, c.ir->GetRegisteredOpInfo("pd_op.data"));
-  c.value_of[h] = op->result(0);
-  c.feeds.emplace_back(name, h);
+  c.value_of[t.impl().get()] = op->result(0);
+  c.feeds.emplace_back(name, owned);
 }
 
 }  // namespace
 
 pir::Value pd_trace_value_or_feed(pd_tensor tensor) {
   PdTraceCtx& c = *g_trace;
-  auto it = c.value_of.find(tensor);
+  const void* imp = reinterpret_cast<pd_tensor_t*>(tensor)->value.impl().get();
+  auto it = c.value_of.find(imp);
   if (it != c.value_of.end()) return it->second;
   // Unseen tensor (weight/constant): auto-declare as a feed.
   std::string name = "feed_" + std::to_string(c.feed_counter++);
   add_feed(c, tensor, name);
-  return c.value_of[tensor];
+  return c.value_of[imp];
 }
 
 void pd_trace_map_output(pd_tensor tensor, pir::Value value) {
-  g_trace->value_of[tensor] = value;
+  const void* imp = reinterpret_cast<pd_tensor_t*>(tensor)->value.impl().get();
+  g_trace->value_of[imp] = value;
 }
 
 extern "C" {
@@ -142,6 +153,12 @@ void pd_trace_free(pd_trace t) {
   if (t == nullptr) return;
   pd_trace_t* real = reinterpret_cast<pd_trace_t*>(t);
   if (g_trace == &real->ctx) g_trace = nullptr;
+  // Release the retain-ed feed shells (add_feed owns them; the borrower
+  // LuaTensor's ~LuaTensor pd_tensor_free's its own shell only).
+  for (auto& f : real->ctx.feeds) {
+    pd_tensor_free(f.second);
+  }
+  real->ctx.feeds.clear();
   delete real;
   PD_GUARD_END_VOID;
 }
@@ -162,7 +179,8 @@ pd_status pd_trace_input(pd_trace t, pd_tensor tensor, const char* name) {
                  "traced function (an auto-feed already exists)");
     return PD_INVALID_ARG;
   }
-  if (c.value_of.find(tensor) == c.value_of.end()) {
+  const void* imp = reinterpret_cast<pd_tensor_t*>(tensor)->value.impl().get();
+  if (c.value_of.find(imp) == c.value_of.end()) {
     add_feed(c, tensor, name);
     c.n_declared++;
   }
@@ -177,7 +195,8 @@ pd_status pd_trace_output(pd_trace t, pd_tensor tensor, const char* name) {
     return PD_INVALID_ARG;
   }
   PdTraceCtx& c = reinterpret_cast<pd_trace_t*>(t)->ctx;
-  auto it = c.value_of.find(tensor);
+  const void* imp = reinterpret_cast<pd_tensor_t*>(tensor)->value.impl().get();
+  auto it = c.value_of.find(imp);
   if (it == c.value_of.end()) {
     pd_set_error(PD_INVALID_ARG,
                  "pd_trace_output: tensor is not a recorded op output");
@@ -241,13 +260,17 @@ int pd_trace_run2(pd_trace t, const pd_tensor* xs, int nx,
   cuda_graph_attrs["cuda_graph_state"] = static_cast<int64_t>(0);
   cuda_graph_attrs["cuda_graph_dispatch_key"] = static_cast<int64_t>(0);
 
-  // Single outer scope (run_program_impl.cc:466-473). STABLE across runs:
-  // InterpreterCoreInfoCache keys by scope ptr -- a per-call fresh scope
-  // that dies at return lets malloc reuse the address and the cache serve
-  // an interpreter bound to a FREED scope (garbage shapes; trace_ctx.h).
-  if (!c.run_scope) {
-    c.run_scope = std::make_shared<paddle::framework::Scope>();
+  // Single outer scope (run_program_impl.cc:466-473). A FRESH scope per
+  // run, previous ones kept alive in retired_scopes (trace_ctx.h): the
+  // InterpreterCoreInfoCache keys by scope ptr, so a fresh scope forces a
+  // fresh interpreter that re-reads every feed -- the reused-scope path
+  // leaves scope["x1"] as a holder-less shell after run 1's GC, and run 2
+  // re-feeds that same shell while the cached interpreter keeps its stale
+  // binding (measured: traced(x2) silently returned traced(x)'s result).
+  if (c.run_scope) {
+    c.retired_scopes.push_back(c.run_scope);
   }
+  c.run_scope = std::make_shared<paddle::framework::Scope>();
   std::vector<paddle::framework::Scope*> step_scope{c.run_scope.get()};
 
   std::vector<paddle::Tensor> out = egr::to_static::run_program_ad_func(
@@ -365,7 +388,8 @@ pd_status pd_trace_save(pd_trace t, const char* path_prefix) {
     auto dense = std::dynamic_pointer_cast<phi::DenseTensor>(tv.impl());
     if (!dense) {
       pd_set_error(PD_INVALID_ARG,
-                   "pd_trace_save: weight tensor has no DenseTensor impl");
+                   ("pd_trace_save: weight '" + p.first
+                    + "' has no DenseTensor impl").c_str());
       return PD_INVALID_ARG;
     }
     tensors.push_back(dense.get());

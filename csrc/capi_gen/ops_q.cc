@@ -4,6 +4,9 @@
  */
 #include "capi_impl.h"
 #include "paddle/fluid/eager/api/generated/eager_generated/forwards/dygraph_functions.h"
+#include "trace_ctx.h"
+#include "paddle/fluid/pir/dialect/operator/ir/pd_op.h"
+#include "paddle/fluid/pir/dialect/operator/ir/op_attribute.h"
 
 /* qr (yaml block line 4455, 2 outputs) */
 int64_t pd_op_qr(pd_tensor* outs, int64_t nout, pd_tensor x, const char* mode) {
@@ -12,6 +15,14 @@ int64_t pd_op_qr(pd_tensor* outs, int64_t nout, pd_tensor x, const char* mode) {
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, mode /* std::string */);
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["mode"] = pir::StrAttribute::get(pd_trace_ir(), std::string(mode));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::QrOp>(_tv0, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }

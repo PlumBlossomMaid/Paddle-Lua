@@ -48,7 +48,28 @@ pd_tensor pd_op_unfold(pd_tensor x, const int* kernel_sizes, int64_t kernel_size
       new pd_tensor_t{std::move(out)});
   if (pd_trace_active()) {
     pir::Value _tv0 = pd_trace_value_or_feed(x);
-    auto _top = pd_trace_builder()->Build<paddle::dialect::UnfoldOp>(_tv0, std::vector<int>(kernel_sizes, kernel_sizes + kernel_sizes_n), std::vector<int>(strides, strides + strides_n), std::vector<int>(paddings, paddings + paddings_n), std::vector<int>(dilations, dilations + dilations_n));
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_kernel_sizes;
+    _tvattr_kernel_sizes.reserve(kernel_sizes_n);
+    for (int64_t _vi = 0; _vi < kernel_sizes_n; ++_vi)
+      _tvattr_kernel_sizes.push_back(pir::Int32Attribute::get(pd_trace_ir(), kernel_sizes[_vi]));
+    _ta["kernel_sizes"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_kernel_sizes);
+    std::vector<pir::Attribute> _tvattr_strides;
+    _tvattr_strides.reserve(strides_n);
+    for (int64_t _vi = 0; _vi < strides_n; ++_vi)
+      _tvattr_strides.push_back(pir::Int32Attribute::get(pd_trace_ir(), strides[_vi]));
+    _ta["strides"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_strides);
+    std::vector<pir::Attribute> _tvattr_paddings;
+    _tvattr_paddings.reserve(paddings_n);
+    for (int64_t _vi = 0; _vi < paddings_n; ++_vi)
+      _tvattr_paddings.push_back(pir::Int32Attribute::get(pd_trace_ir(), paddings[_vi]));
+    _ta["paddings"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_paddings);
+    std::vector<pir::Attribute> _tvattr_dilations;
+    _tvattr_dilations.reserve(dilations_n);
+    for (int64_t _vi = 0; _vi < dilations_n; ++_vi)
+      _tvattr_dilations.push_back(pir::Int32Attribute::get(pd_trace_ir(), dilations[_vi]));
+    _ta["dilations"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_dilations);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::UnfoldOp>(_tv0, _ta);
     pd_trace_map_output(_th, _top->result(0));
   }
   return _th;
@@ -98,7 +119,22 @@ pd_tensor pd_op_uniform_random_batch_size_like(pd_tensor input, const int* shape
       new pd_tensor_t{std::move(out)});
   if (pd_trace_active()) {
     pir::Value _tv0 = pd_trace_value_or_feed(input);
-    auto _top = pd_trace_builder()->Build<paddle::dialect::UniformRandomBatchSizeLikeOp>(_tv0, std::vector<int>(shape, shape + shape_n), input_dim_idx, output_dim_idx, min, max, seed, diag_num, diag_step, diag_val, static_cast<phi::DataType>(dtype));
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_shape;
+    _tvattr_shape.reserve(shape_n);
+    for (int64_t _vi = 0; _vi < shape_n; ++_vi)
+      _tvattr_shape.push_back(pir::Int32Attribute::get(pd_trace_ir(), shape[_vi]));
+    _ta["shape"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_shape);
+    _ta["input_dim_idx"] = pir::Int32Attribute::get(pd_trace_ir(), input_dim_idx);
+    _ta["output_dim_idx"] = pir::Int32Attribute::get(pd_trace_ir(), output_dim_idx);
+    _ta["min"] = pir::FloatAttribute::get(pd_trace_ir(), min);
+    _ta["max"] = pir::FloatAttribute::get(pd_trace_ir(), max);
+    _ta["seed"] = pir::Int32Attribute::get(pd_trace_ir(), seed);
+    _ta["diag_num"] = pir::Int32Attribute::get(pd_trace_ir(), diag_num);
+    _ta["diag_step"] = pir::Int32Attribute::get(pd_trace_ir(), diag_step);
+    _ta["diag_val"] = pir::FloatAttribute::get(pd_trace_ir(), diag_val);
+    _ta["dtype"] = paddle::dialect::DataTypeAttribute::get(pd_trace_ir(), static_cast<phi::DataType>(dtype));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::UniformRandomBatchSizeLikeOp>(_tv0, _ta);
     pd_trace_map_output(_th, _top->result(0));
   }
   return _th;
@@ -116,6 +152,24 @@ int64_t pd_op_unique(pd_tensor* outs, int64_t nout, pd_tensor x, int return_inde
   std::get<2>(r) = pd_idx_plus1(std::get<2>(r));
   if (nout >= 3) outs[2] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<2>(r))});
   if (nout >= 4) outs[3] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<3>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["return_index"] = pir::BoolAttribute::get(pd_trace_ir(), return_index != 0);
+    _ta["return_inverse"] = pir::BoolAttribute::get(pd_trace_ir(), return_inverse != 0);
+    _ta["return_counts"] = pir::BoolAttribute::get(pd_trace_ir(), return_counts != 0);
+    std::vector<pir::Attribute> _tvattr_axis;
+    _tvattr_axis.reserve(axis_n);
+    for (int64_t _vi = 0; _vi < axis_n; ++_vi)
+      _tvattr_axis.push_back(pir::Int32Attribute::get(pd_trace_ir(), axis[_vi]));
+    _ta["axis"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_axis);
+    _ta["dtype"] = paddle::dialect::DataTypeAttribute::get(pd_trace_ir(), static_cast<phi::DataType>(dtype));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::UniqueOp>(_tv0, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+    if (nout >= 3) pd_trace_map_output(outs[2], _top->result(2));
+    if (nout >= 4) pd_trace_map_output(outs[3], _top->result(3));
+  }
   return 4;
   PD_GUARD_END(0);
 }
@@ -129,6 +183,22 @@ int64_t pd_op_unique_consecutive(pd_tensor* outs, int64_t nout, pd_tensor x, int
   std::get<1>(r) = pd_idx_plus1(std::get<1>(r));
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
   if (nout >= 3) outs[2] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<2>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["return_inverse"] = pir::BoolAttribute::get(pd_trace_ir(), return_inverse != 0);
+    _ta["return_counts"] = pir::BoolAttribute::get(pd_trace_ir(), return_counts != 0);
+    std::vector<pir::Attribute> _tvattr_axis;
+    _tvattr_axis.reserve(axis_n);
+    for (int64_t _vi = 0; _vi < axis_n; ++_vi)
+      _tvattr_axis.push_back(pir::Int32Attribute::get(pd_trace_ir(), axis[_vi]));
+    _ta["axis"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_axis);
+    _ta["dtype"] = paddle::dialect::DataTypeAttribute::get(pd_trace_ir(), static_cast<phi::DataType>(dtype));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::UniqueConsecutiveOp>(_tv0, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+    if (nout >= 3) pd_trace_map_output(outs[2], _top->result(2));
+  }
   return 3;
   PD_GUARD_END(0);
 }

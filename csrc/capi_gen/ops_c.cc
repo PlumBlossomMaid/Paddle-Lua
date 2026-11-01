@@ -144,6 +144,21 @@ int64_t pd_op_cal_aux_loss(pd_tensor* outs, int64_t nout, pd_tensor gate_prob, p
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
   if (nout >= 3) outs[2] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<2>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(gate_prob);
+    pir::Value _tv1 = pd_trace_value_or_feed(dispatch_mask);
+    pir::Value _tv2 = tokens_mask ? pd_trace_value_or_feed(tokens_mask) : pir::Value();
+    pir::Value _tv3 = dispatch_tokens_mask ? pd_trace_value_or_feed(dispatch_tokens_mask) : pir::Value();
+    pir::AttributeMap _ta;
+    _ta["num_experts"] = pir::Int64Attribute::get(pd_trace_ir(), num_experts);
+    _ta["use_group"] = pir::BoolAttribute::get(pd_trace_ir(), use_group != 0);
+    _ta["moe_k"] = pir::Int64Attribute::get(pd_trace_ir(), moe_k);
+    _ta["clip_min"] = pir::FloatAttribute::get(pd_trace_ir(), clip_min);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::CalAuxLossOp>(_tv0, _tv1, _tv2, _tv3, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+    if (nout >= 3) pd_trace_map_output(outs[2], _top->result(2));
+  }
   return 3;
   PD_GUARD_END(0);
 }
@@ -244,6 +259,18 @@ int64_t pd_op_check_numerics(pd_tensor* outs, int64_t nout, pd_tensor tensor, co
       reinterpret_cast<pd_tensor_t*>(tensor)->value /* Tensor */, op_type /* std::string */, var_name /* std::string */, check_nan_inf_level /* int */, stack_height_limit /* int */, output_dir /* std::string */);
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(tensor);
+    pir::AttributeMap _ta;
+    _ta["op_type"] = pir::StrAttribute::get(pd_trace_ir(), std::string(op_type));
+    _ta["var_name"] = pir::StrAttribute::get(pd_trace_ir(), std::string(var_name));
+    _ta["check_nan_inf_level"] = pir::Int32Attribute::get(pd_trace_ir(), check_nan_inf_level);
+    _ta["stack_height_limit"] = pir::Int32Attribute::get(pd_trace_ir(), stack_height_limit);
+    _ta["output_dir"] = pir::StrAttribute::get(pd_trace_ir(), std::string(output_dir));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::CheckNumericsOp>(_tv0, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }
@@ -436,7 +463,26 @@ pd_tensor pd_op_conv2d(pd_tensor input, pd_tensor filter, const int* strides, in
   if (pd_trace_active()) {
     pir::Value _tv0 = pd_trace_value_or_feed(input);
     pir::Value _tv1 = pd_trace_value_or_feed(filter);
-    auto _top = pd_trace_builder()->Build<paddle::dialect::Conv2dOp>(_tv0, _tv1, std::vector<int>(strides, strides + strides_n), std::vector<int>(paddings, paddings + paddings_n), std::string(padding_algorithm), std::vector<int>(dilations, dilations + dilations_n), groups, std::string(data_format));
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_strides;
+    _tvattr_strides.reserve(strides_n);
+    for (int64_t _vi = 0; _vi < strides_n; ++_vi)
+      _tvattr_strides.push_back(pir::Int32Attribute::get(pd_trace_ir(), strides[_vi]));
+    _ta["strides"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_strides);
+    std::vector<pir::Attribute> _tvattr_paddings;
+    _tvattr_paddings.reserve(paddings_n);
+    for (int64_t _vi = 0; _vi < paddings_n; ++_vi)
+      _tvattr_paddings.push_back(pir::Int32Attribute::get(pd_trace_ir(), paddings[_vi]));
+    _ta["paddings"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_paddings);
+    _ta["padding_algorithm"] = pir::StrAttribute::get(pd_trace_ir(), std::string(padding_algorithm));
+    std::vector<pir::Attribute> _tvattr_dilations;
+    _tvattr_dilations.reserve(dilations_n);
+    for (int64_t _vi = 0; _vi < dilations_n; ++_vi)
+      _tvattr_dilations.push_back(pir::Int32Attribute::get(pd_trace_ir(), dilations[_vi]));
+    _ta["dilations"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_dilations);
+    _ta["groups"] = pir::Int32Attribute::get(pd_trace_ir(), groups);
+    _ta["data_format"] = pir::StrAttribute::get(pd_trace_ir(), std::string(data_format));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::Conv2dOp>(_tv0, _tv1, _ta);
     pd_trace_map_output(_th, _top->result(0));
   }
   return _th;
@@ -450,6 +496,37 @@ pd_tensor pd_op_conv2d_transpose(pd_tensor x, pd_tensor filter, const int* strid
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(filter)->value /* Tensor */, std::vector<int>(strides, strides + strides_n) /* std::vector<int> */, std::vector<int>(paddings, paddings + paddings_n) /* std::vector<int> */, std::vector<int>(output_padding, output_padding + output_padding_n) /* std::vector<int> */, paddle::experimental::IntArray(output_size, output_size_n) /* paddle::experimental::IntArray */, padding_algorithm /* std::string */, groups /* int */, std::vector<int>(dilations, dilations + dilations_n) /* std::vector<int> */, data_format /* std::string */);
   pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = pd_trace_value_or_feed(filter);
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_strides;
+    _tvattr_strides.reserve(strides_n);
+    for (int64_t _vi = 0; _vi < strides_n; ++_vi)
+      _tvattr_strides.push_back(pir::Int32Attribute::get(pd_trace_ir(), strides[_vi]));
+    _ta["strides"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_strides);
+    std::vector<pir::Attribute> _tvattr_paddings;
+    _tvattr_paddings.reserve(paddings_n);
+    for (int64_t _vi = 0; _vi < paddings_n; ++_vi)
+      _tvattr_paddings.push_back(pir::Int32Attribute::get(pd_trace_ir(), paddings[_vi]));
+    _ta["paddings"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_paddings);
+    std::vector<pir::Attribute> _tvattr_output_padding;
+    _tvattr_output_padding.reserve(output_padding_n);
+    for (int64_t _vi = 0; _vi < output_padding_n; ++_vi)
+      _tvattr_output_padding.push_back(pir::Int32Attribute::get(pd_trace_ir(), output_padding[_vi]));
+    _ta["output_padding"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_output_padding);
+    _ta["output_size"] = paddle::dialect::IntArrayAttribute::get(pd_trace_ir(), paddle::experimental::IntArray(output_size, output_size_n));
+    _ta["padding_algorithm"] = pir::StrAttribute::get(pd_trace_ir(), std::string(padding_algorithm));
+    _ta["groups"] = pir::Int32Attribute::get(pd_trace_ir(), groups);
+    std::vector<pir::Attribute> _tvattr_dilations;
+    _tvattr_dilations.reserve(dilations_n);
+    for (int64_t _vi = 0; _vi < dilations_n; ++_vi)
+      _tvattr_dilations.push_back(pir::Int32Attribute::get(pd_trace_ir(), dilations[_vi]));
+    _ta["dilations"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_dilations);
+    _ta["data_format"] = pir::StrAttribute::get(pd_trace_ir(), std::string(data_format));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::Conv2dTransposeOp>(_tv0, _tv1, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
   return _th;
   PD_GUARD_END(nullptr);
 }
@@ -461,6 +538,38 @@ pd_tensor pd_op_conv2d_transpose_bias(pd_tensor x, pd_tensor filter, pd_tensor b
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(filter)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(bias)->value /* Tensor */, std::vector<int>(strides, strides + strides_n) /* std::vector<int> */, std::vector<int>(paddings, paddings + paddings_n) /* std::vector<int> */, std::vector<int>(output_padding, output_padding + output_padding_n) /* std::vector<int> */, paddle::experimental::IntArray(output_size, output_size_n) /* paddle::experimental::IntArray */, padding_algorithm /* std::string */, groups /* int */, std::vector<int>(dilations, dilations + dilations_n) /* std::vector<int> */, data_format /* std::string */);
   pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = pd_trace_value_or_feed(filter);
+    pir::Value _tv2 = pd_trace_value_or_feed(bias);
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_strides;
+    _tvattr_strides.reserve(strides_n);
+    for (int64_t _vi = 0; _vi < strides_n; ++_vi)
+      _tvattr_strides.push_back(pir::Int32Attribute::get(pd_trace_ir(), strides[_vi]));
+    _ta["strides"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_strides);
+    std::vector<pir::Attribute> _tvattr_paddings;
+    _tvattr_paddings.reserve(paddings_n);
+    for (int64_t _vi = 0; _vi < paddings_n; ++_vi)
+      _tvattr_paddings.push_back(pir::Int32Attribute::get(pd_trace_ir(), paddings[_vi]));
+    _ta["paddings"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_paddings);
+    std::vector<pir::Attribute> _tvattr_output_padding;
+    _tvattr_output_padding.reserve(output_padding_n);
+    for (int64_t _vi = 0; _vi < output_padding_n; ++_vi)
+      _tvattr_output_padding.push_back(pir::Int32Attribute::get(pd_trace_ir(), output_padding[_vi]));
+    _ta["output_padding"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_output_padding);
+    _ta["output_size"] = paddle::dialect::IntArrayAttribute::get(pd_trace_ir(), paddle::experimental::IntArray(output_size, output_size_n));
+    _ta["padding_algorithm"] = pir::StrAttribute::get(pd_trace_ir(), std::string(padding_algorithm));
+    _ta["groups"] = pir::Int32Attribute::get(pd_trace_ir(), groups);
+    std::vector<pir::Attribute> _tvattr_dilations;
+    _tvattr_dilations.reserve(dilations_n);
+    for (int64_t _vi = 0; _vi < dilations_n; ++_vi)
+      _tvattr_dilations.push_back(pir::Int32Attribute::get(pd_trace_ir(), dilations[_vi]));
+    _ta["dilations"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_dilations);
+    _ta["data_format"] = pir::StrAttribute::get(pd_trace_ir(), std::string(data_format));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::Conv2dTransposeBiasOp>(_tv0, _tv1, _tv2, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
   return _th;
   PD_GUARD_END(nullptr);
 }
@@ -475,7 +584,26 @@ pd_tensor pd_op_conv3d(pd_tensor input, pd_tensor filter, const int* strides, in
   if (pd_trace_active()) {
     pir::Value _tv0 = pd_trace_value_or_feed(input);
     pir::Value _tv1 = pd_trace_value_or_feed(filter);
-    auto _top = pd_trace_builder()->Build<paddle::dialect::Conv3dOp>(_tv0, _tv1, std::vector<int>(strides, strides + strides_n), std::vector<int>(paddings, paddings + paddings_n), std::string(padding_algorithm), groups, std::vector<int>(dilations, dilations + dilations_n), std::string(data_format));
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_strides;
+    _tvattr_strides.reserve(strides_n);
+    for (int64_t _vi = 0; _vi < strides_n; ++_vi)
+      _tvattr_strides.push_back(pir::Int32Attribute::get(pd_trace_ir(), strides[_vi]));
+    _ta["strides"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_strides);
+    std::vector<pir::Attribute> _tvattr_paddings;
+    _tvattr_paddings.reserve(paddings_n);
+    for (int64_t _vi = 0; _vi < paddings_n; ++_vi)
+      _tvattr_paddings.push_back(pir::Int32Attribute::get(pd_trace_ir(), paddings[_vi]));
+    _ta["paddings"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_paddings);
+    _ta["padding_algorithm"] = pir::StrAttribute::get(pd_trace_ir(), std::string(padding_algorithm));
+    _ta["groups"] = pir::Int32Attribute::get(pd_trace_ir(), groups);
+    std::vector<pir::Attribute> _tvattr_dilations;
+    _tvattr_dilations.reserve(dilations_n);
+    for (int64_t _vi = 0; _vi < dilations_n; ++_vi)
+      _tvattr_dilations.push_back(pir::Int32Attribute::get(pd_trace_ir(), dilations[_vi]));
+    _ta["dilations"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_dilations);
+    _ta["data_format"] = pir::StrAttribute::get(pd_trace_ir(), std::string(data_format));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::Conv3dOp>(_tv0, _tv1, _ta);
     pd_trace_map_output(_th, _top->result(0));
   }
   return _th;
@@ -492,7 +620,36 @@ pd_tensor pd_op_conv3d_transpose(pd_tensor x, pd_tensor filter, const int* strid
   if (pd_trace_active()) {
     pir::Value _tv0 = pd_trace_value_or_feed(x);
     pir::Value _tv1 = pd_trace_value_or_feed(filter);
-    auto _top = pd_trace_builder()->Build<paddle::dialect::Conv3dTransposeOp>(_tv0, _tv1, std::vector<int>(strides, strides + strides_n), std::vector<int>(paddings, paddings + paddings_n), std::vector<int>(output_padding, output_padding + output_padding_n), std::vector<int>(output_size, output_size + output_size_n), std::string(padding_algorithm), groups, std::vector<int>(dilations, dilations + dilations_n), std::string(data_format));
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_strides;
+    _tvattr_strides.reserve(strides_n);
+    for (int64_t _vi = 0; _vi < strides_n; ++_vi)
+      _tvattr_strides.push_back(pir::Int32Attribute::get(pd_trace_ir(), strides[_vi]));
+    _ta["strides"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_strides);
+    std::vector<pir::Attribute> _tvattr_paddings;
+    _tvattr_paddings.reserve(paddings_n);
+    for (int64_t _vi = 0; _vi < paddings_n; ++_vi)
+      _tvattr_paddings.push_back(pir::Int32Attribute::get(pd_trace_ir(), paddings[_vi]));
+    _ta["paddings"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_paddings);
+    std::vector<pir::Attribute> _tvattr_output_padding;
+    _tvattr_output_padding.reserve(output_padding_n);
+    for (int64_t _vi = 0; _vi < output_padding_n; ++_vi)
+      _tvattr_output_padding.push_back(pir::Int32Attribute::get(pd_trace_ir(), output_padding[_vi]));
+    _ta["output_padding"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_output_padding);
+    std::vector<pir::Attribute> _tvattr_output_size;
+    _tvattr_output_size.reserve(output_size_n);
+    for (int64_t _vi = 0; _vi < output_size_n; ++_vi)
+      _tvattr_output_size.push_back(pir::Int32Attribute::get(pd_trace_ir(), output_size[_vi]));
+    _ta["output_size"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_output_size);
+    _ta["padding_algorithm"] = pir::StrAttribute::get(pd_trace_ir(), std::string(padding_algorithm));
+    _ta["groups"] = pir::Int32Attribute::get(pd_trace_ir(), groups);
+    std::vector<pir::Attribute> _tvattr_dilations;
+    _tvattr_dilations.reserve(dilations_n);
+    for (int64_t _vi = 0; _vi < dilations_n; ++_vi)
+      _tvattr_dilations.push_back(pir::Int32Attribute::get(pd_trace_ir(), dilations[_vi]));
+    _ta["dilations"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_dilations);
+    _ta["data_format"] = pir::StrAttribute::get(pd_trace_ir(), std::string(data_format));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::Conv3dTransposeOp>(_tv0, _tv1, _ta);
     pd_trace_map_output(_th, _top->result(0));
   }
   return _th;
@@ -671,6 +828,17 @@ int64_t pd_op_ctc_align(pd_tensor* outs, int64_t nout, pd_tensor input, pd_tenso
       reinterpret_cast<pd_tensor_t*>(input)->value /* Tensor */, input_length ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(input_length)->value) : paddle::none /* Tensor? */, blank /* int */, merge_repeated != 0 /* bool */, padding_value /* int */);
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(input);
+    pir::Value _tv1 = input_length ? pd_trace_value_or_feed(input_length) : pir::Value();
+    pir::AttributeMap _ta;
+    _ta["blank"] = pir::Int32Attribute::get(pd_trace_ir(), blank);
+    _ta["merge_repeated"] = pir::BoolAttribute::get(pd_trace_ir(), merge_repeated != 0);
+    _ta["padding_value"] = pir::Int32Attribute::get(pd_trace_ir(), padding_value);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::CtcAlignOp>(_tv0, _tv1, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }
@@ -702,6 +870,15 @@ int64_t pd_op_cummax(pd_tensor* outs, int64_t nout, pd_tensor x, int axis, pd_dt
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   std::get<1>(r) = pd_idx_plus1(std::get<1>(r));
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["axis"] = pir::Int32Attribute::get(pd_trace_ir(), axis);
+    _ta["dtype"] = paddle::dialect::DataTypeAttribute::get(pd_trace_ir(), static_cast<phi::DataType>(dtype));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::CummaxOp>(_tv0, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }
@@ -714,6 +891,15 @@ int64_t pd_op_cummin(pd_tensor* outs, int64_t nout, pd_tensor x, int axis, pd_dt
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   std::get<1>(r) = pd_idx_plus1(std::get<1>(r));
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["axis"] = pir::Int32Attribute::get(pd_trace_ir(), axis);
+    _ta["dtype"] = paddle::dialect::DataTypeAttribute::get(pd_trace_ir(), static_cast<phi::DataType>(dtype));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::CumminOp>(_tv0, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }

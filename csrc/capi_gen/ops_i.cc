@@ -115,6 +115,33 @@ pd_tensor pd_op_im2sequence(pd_tensor x, pd_tensor y, const int* kernels, int64_
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, y ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(y)->value) : paddle::none /* Tensor? */, std::vector<int>(kernels, kernels + kernels_n) /* std::vector<int> */, std::vector<int>(strides, strides + strides_n) /* std::vector<int> */, std::vector<int>(paddings, paddings + paddings_n) /* std::vector<int> */, std::vector<int>(out_stride, out_stride + out_stride_n) /* std::vector<int> */);
   pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = y ? pd_trace_value_or_feed(y) : pir::Value();
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_kernels;
+    _tvattr_kernels.reserve(kernels_n);
+    for (int64_t _vi = 0; _vi < kernels_n; ++_vi)
+      _tvattr_kernels.push_back(pir::Int32Attribute::get(pd_trace_ir(), kernels[_vi]));
+    _ta["kernels"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_kernels);
+    std::vector<pir::Attribute> _tvattr_strides;
+    _tvattr_strides.reserve(strides_n);
+    for (int64_t _vi = 0; _vi < strides_n; ++_vi)
+      _tvattr_strides.push_back(pir::Int32Attribute::get(pd_trace_ir(), strides[_vi]));
+    _ta["strides"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_strides);
+    std::vector<pir::Attribute> _tvattr_paddings;
+    _tvattr_paddings.reserve(paddings_n);
+    for (int64_t _vi = 0; _vi < paddings_n; ++_vi)
+      _tvattr_paddings.push_back(pir::Int32Attribute::get(pd_trace_ir(), paddings[_vi]));
+    _ta["paddings"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_paddings);
+    std::vector<pir::Attribute> _tvattr_out_stride;
+    _tvattr_out_stride.reserve(out_stride_n);
+    for (int64_t _vi = 0; _vi < out_stride_n; ++_vi)
+      _tvattr_out_stride.push_back(pir::Int32Attribute::get(pd_trace_ir(), out_stride[_vi]));
+    _ta["out_stride"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_out_stride);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::Im2sequenceOp>(_tv0, _tv1, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
   return _th;
   PD_GUARD_END(nullptr);
 }
@@ -284,6 +311,15 @@ pd_tensor pd_op_instance_norm(pd_tensor x, pd_tensor scale, pd_tensor bias, floa
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, scale ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(scale)->value) : paddle::none /* Tensor? */, bias ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(bias)->value) : paddle::none /* Tensor? */, epsilon /* float */);
   pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = scale ? pd_trace_value_or_feed(scale) : pir::Value();
+    pir::Value _tv2 = bias ? pd_trace_value_or_feed(bias) : pir::Value();
+    pir::AttributeMap _ta;
+    _ta["epsilon"] = pir::FloatAttribute::get(pd_trace_ir(), epsilon);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::InstanceNormOp>(_tv0, _tv1, _tv2, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
   return _th;
   PD_GUARD_END(nullptr);
 }

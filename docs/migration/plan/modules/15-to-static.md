@@ -243,12 +243,21 @@ lua: y = traced_net(x)
 
 ## 5. 验收
 
-- [ ] `trace` 一个 ResNet18,前向输出与动态图逐位一致
-- [ ] traced 模型能训练,loss 曲线与动态图一致到 1e-5
-- [ ] 产物能被 Python 端 `paddle.jit.load` 读回并推理一致
-- [ ] 前向里有 `if x:item() > 0` 时,trace 报错而不是静默固化
-- [ ] traced 模型的显存峰值 <= 动态图(验证 §2.1 的论断)
-- [ ] trace 一次的耗时 < 前向 10 次
+**P15 状态(2026-11-02):推理先行(P15-A)验收 3/6 通过,训练态与显存对比留到 P15-B(训练优先时一并验收)。**
+
+- [x] ``trace` 一个 ResNet18,前向输出与动态图逐位一致`` —— **PASS**:`tools/smoke/resnet18_trace_smoke.lua` 5 断言,`traced(x)==eager(x)` 与 `traced(x2)==eager(x2)`(新输入替换)**均逐位一致**,trace 0.041s
+- [ ] traced 模型能训练,loss 曲线与动态图一致到 1e-5(训练向后传播的 trace 属 P15-B,推理先行版只录前向)
+- [x] ``产物能被 Python 端 `paddle.jit.load` 读回并推理一致`` —— **PASS**:`tools/smoke/py_resnet_readback.py`,`paddle.jit.load` 读回 `resnet18_trace.{json,pdiparams}` 推理 max|diff|=3.8e-6 ≤ atol 1e-5。**判据说明**:Python 端是 pip 安装的 GPU 构建,产物由我们 no-Python CPU 构建跑出 —— 同权重下两个独立构建的卷积/BN kernel 浮点 accumulate 顺序不同,逐位不可达;Python 自身动态图 vs 静态图在同构建内逐位一致(selfcheck:0.0)。1e-5 覆盖跨构建 roundoff,远小于结构错误(O(1))
+- [x] ``前向里有 `if x:item() > 0` 时,trace 报错而不是静默固化`` —— **PASS**(步骤 3 已落地,tensor.lua item 门,JIT_TRACE_SMOKE 断言)
+- [ ] traced 模型的显存峰值 <= 动态图(留 P15-B)
+- [x] ``trace 一次的耗时 < 前向 10 次`` —— **PASS**:ResNet18 trace 0.041s vs 前向平均,实测 < 10×
+
+**P15-A 落地时发现并修复的三个根因**(全部实测,详见 tasks.md T-M3-01):
+1. `add_feed` 存裸句柄 → Lua GC 回收 LuaTensor 即 use-after-free → `pd_tensor_retain` 自有 shell
+2. `value_of` 用 handle 指针做 key → sol 按值传 LuaTensor 产生同 impl 新 shell,永久 miss + GC 地址复用误命中(on 多轮 trace 偶发错值)→ **改 impl 指针做 key**
+3. 6 输出 `BatchNormOp` 在 no-Python interpreter 上 native crash → `TRACE_CLS_OVERRIDE{batch_norm→batch_norm_}`(与 Python eval 图一致)
+
+**trace 门槛实测结论**:ResNet18 用到的 conv2d/batch_norm/maxpool/adaptive_avg_pool/flatten/linear **全部通过**生成器 `trace_form` 门槛 —— pool2d 的 vector attrs(INT64 数组)经 `TRACE_SCALAR` 扩展、多输出 op 与 optional Tensor 输入经 trace branch 扩展后,当前 ResNet18 无残留门槛缺口。
 
 ---
 

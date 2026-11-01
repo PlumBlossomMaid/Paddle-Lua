@@ -139,6 +139,17 @@ pd_tensor pd_op_histogram(pd_tensor input, pd_tensor weight, int64_t bins, float
       reinterpret_cast<pd_tensor_t*>(input)->value /* Tensor */, weight ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(weight)->value) : paddle::none /* Tensor? */, bins /* int64_t */, min /* float */, max /* float */, density != 0 /* bool */);
   pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(input);
+    pir::Value _tv1 = weight ? pd_trace_value_or_feed(weight) : pir::Value();
+    pir::AttributeMap _ta;
+    _ta["bins"] = pir::Int64Attribute::get(pd_trace_ir(), bins);
+    _ta["min"] = pir::FloatAttribute::get(pd_trace_ir(), min);
+    _ta["max"] = pir::FloatAttribute::get(pd_trace_ir(), max);
+    _ta["density"] = pir::BoolAttribute::get(pd_trace_ir(), density != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::HistogramOp>(_tv0, _tv1, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
   return _th;
   PD_GUARD_END(nullptr);
 }

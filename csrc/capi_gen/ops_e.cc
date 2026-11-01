@@ -33,6 +33,17 @@ int64_t pd_op_edit_distance(pd_tensor* outs, int64_t nout, pd_tensor hyps, pd_te
       reinterpret_cast<pd_tensor_t*>(hyps)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(refs)->value /* Tensor */, hypslength ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(hypslength)->value) : paddle::none /* Tensor? */, refslength ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(refslength)->value) : paddle::none /* Tensor? */, normalized != 0 /* bool */);
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(hyps);
+    pir::Value _tv1 = pd_trace_value_or_feed(refs);
+    pir::Value _tv2 = hypslength ? pd_trace_value_or_feed(hypslength) : pir::Value();
+    pir::Value _tv3 = refslength ? pd_trace_value_or_feed(refslength) : pir::Value();
+    pir::AttributeMap _ta;
+    _ta["normalized"] = pir::BoolAttribute::get(pd_trace_ir(), normalized != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::EditDistanceOp>(_tv0, _tv1, _tv2, _tv3, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }
@@ -44,6 +55,12 @@ int64_t pd_op_eig(pd_tensor* outs, int64_t nout, pd_tensor x) {
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */);
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::EigOp>(_tv0);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }
@@ -55,6 +72,14 @@ int64_t pd_op_eigh(pd_tensor* outs, int64_t nout, pd_tensor x, const char* UPLO)
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, UPLO /* std::string */);
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["UPLO"] = pir::StrAttribute::get(pd_trace_ir(), std::string(UPLO));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::EighOp>(_tv0, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }
@@ -82,6 +107,15 @@ int64_t pd_op_eigvalsh(pd_tensor* outs, int64_t nout, pd_tensor x, const char* u
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, uplo /* std::string */, is_test != 0 /* bool */);
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["uplo"] = pir::StrAttribute::get(pd_trace_ir(), std::string(uplo));
+    _ta["is_test"] = pir::BoolAttribute::get(pd_trace_ir(), is_test != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::EigvalshOp>(_tv0, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }
@@ -329,6 +363,18 @@ pd_tensor pd_op_expand_as(pd_tensor x, pd_tensor y, const int64_t* target_shape,
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, y ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(y)->value) : paddle::none /* Tensor? */, std::vector<int64_t>(target_shape, target_shape + target_shape_n) /* std::vector<int64_t> */);
   pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = y ? pd_trace_value_or_feed(y) : pir::Value();
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_target_shape;
+    _tvattr_target_shape.reserve(target_shape_n);
+    for (int64_t _vi = 0; _vi < target_shape_n; ++_vi)
+      _tvattr_target_shape.push_back(pir::Int64Attribute::get(pd_trace_ir(), target_shape[_vi]));
+    _ta["target_shape"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_target_shape);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::ExpandAsOp>(_tv0, _tv1, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
   return _th;
   PD_GUARD_END(nullptr);
 }

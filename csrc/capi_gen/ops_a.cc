@@ -232,7 +232,14 @@ pd_tensor pd_op_all(pd_tensor x, const int64_t* axis, int64_t axis_n, int keepdi
       new pd_tensor_t{std::move(out)});
   if (pd_trace_active()) {
     pir::Value _tv0 = pd_trace_value_or_feed(x);
-    auto _top = pd_trace_builder()->Build<paddle::dialect::AllOp>(_tv0, std::vector<int64_t>(axis, axis + axis_n), keepdim != 0);
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_axis;
+    _tvattr_axis.reserve(axis_n);
+    for (int64_t _vi = 0; _vi < axis_n; ++_vi)
+      _tvattr_axis.push_back(pir::Int64Attribute::get(pd_trace_ir(), axis[_vi]));
+    _ta["axis"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_axis);
+    _ta["keepdim"] = pir::BoolAttribute::get(pd_trace_ir(), keepdim != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::AllOp>(_tv0, _ta);
     pd_trace_map_output(_th, _top->result(0));
   }
   return _th;
@@ -325,7 +332,14 @@ pd_tensor pd_op_amax(pd_tensor x, const int64_t* axis, int64_t axis_n, int keepd
       new pd_tensor_t{std::move(out)});
   if (pd_trace_active()) {
     pir::Value _tv0 = pd_trace_value_or_feed(x);
-    auto _top = pd_trace_builder()->Build<paddle::dialect::AmaxOp>(_tv0, std::vector<int64_t>(axis, axis + axis_n), keepdim != 0);
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_axis;
+    _tvattr_axis.reserve(axis_n);
+    for (int64_t _vi = 0; _vi < axis_n; ++_vi)
+      _tvattr_axis.push_back(pir::Int64Attribute::get(pd_trace_ir(), axis[_vi]));
+    _ta["axis"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_axis);
+    _ta["keepdim"] = pir::BoolAttribute::get(pd_trace_ir(), keepdim != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::AmaxOp>(_tv0, _ta);
     pd_trace_map_output(_th, _top->result(0));
   }
   return _th;
@@ -341,7 +355,14 @@ pd_tensor pd_op_amin(pd_tensor x, const int64_t* axis, int64_t axis_n, int keepd
       new pd_tensor_t{std::move(out)});
   if (pd_trace_active()) {
     pir::Value _tv0 = pd_trace_value_or_feed(x);
-    auto _top = pd_trace_builder()->Build<paddle::dialect::AminOp>(_tv0, std::vector<int64_t>(axis, axis + axis_n), keepdim != 0);
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_axis;
+    _tvattr_axis.reserve(axis_n);
+    for (int64_t _vi = 0; _vi < axis_n; ++_vi)
+      _tvattr_axis.push_back(pir::Int64Attribute::get(pd_trace_ir(), axis[_vi]));
+    _ta["axis"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_axis);
+    _ta["keepdim"] = pir::BoolAttribute::get(pd_trace_ir(), keepdim != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::AminOp>(_tv0, _ta);
     pd_trace_map_output(_th, _top->result(0));
   }
   return _th;
@@ -355,6 +376,19 @@ int64_t pd_op_aminmax(pd_tensor* outs, int64_t nout, pd_tensor x, const int64_t*
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, std::vector<int64_t>(axis, axis + axis_n) /* std::vector<int64_t> */, keepdim != 0 /* bool */);
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_axis;
+    _tvattr_axis.reserve(axis_n);
+    for (int64_t _vi = 0; _vi < axis_n; ++_vi)
+      _tvattr_axis.push_back(pir::Int64Attribute::get(pd_trace_ir(), axis[_vi]));
+    _ta["axis"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_axis);
+    _ta["keepdim"] = pir::BoolAttribute::get(pd_trace_ir(), keepdim != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::AminmaxOp>(_tv0, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }
@@ -384,7 +418,14 @@ pd_tensor pd_op_any(pd_tensor x, const int64_t* axis, int64_t axis_n, int keepdi
       new pd_tensor_t{std::move(out)});
   if (pd_trace_active()) {
     pir::Value _tv0 = pd_trace_value_or_feed(x);
-    auto _top = pd_trace_builder()->Build<paddle::dialect::AnyOp>(_tv0, std::vector<int64_t>(axis, axis + axis_n), keepdim != 0);
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_axis;
+    _tvattr_axis.reserve(axis_n);
+    for (int64_t _vi = 0; _vi < axis_n; ++_vi)
+      _tvattr_axis.push_back(pir::Int64Attribute::get(pd_trace_ir(), axis[_vi]));
+    _ta["axis"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_axis);
+    _ta["keepdim"] = pir::BoolAttribute::get(pd_trace_ir(), keepdim != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::AnyOp>(_tv0, _ta);
     pd_trace_map_output(_th, _top->result(0));
   }
   return _th;
@@ -528,6 +569,16 @@ int64_t pd_op_argsort(pd_tensor* outs, int64_t nout, pd_tensor x, int axis, int 
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   std::get<1>(r) = pd_idx_plus1(std::get<1>(r));
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["axis"] = pir::Int32Attribute::get(pd_trace_ir(), axis);
+    _ta["descending"] = pir::BoolAttribute::get(pd_trace_ir(), descending != 0);
+    _ta["stable"] = pir::BoolAttribute::get(pd_trace_ir(), stable != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::ArgsortOp>(_tv0, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }
@@ -573,7 +624,19 @@ pd_tensor pd_op_as_strided(pd_tensor input, const int64_t* dims, int64_t dims_n,
       new pd_tensor_t{std::move(out)});
   if (pd_trace_active()) {
     pir::Value _tv0 = pd_trace_value_or_feed(input);
-    auto _top = pd_trace_builder()->Build<paddle::dialect::AsStridedOp>(_tv0, std::vector<int64_t>(dims, dims + dims_n), std::vector<int64_t>(stride, stride + stride_n), offset);
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_dims;
+    _tvattr_dims.reserve(dims_n);
+    for (int64_t _vi = 0; _vi < dims_n; ++_vi)
+      _tvattr_dims.push_back(pir::Int64Attribute::get(pd_trace_ir(), dims[_vi]));
+    _ta["dims"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_dims);
+    std::vector<pir::Attribute> _tvattr_stride;
+    _tvattr_stride.reserve(stride_n);
+    for (int64_t _vi = 0; _vi < stride_n; ++_vi)
+      _tvattr_stride.push_back(pir::Int64Attribute::get(pd_trace_ir(), stride[_vi]));
+    _ta["stride"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_stride);
+    _ta["offset"] = pir::Int64Attribute::get(pd_trace_ir(), offset);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::AsStridedOp>(_tv0, _ta);
     pd_trace_map_output(_th, _top->result(0));
   }
   return _th;
@@ -702,6 +765,24 @@ int64_t pd_op_attention_lstm(pd_tensor* outs, int64_t nout, pd_tensor x, pd_tens
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(c0)->value /* Tensor */, h0 ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(h0)->value) : paddle::none /* Tensor? */, reinterpret_cast<pd_tensor_t*>(attention_weight)->value /* Tensor */, attention_bias ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(attention_bias)->value) : paddle::none /* Tensor? */, attention_scalar ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(attention_scalar)->value) : paddle::none /* Tensor? */, attention_scalar_bias ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(attention_scalar_bias)->value) : paddle::none /* Tensor? */, reinterpret_cast<pd_tensor_t*>(lstm_weight)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(lstm_bias)->value /* Tensor */, gate_activation /* std::string */, cell_activation /* std::string */, candidate_activation /* std::string */);
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = pd_trace_value_or_feed(c0);
+    pir::Value _tv2 = h0 ? pd_trace_value_or_feed(h0) : pir::Value();
+    pir::Value _tv3 = pd_trace_value_or_feed(attention_weight);
+    pir::Value _tv4 = attention_bias ? pd_trace_value_or_feed(attention_bias) : pir::Value();
+    pir::Value _tv5 = attention_scalar ? pd_trace_value_or_feed(attention_scalar) : pir::Value();
+    pir::Value _tv6 = attention_scalar_bias ? pd_trace_value_or_feed(attention_scalar_bias) : pir::Value();
+    pir::Value _tv7 = pd_trace_value_or_feed(lstm_weight);
+    pir::Value _tv8 = pd_trace_value_or_feed(lstm_bias);
+    pir::AttributeMap _ta;
+    _ta["gate_activation"] = pir::StrAttribute::get(pd_trace_ir(), std::string(gate_activation));
+    _ta["cell_activation"] = pir::StrAttribute::get(pd_trace_ir(), std::string(cell_activation));
+    _ta["candidate_activation"] = pir::StrAttribute::get(pd_trace_ir(), std::string(candidate_activation));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::AttentionLstmOp>(_tv0, _tv1, _tv2, _tv3, _tv4, _tv5, _tv6, _tv7, _tv8, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }
@@ -714,6 +795,21 @@ int64_t pd_op_auc(pd_tensor* outs, int64_t nout, pd_tensor x, pd_tensor label, p
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
   if (nout >= 3) outs[2] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<2>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = pd_trace_value_or_feed(label);
+    pir::Value _tv2 = pd_trace_value_or_feed(stat_pos);
+    pir::Value _tv3 = pd_trace_value_or_feed(stat_neg);
+    pir::Value _tv4 = ins_tag_weight ? pd_trace_value_or_feed(ins_tag_weight) : pir::Value();
+    pir::AttributeMap _ta;
+    _ta["curve"] = pir::StrAttribute::get(pd_trace_ir(), std::string(curve));
+    _ta["num_thresholds"] = pir::Int32Attribute::get(pd_trace_ir(), num_thresholds);
+    _ta["slide_steps"] = pir::Int32Attribute::get(pd_trace_ir(), slide_steps);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::AucOp>(_tv0, _tv1, _tv2, _tv3, _tv4, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+    if (nout >= 3) pd_trace_map_output(outs[2], _top->result(2));
+  }
   return 3;
   PD_GUARD_END(0);
 }

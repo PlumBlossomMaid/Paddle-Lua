@@ -508,7 +508,32 @@ local TRACE_SCALAR = {
   ["phi::DataType"] = true, ["paddle::Place"] = true,
   ["paddle::experimental::Scalar"] = true,
   ["paddle::experimental::IntArray"] = true,
+  -- vector attrs serialize as pir::ArrayAttribute of the element kind
+  -- (verified: pool2d strides/paddings are 0.a_array of 0.a_i64 in the
+  -- Python-saved .json); TRACE_SCALAR gates only the attrmap form, the
+  -- typed form already handled them.
+  ["std::vector<int64_t>"] = true, ["std::vector<int>"] = true,
+  ["std::vector<float>"] = true, ["std::vector<double>"] = true,
 }
+
+-- PIR op class override for the RECORDED graph. Paddle's eval batch_norm
+-- is pd_op.batch_norm_ (same 5-input attrmap Build as BatchNormOp,
+-- pd_op_builds.lua) -- the interpreter executes it reliably while the
+-- 6-output BatchNormOp crashes the no-Python interpreter (measured
+-- 0xC0000005 on both is_test values). The EAGER call stays the 6-output
+-- batch_norm_ad_func (we keep get<0>); only the recorded op changes.
+local TRACE_CLS_OVERRIDE = {
+  ["batch_norm"] = "batch_norm_",
+}
+
+-- Attribute element kind for one vector attr cpp_type (nil = not vector).
+local function vector_attr_kind(t)
+  if t == "std::vector<int64_t>" then return "Int64" end
+  if t == "std::vector<int>" then return "Int32" end
+  if t == "std::vector<float>" then return "Float" end
+  if t == "std::vector<double>" then return "Double" end
+  return nil
+end
 
 -- C++ expression building the dialect Attribute for one attr from its C
 -- ABI param(s) (v = the param name; IntArray also has <v>_n).
@@ -588,18 +613,32 @@ local function typed_compatible(ty, at)
   return false
 end
 
+-- The PIR op class to instantiate when recording `op`. TRACE_CLS_OVERRIDE
+-- wins (batch_norm -> batch_norm_), else the plain pd_op_builds class.
+local function trace_cls(op)
+  local rec = TRACE_CLS_OVERRIDE[op] or op
+  local b = pd_op_builds[rec]
+  if not b then error("trace_cls: no pd_op_builds entry for '" .. rec .. "'") end
+  return b.cls
+end
+
 -- The op's trace call form, or nil = no trace branch. Returns
 -- { cls = <class>, form = "attrmap" }            -- Build(values..., _ta)
 -- { cls = <class>, form = "typed", trailing }    -- Build(values..., exprs)
 local function trace_form(ir)
-  if string.find(ir.op, "_inplace$") then return nil end
+  if string.find(ir.op, "_inplace$") and ir.op ~= "batch_norm_" then
+    return nil
+  end
   if returns_index_set(ir)[1] then return nil end
   local opt = optional_set(ir)
   local takes = takes_index_set(ir)
   for _, in_ in ipairs(ir.inputs or {}) do
-    if in_.type ~= "Tensor" or opt[in_.name] or takes[in_.name] then
+    if in_.type ~= "Tensor" or takes[in_.name] then
       return nil
     end
+    -- Optional Tensor inputs are allowed: the trace branch emits a
+    -- conditional Value (null handle -> empty Value). Verified needed by
+    -- batch_norm (scale/bias optional, always non-null in resnet).
   end
   local b = pd_op_builds[ir.op]
   if not b then return nil end
@@ -613,7 +652,7 @@ local function trace_form(ir)
   if attr_ok then
     for _, bd in ipairs(b.builds) do
       if bd.attrmap and bd.values == I then
-        return { cls = b.cls, form = "attrmap" }
+        return { cls = trace_cls(ir.op), form = "attrmap" }
       end
     end
   end
@@ -632,7 +671,7 @@ local function trace_form(ir)
         tr[i] = e
       end
       if ok then
-        return { cls = b.cls, form = "typed", trailing = tr }
+        return { cls = trace_cls(ir.op), form = "typed", trailing = tr }
       end
     end
   end
@@ -642,20 +681,41 @@ end
 -- Emit the trace branch for one single-output op (caller has checked
 -- trace_form). Runs after `pd_tensor _th` is created.
 local function emit_trace_branch(ir, sel, out)
+  local opt = optional_set(ir)
   out[#out + 1] = "  if (pd_trace_active()) {"
   local inlist = {}
   for i, in_ in ipairs(ir.inputs or {}) do
     local nm = "_tv" .. (i - 1)
     inlist[#inlist + 1] = nm
-    out[#out + 1] = "    pir::Value " .. nm
-      .. " = pd_trace_value_or_feed(" .. in_.name .. ");"
+    if opt[in_.name] then
+      out[#out + 1] = "    pir::Value " .. nm .. " = "
+        .. in_.name .. " ? pd_trace_value_or_feed(" .. in_.name
+        .. ") : pir::Value();"
+    else
+      out[#out + 1] = "    pir::Value " .. nm
+        .. " = pd_trace_value_or_feed(" .. in_.name .. ");"
+    end
   end
   local args = table.concat(inlist, ", ")
   if sel.form == "attrmap" then
     out[#out + 1] = "    pir::AttributeMap _ta;"
     for _, a in ipairs(ir.attrs or {}) do
-      out[#out + 1] = "    _ta[\"" .. a.name .. "\"] = "
-        .. trace_attr_expr(a, a.name) .. ";"
+      local kind = vector_attr_kind(a.type)
+      if kind then
+        local var = "_tvattr_" .. a.name
+        out[#out + 1] = "    std::vector<pir::Attribute> " .. var .. ";"
+        out[#out + 1] = "    " .. var .. ".reserve(" .. a.name .. "_n);"
+        out[#out + 1] = "    for (int64_t _vi = 0; _vi < " .. a.name
+          .. "_n; ++_vi)"
+        out[#out + 1] = "      " .. var
+          .. ".push_back(pir::" .. kind
+          .. "Attribute::get(pd_trace_ir(), " .. a.name .. "[_vi]));"
+        out[#out + 1] = "    _ta[\"" .. a.name .. "\"] = "
+          .. "pir::ArrayAttribute::get(pd_trace_ir(), " .. var .. ");"
+      else
+        out[#out + 1] = "    _ta[\"" .. a.name .. "\"] = "
+          .. trace_attr_expr(a, a.name) .. ";"
+      end
     end
     args = (args ~= "" and (args .. ", ") or "") .. "_ta"
   else
@@ -666,6 +726,64 @@ local function emit_trace_branch(ir, sel, out)
   out[#out + 1] = "    auto _top = pd_trace_builder()->Build<paddle::dialect::"
     .. sel.cls .. ">(" .. args .. ");"
   out[#out + 1] = "    pd_trace_map_output(_th, _top->result(0));"
+  out[#out + 1] = "  }"
+end
+
+-- Emit the trace branch for a MULTI-output op (emit_op_multi shape):
+-- same op construction as emit_trace_branch, then every created output
+-- handle is bound to the corresponding Build result. `nout` gates the
+-- mapping so handles the caller never asked for stay unmapped (they do
+-- not exist in Lua and are never consumed downstream).
+local function emit_trace_branch_multi(ir, sel, nout_total, out)
+  local opt = optional_set(ir)
+  out[#out + 1] = "  if (pd_trace_active()) {"
+  local inlist = {}
+  for i, in_ in ipairs(ir.inputs or {}) do
+    local nm = "_tv" .. (i - 1)
+    inlist[#inlist + 1] = nm
+    if opt[in_.name] then
+      out[#out + 1] = "    pir::Value " .. nm .. " = "
+        .. in_.name .. " ? pd_trace_value_or_feed(" .. in_.name
+        .. ") : pir::Value();"
+    else
+      out[#out + 1] = "    pir::Value " .. nm
+        .. " = pd_trace_value_or_feed(" .. in_.name .. ");"
+    end
+  end
+  local args = table.concat(inlist, ", ")
+  if sel.form == "attrmap" then
+    out[#out + 1] = "    pir::AttributeMap _ta;"
+    for _, a in ipairs(ir.attrs or {}) do
+      local kind = vector_attr_kind(a.type)
+      if kind then
+        local var = "_tvattr_" .. a.name
+        out[#out + 1] = "    std::vector<pir::Attribute> " .. var .. ";"
+        out[#out + 1] = "    " .. var .. ".reserve(" .. a.name .. "_n);"
+        out[#out + 1] = "    for (int64_t _vi = 0; _vi < " .. a.name
+          .. "_n; ++_vi)"
+        out[#out + 1] = "      " .. var
+          .. ".push_back(pir::" .. kind
+          .. "Attribute::get(pd_trace_ir(), " .. a.name .. "[_vi]));"
+        out[#out + 1] = "    _ta[\"" .. a.name .. "\"] = "
+          .. "pir::ArrayAttribute::get(pd_trace_ir(), " .. var .. ");"
+      else
+        out[#out + 1] = "    _ta[\"" .. a.name .. "\"] = "
+          .. trace_attr_expr(a, a.name) .. ";"
+      end
+    end
+    args = (args ~= "" and (args .. ", ") or "") .. "_ta"
+  else
+    for _, e in ipairs(sel.trailing) do
+      args = (args ~= "" and (args .. ", ") or "") .. e
+    end
+  end
+  out[#out + 1] = "    auto _top = pd_trace_builder()->Build<paddle::dialect::"
+    .. sel.cls .. ">(" .. args .. ");"
+  for i = 1, nout_total do
+    out[#out + 1] = string.format(
+      "    if (nout >= %d) pd_trace_map_output(outs[%d], _top->result(%d));",
+      i, i - 1, i - 1)
+  end
   out[#out + 1] = "  }"
 end
 
@@ -744,6 +862,15 @@ local function emit_op_multi(ir, out)
     out[#out + 1] = string.format(
       "  if (nout >= %d) outs[%d] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<%d>(r))});",
       i, i - 1, i - 1)
+  end
+  -- P15 trace branch for multi-output ops (batch_norm etc.): every created
+  -- output handle is bound to the corresponding Build op result, so the
+  -- handle chain stays continuous (an unmapped intermediate would be
+  -- auto-fed as a CONSTANT by later ops -- the traced net silently stops
+  -- reacting to input changes, seen with ResNet18 + shape-scramble smells).
+  local tfm = trace_form(ir)
+  if tfm then
+    emit_trace_branch_multi(ir, tfm, n, out)
   end
   out[#out + 1] = string.format("  return %d;", n)
   out[#out + 1] = "  PD_GUARD_END(0);"
@@ -874,13 +1001,21 @@ local function emit_all(ops, outdir, sha)
       if needs_index_helper(ir) then need_helper = true break end
     end
     -- any op in this bucket that will carry a trace branch? (single-output
-    -- emit_op shape AND trace_form) -> needs trace_ctx.h + pd_op.h.
+    -- emit_op shape OR multi-output emit_op_multi shape, both AND
+    -- trace_form) -> needs trace_ctx.h + pd_op.h.
     local need_trace = false
     for _, ir in ipairs(buckets[letter]) do
-      if not single_vec_output(ir) and #effective_returns(ir) <= 1
-         and trace_form(ir) then
-        need_trace = true
-        break
+      if trace_form(ir) then
+        if single_vec_output(ir) then
+          -- vector-output ops carry no branch (recorded per-element would
+          -- need a combine op; leave untraceable for now)
+        elseif #effective_returns(ir) > 1 then
+          need_trace = true
+          break
+        else
+          need_trace = true
+          break
+        end
       end
     end
     local cc = {}

@@ -94,6 +94,16 @@ int64_t pd_op_tdm_child(pd_tensor* outs, int64_t nout, pd_tensor x, pd_tensor tr
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(tree_info)->value /* Tensor */, child_nums /* int */, static_cast<phi::DataType>(dtype) /* phi::DataType */);
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = pd_trace_value_or_feed(tree_info);
+    pir::AttributeMap _ta;
+    _ta["child_nums"] = pir::Int32Attribute::get(pd_trace_ir(), child_nums);
+    _ta["dtype"] = paddle::dialect::DataTypeAttribute::get(pd_trace_ir(), static_cast<phi::DataType>(dtype));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::TdmChildOp>(_tv0, _tv1, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }
@@ -177,6 +187,21 @@ int64_t pd_op_top_p_sampling(pd_tensor* outs, int64_t nout, pd_tensor x, pd_tens
   if (nout >= 3) outs[2] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<2>(r))});
   std::get<3>(r) = pd_idx_plus1(std::get<3>(r));
   if (nout >= 4) outs[3] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<3>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = pd_trace_value_or_feed(ps);
+    pir::Value _tv2 = threshold ? pd_trace_value_or_feed(threshold) : pir::Value();
+    pir::Value _tv3 = topp_seed ? pd_trace_value_or_feed(topp_seed) : pir::Value();
+    pir::AttributeMap _ta;
+    _ta["seed"] = pir::Int64Attribute::get(pd_trace_ir(), seed);
+    _ta["k"] = pir::Int32Attribute::get(pd_trace_ir(), k);
+    _ta["mode"] = pir::StrAttribute::get(pd_trace_ir(), std::string(mode));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::TopPSamplingOp>(_tv0, _tv1, _tv2, _tv3, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+    if (nout >= 3) pd_trace_map_output(outs[2], _top->result(2));
+    if (nout >= 4) pd_trace_map_output(outs[3], _top->result(3));
+  }
   return 4;
   PD_GUARD_END(0);
 }
@@ -189,6 +214,17 @@ int64_t pd_op_topk(pd_tensor* outs, int64_t nout, pd_tensor x, double k, int axi
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   std::get<1>(r) = pd_idx_plus1(std::get<1>(r));
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["k"] = paddle::dialect::ScalarAttribute::get(pd_trace_ir(), paddle::experimental::Scalar(static_cast<int64_t>(k)));
+    _ta["axis"] = pir::Int32Attribute::get(pd_trace_ir(), axis);
+    _ta["largest"] = pir::BoolAttribute::get(pd_trace_ir(), largest != 0);
+    _ta["sorted"] = pir::BoolAttribute::get(pd_trace_ir(), sorted != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::TopkOp>(_tv0, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }
@@ -222,7 +258,13 @@ pd_tensor pd_op_trans_layout(pd_tensor x, const int* perm, int64_t perm_n) {
       new pd_tensor_t{std::move(out)});
   if (pd_trace_active()) {
     pir::Value _tv0 = pd_trace_value_or_feed(x);
-    auto _top = pd_trace_builder()->Build<paddle::dialect::TransLayoutOp>(_tv0, std::vector<int>(perm, perm + perm_n));
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_perm;
+    _tvattr_perm.reserve(perm_n);
+    for (int64_t _vi = 0; _vi < perm_n; ++_vi)
+      _tvattr_perm.push_back(pir::Int32Attribute::get(pd_trace_ir(), perm[_vi]));
+    _ta["perm"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_perm);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::TransLayoutOp>(_tv0, _ta);
     pd_trace_map_output(_th, _top->result(0));
   }
   return _th;
@@ -238,7 +280,13 @@ pd_tensor pd_op_transpose(pd_tensor x, const int* perm, int64_t perm_n) {
       new pd_tensor_t{std::move(out)});
   if (pd_trace_active()) {
     pir::Value _tv0 = pd_trace_value_or_feed(x);
-    auto _top = pd_trace_builder()->Build<paddle::dialect::TransposeOp>(_tv0, std::vector<int>(perm, perm + perm_n));
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_perm;
+    _tvattr_perm.reserve(perm_n);
+    for (int64_t _vi = 0; _vi < perm_n; ++_vi)
+      _tvattr_perm.push_back(pir::Int32Attribute::get(pd_trace_ir(), perm[_vi]));
+    _ta["perm"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_perm);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::TransposeOp>(_tv0, _ta);
     pd_trace_map_output(_th, _top->result(0));
   }
   return _th;
@@ -384,7 +432,20 @@ pd_tensor pd_op_truncated_gaussian_random(const int* shape, int64_t shape_n, flo
   pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
   if (pd_trace_active()) {
-    auto _top = pd_trace_builder()->Build<paddle::dialect::TruncatedGaussianRandomOp>(std::vector<int>(shape, shape + shape_n), mean, std, seed, a, b, static_cast<phi::DataType>(dtype), reinterpret_cast<pd_place_t*>(place)->value);
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_shape;
+    _tvattr_shape.reserve(shape_n);
+    for (int64_t _vi = 0; _vi < shape_n; ++_vi)
+      _tvattr_shape.push_back(pir::Int32Attribute::get(pd_trace_ir(), shape[_vi]));
+    _ta["shape"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_shape);
+    _ta["mean"] = pir::FloatAttribute::get(pd_trace_ir(), mean);
+    _ta["std"] = pir::FloatAttribute::get(pd_trace_ir(), std);
+    _ta["seed"] = pir::Int32Attribute::get(pd_trace_ir(), seed);
+    _ta["a"] = pir::FloatAttribute::get(pd_trace_ir(), a);
+    _ta["b"] = pir::FloatAttribute::get(pd_trace_ir(), b);
+    _ta["dtype"] = paddle::dialect::DataTypeAttribute::get(pd_trace_ir(), static_cast<phi::DataType>(dtype));
+    _ta["place"] = paddle::dialect::PlaceAttribute::get(pd_trace_ir(), reinterpret_cast<pd_place_t*>(place)->value);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::TruncatedGaussianRandomOp>(_ta);
     pd_trace_map_output(_th, _top->result(0));
   }
   return _th;

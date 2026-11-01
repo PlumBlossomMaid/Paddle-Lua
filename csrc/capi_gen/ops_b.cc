@@ -95,6 +95,27 @@ int64_t pd_op_batch_norm(pd_tensor* outs, int64_t nout, pd_tensor x, pd_tensor m
   if (nout >= 4) outs[3] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<3>(r))});
   if (nout >= 5) outs[4] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<4>(r))});
   if (nout >= 6) outs[5] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<5>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = pd_trace_value_or_feed(mean);
+    pir::Value _tv2 = pd_trace_value_or_feed(variance);
+    pir::Value _tv3 = scale ? pd_trace_value_or_feed(scale) : pir::Value();
+    pir::Value _tv4 = bias ? pd_trace_value_or_feed(bias) : pir::Value();
+    pir::AttributeMap _ta;
+    _ta["is_test"] = pir::BoolAttribute::get(pd_trace_ir(), is_test != 0);
+    _ta["momentum"] = pir::FloatAttribute::get(pd_trace_ir(), momentum);
+    _ta["epsilon"] = pir::FloatAttribute::get(pd_trace_ir(), epsilon);
+    _ta["data_format"] = pir::StrAttribute::get(pd_trace_ir(), std::string(data_format));
+    _ta["use_global_stats"] = pir::BoolAttribute::get(pd_trace_ir(), use_global_stats != 0);
+    _ta["trainable_statistics"] = pir::BoolAttribute::get(pd_trace_ir(), trainable_statistics != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::BatchNorm_Op>(_tv0, _tv1, _tv2, _tv3, _tv4, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+    if (nout >= 3) pd_trace_map_output(outs[2], _top->result(2));
+    if (nout >= 4) pd_trace_map_output(outs[3], _top->result(3));
+    if (nout >= 5) pd_trace_map_output(outs[4], _top->result(4));
+    if (nout >= 6) pd_trace_map_output(outs[5], _top->result(5));
+  }
   return 6;
   PD_GUARD_END(0);
 }
@@ -109,7 +130,15 @@ pd_tensor pd_op_batched_gemm(pd_tensor lhs, pd_tensor rhs, const int64_t* batch_
   if (pd_trace_active()) {
     pir::Value _tv0 = pd_trace_value_or_feed(lhs);
     pir::Value _tv1 = pd_trace_value_or_feed(rhs);
-    auto _top = pd_trace_builder()->Build<paddle::dialect::BatchedGemmOp>(_tv0, _tv1, std::vector<int64_t>(batch_sizes, batch_sizes + batch_sizes_n), trans_lhs != 0, trans_rhs != 0);
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_batch_sizes;
+    _tvattr_batch_sizes.reserve(batch_sizes_n);
+    for (int64_t _vi = 0; _vi < batch_sizes_n; ++_vi)
+      _tvattr_batch_sizes.push_back(pir::Int64Attribute::get(pd_trace_ir(), batch_sizes[_vi]));
+    _ta["batch_sizes"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_batch_sizes);
+    _ta["trans_lhs"] = pir::BoolAttribute::get(pd_trace_ir(), trans_lhs != 0);
+    _ta["trans_rhs"] = pir::BoolAttribute::get(pd_trace_ir(), trans_rhs != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::BatchedGemmOp>(_tv0, _tv1, _ta);
     pd_trace_map_output(_th, _top->result(0));
   }
   return _th;
@@ -194,6 +223,14 @@ pd_tensor pd_op_bilinear(pd_tensor x, pd_tensor y, pd_tensor weight, pd_tensor b
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(y)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(weight)->value /* Tensor */, bias ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(bias)->value) : paddle::none /* Tensor? */);
   pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = pd_trace_value_or_feed(y);
+    pir::Value _tv2 = pd_trace_value_or_feed(weight);
+    pir::Value _tv3 = bias ? pd_trace_value_or_feed(bias) : pir::Value();
+    auto _top = pd_trace_builder()->Build<paddle::dialect::BilinearOp>(_tv0, _tv1, _tv2, _tv3);
+    pd_trace_map_output(_th, _top->result(0));
+  }
   return _th;
   PD_GUARD_END(nullptr);
 }
@@ -222,6 +259,14 @@ pd_tensor pd_op_bincount(pd_tensor x, pd_tensor weights, double minlength) {
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, weights ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(weights)->value) : paddle::none /* Tensor? */, paddle::experimental::Scalar(static_cast<int64_t>(minlength)) /* Scalar(int) constructed as int64 */);
   pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = weights ? pd_trace_value_or_feed(weights) : pir::Value();
+    pir::AttributeMap _ta;
+    _ta["minlength"] = paddle::dialect::ScalarAttribute::get(pd_trace_ir(), paddle::experimental::Scalar(static_cast<int64_t>(minlength)));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::BincountOp>(_tv0, _tv1, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
   return _th;
   PD_GUARD_END(nullptr);
 }
@@ -401,6 +446,22 @@ pd_tensor pd_op_box_coder(pd_tensor prior_box, pd_tensor prior_box_var, pd_tenso
       reinterpret_cast<pd_tensor_t*>(prior_box)->value /* Tensor */, prior_box_var ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(prior_box_var)->value) : paddle::none /* Tensor? */, reinterpret_cast<pd_tensor_t*>(target_box)->value /* Tensor */, code_type /* std::string */, box_normalized != 0 /* bool */, axis /* int */, std::vector<float>(variance, variance + variance_n) /* std::vector<float> */);
   pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(prior_box);
+    pir::Value _tv1 = prior_box_var ? pd_trace_value_or_feed(prior_box_var) : pir::Value();
+    pir::Value _tv2 = pd_trace_value_or_feed(target_box);
+    pir::AttributeMap _ta;
+    _ta["code_type"] = pir::StrAttribute::get(pd_trace_ir(), std::string(code_type));
+    _ta["box_normalized"] = pir::BoolAttribute::get(pd_trace_ir(), box_normalized != 0);
+    _ta["axis"] = pir::Int32Attribute::get(pd_trace_ir(), axis);
+    std::vector<pir::Attribute> _tvattr_variance;
+    _tvattr_variance.reserve(variance_n);
+    for (int64_t _vi = 0; _vi < variance_n; ++_vi)
+      _tvattr_variance.push_back(pir::FloatAttribute::get(pd_trace_ir(), variance[_vi]));
+    _ta["variance"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_variance);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::BoxCoderOp>(_tv0, _tv1, _tv2, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
   return _th;
   PD_GUARD_END(nullptr);
 }
@@ -449,6 +510,19 @@ int64_t pd_op_build_src_rank_and_local_expert_id(pd_tensor* outs, int64_t nout, 
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   std::get<1>(r) = pd_idx_plus1(std::get<1>(r));
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(expert_num_global_tensor);
+    pir::AttributeMap _ta;
+    std::vector<pir::Attribute> _tvattr_expert_num_global;
+    _tvattr_expert_num_global.reserve(expert_num_global_n);
+    for (int64_t _vi = 0; _vi < expert_num_global_n; ++_vi)
+      _tvattr_expert_num_global.push_back(pir::Int64Attribute::get(pd_trace_ir(), expert_num_global[_vi]));
+    _ta["expert_num_global"] = pir::ArrayAttribute::get(pd_trace_ir(), _tvattr_expert_num_global);
+    _ta["num_local_experts"] = pir::Int64Attribute::get(pd_trace_ir(), num_local_experts);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::BuildSrcRankAndLocalExpertIdOp>(_tv0, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }

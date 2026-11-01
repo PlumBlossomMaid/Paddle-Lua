@@ -79,6 +79,18 @@ pd_tensor pd_op_weight_only_linear(pd_tensor x, pd_tensor weight, pd_tensor bias
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(weight)->value /* Tensor */, bias ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(bias)->value) : paddle::none /* Tensor? */, reinterpret_cast<pd_tensor_t*>(weight_scale)->value /* Tensor */, weight_dtype /* std::string */, arch /* int */, group_size /* int */);
   pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = pd_trace_value_or_feed(weight);
+    pir::Value _tv2 = bias ? pd_trace_value_or_feed(bias) : pir::Value();
+    pir::Value _tv3 = pd_trace_value_or_feed(weight_scale);
+    pir::AttributeMap _ta;
+    _ta["weight_dtype"] = pir::StrAttribute::get(pd_trace_ir(), std::string(weight_dtype));
+    _ta["arch"] = pir::Int32Attribute::get(pd_trace_ir(), arch);
+    _ta["group_size"] = pir::Int32Attribute::get(pd_trace_ir(), group_size);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::WeightOnlyLinearOp>(_tv0, _tv1, _tv2, _tv3, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
   return _th;
   PD_GUARD_END(nullptr);
 }
@@ -90,6 +102,16 @@ int64_t pd_op_weight_quantize(pd_tensor* outs, int64_t nout, pd_tensor x, const 
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, algo /* std::string */, arch /* int */, group_size /* int */);
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::AttributeMap _ta;
+    _ta["algo"] = pir::StrAttribute::get(pd_trace_ir(), std::string(algo));
+    _ta["arch"] = pir::Int32Attribute::get(pd_trace_ir(), arch);
+    _ta["group_size"] = pir::Int32Attribute::get(pd_trace_ir(), group_size);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::WeightQuantizeOp>(_tv0, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+  }
   return 2;
   PD_GUARD_END(0);
 }

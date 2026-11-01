@@ -161,6 +161,24 @@ int64_t pd_op_generate_proposals(pd_tensor* outs, int64_t nout, pd_tensor scores
   if (nout >= 1) outs[0] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<0>(r))});
   if (nout >= 2) outs[1] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<1>(r))});
   if (nout >= 3) outs[2] = reinterpret_cast<pd_tensor>(new pd_tensor_t{std::move(std::get<2>(r))});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(scores);
+    pir::Value _tv1 = pd_trace_value_or_feed(bbox_deltas);
+    pir::Value _tv2 = pd_trace_value_or_feed(im_shape);
+    pir::Value _tv3 = pd_trace_value_or_feed(anchors);
+    pir::Value _tv4 = pd_trace_value_or_feed(variances);
+    pir::AttributeMap _ta;
+    _ta["pre_nms_top_n"] = pir::Int32Attribute::get(pd_trace_ir(), pre_nms_top_n);
+    _ta["post_nms_top_n"] = pir::Int32Attribute::get(pd_trace_ir(), post_nms_top_n);
+    _ta["nms_thresh"] = pir::FloatAttribute::get(pd_trace_ir(), nms_thresh);
+    _ta["min_size"] = pir::FloatAttribute::get(pd_trace_ir(), min_size);
+    _ta["eta"] = pir::FloatAttribute::get(pd_trace_ir(), eta);
+    _ta["pixel_offset"] = pir::BoolAttribute::get(pd_trace_ir(), pixel_offset != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::GenerateProposalsOp>(_tv0, _tv1, _tv2, _tv3, _tv4, _ta);
+    if (nout >= 1) pd_trace_map_output(outs[0], _top->result(0));
+    if (nout >= 2) pd_trace_map_output(outs[1], _top->result(1));
+    if (nout >= 3) pd_trace_map_output(outs[2], _top->result(2));
+  }
   return 3;
   PD_GUARD_END(0);
 }
@@ -267,6 +285,17 @@ pd_tensor pd_op_group_norm(pd_tensor x, pd_tensor scale, pd_tensor bias, double 
       reinterpret_cast<pd_tensor_t*>(x)->value /* Tensor */, scale ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(scale)->value) : paddle::none /* Tensor? */, bias ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(bias)->value) : paddle::none /* Tensor? */, epsilon /* double */, groups /* int */, data_format /* std::string */);
   pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(x);
+    pir::Value _tv1 = scale ? pd_trace_value_or_feed(scale) : pir::Value();
+    pir::Value _tv2 = bias ? pd_trace_value_or_feed(bias) : pir::Value();
+    pir::AttributeMap _ta;
+    _ta["epsilon"] = pir::DoubleAttribute::get(pd_trace_ir(), epsilon);
+    _ta["groups"] = pir::Int32Attribute::get(pd_trace_ir(), groups);
+    _ta["data_format"] = pir::StrAttribute::get(pd_trace_ir(), std::string(data_format));
+    auto _top = pd_trace_builder()->Build<paddle::dialect::GroupNormOp>(_tv0, _tv1, _tv2, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
   return _th;
   PD_GUARD_END(nullptr);
 }
@@ -278,6 +307,20 @@ pd_tensor pd_op_gru(pd_tensor input, pd_tensor h0, pd_tensor weight, pd_tensor b
       reinterpret_cast<pd_tensor_t*>(input)->value /* Tensor */, h0 ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(h0)->value) : paddle::none /* Tensor? */, reinterpret_cast<pd_tensor_t*>(weight)->value /* Tensor */, bias ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(bias)->value) : paddle::none /* Tensor? */, activation /* std::string */, gate_activation /* std::string */, is_reverse != 0 /* bool */, origin_mode != 0 /* bool */, is_test != 0 /* bool */);
   pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(input);
+    pir::Value _tv1 = h0 ? pd_trace_value_or_feed(h0) : pir::Value();
+    pir::Value _tv2 = pd_trace_value_or_feed(weight);
+    pir::Value _tv3 = bias ? pd_trace_value_or_feed(bias) : pir::Value();
+    pir::AttributeMap _ta;
+    _ta["activation"] = pir::StrAttribute::get(pd_trace_ir(), std::string(activation));
+    _ta["gate_activation"] = pir::StrAttribute::get(pd_trace_ir(), std::string(gate_activation));
+    _ta["is_reverse"] = pir::BoolAttribute::get(pd_trace_ir(), is_reverse != 0);
+    _ta["origin_mode"] = pir::BoolAttribute::get(pd_trace_ir(), origin_mode != 0);
+    _ta["is_test"] = pir::BoolAttribute::get(pd_trace_ir(), is_test != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::GruOp>(_tv0, _tv1, _tv2, _tv3, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
   return _th;
   PD_GUARD_END(nullptr);
 }
@@ -289,6 +332,18 @@ pd_tensor pd_op_gru_unit(pd_tensor input, pd_tensor hidden_prev, pd_tensor weigh
       reinterpret_cast<pd_tensor_t*>(input)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(hidden_prev)->value /* Tensor */, reinterpret_cast<pd_tensor_t*>(weight)->value /* Tensor */, bias ? paddle::make_optional(reinterpret_cast<pd_tensor_t*>(bias)->value) : paddle::none /* Tensor? */, activation /* int */, gate_activation /* int */, origin_mode != 0 /* bool */);
   pd_tensor _th = reinterpret_cast<pd_tensor>(
       new pd_tensor_t{std::move(out)});
+  if (pd_trace_active()) {
+    pir::Value _tv0 = pd_trace_value_or_feed(input);
+    pir::Value _tv1 = pd_trace_value_or_feed(hidden_prev);
+    pir::Value _tv2 = pd_trace_value_or_feed(weight);
+    pir::Value _tv3 = bias ? pd_trace_value_or_feed(bias) : pir::Value();
+    pir::AttributeMap _ta;
+    _ta["activation"] = pir::Int32Attribute::get(pd_trace_ir(), activation);
+    _ta["gate_activation"] = pir::Int32Attribute::get(pd_trace_ir(), gate_activation);
+    _ta["origin_mode"] = pir::BoolAttribute::get(pd_trace_ir(), origin_mode != 0);
+    auto _top = pd_trace_builder()->Build<paddle::dialect::GruUnitOp>(_tv0, _tv1, _tv2, _tv3, _ta);
+    pd_trace_map_output(_th, _top->result(0));
+  }
   return _th;
   PD_GUARD_END(nullptr);
 }

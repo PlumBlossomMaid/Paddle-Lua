@@ -213,6 +213,15 @@
 | 需要什么才能关 | 上游层面:`ProgramInterpreter` 析构时 join 异步线程池(或 phi 全局线程池显式 shutdown);或宿主侧规避(进程退出前给线程池 wind-down 时间)。**不阻塞 M1**:2.8 验收 smoke 以 `os.exit(0)` 收尾(探针实证干净),文档已注明;真实「Python 训练 / Lua 推理」场景脚本退出时也会撞,需在 P8 落地时一并处理(jit 模块文档已挂 Q-25) |
 | 影响 | P8 `jit::Layer`;**不阻塞 2.8 完成** |
 
+### Q-27 · 录制程序带 builtin.shadow_output 时 no-Python interpreter 崩溃(0xC0000005)
+
+| | |
+|---|---|
+| 现象 | trace 录制的静态图数据流 `pd_op.data ×5 → pd_op.batch_norm_ → builtin.shadow_output`,`run_program_ad_func` 执行时崩溃(exit -1073741819 = 0xC0000005,偶发栈异常 0xC0000409)。**删掉 shadow_output(不调 trace:output)时同一程序执行成功且数值正确** —— 崩点锚定在专项 pass 或 interpreter 的 shadow_output 指令 |
+| 已排查 | ① 非 batch_norm 6 输出 op 本身:is_test=0/1 在无 shadow_output 时都成功;Python 保存的 eval 图结构与我们完全一致(`1.batch_norm_` is_test=true + 5 输入,`py_bn.json`);② 不随 op class 变化(BatchNormOp 与 BatchNorm_Op 同样崩);③ TRACE_CLS_OVERRIDE(batch_norm→batch_norm_)已让录制 op 与 Python eval 图一致,崩溃依旧;④ `RemoveShadowFeedPass` 只处理 `pd_op.shadow_feed`(PhiKernelOp),不碰 builtin shadow_output —— 崩点另有其处;⑤ 剩余候选:`ApplyIrPass`(含 `PdOpLowerToKernelPass` 与 `InplacePass`,`run_program_impl.cc:566-575`)与 interpreter 执行 builtin op 的路径 |
+| 需要 | 二分 pass 链:临时把 shadow_output 换成不触发它、或单跑 InplacePass 看崩不崩;核对 `builtin.shadow_output` 手写 attr 与 `AppendShadowOutput`(`pir.cc:2247-2265`)逐字段一致 |
+| 影响 | P15-A ResNet18 trace 验收(15-to-static.md §5 前两条)。不通过则 ResNet18 前向 trace 无法完成 |
+
 ### Q-21 · 上游有没有「显式 `None` 与缺省含义不同」的参数
 
 | | |
