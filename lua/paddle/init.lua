@@ -51,6 +51,16 @@ M.iinfo = dtype.iinfo
 M.get_default_dtype = dtype.get_default_dtype
 M.set_default_dtype = dtype.set_default_dtype
 
+-- ---- 顶层算子层(top.md §2,4.4 metrics-lua 前置) ---------------
+-- paddle.zeros/cast/sum/... 是公开 API —— metrics-lua 只能调公开 API
+-- (overview.md §1),但生成物在 _ops/ 子包从未接线到顶层(实测顶层 nil)。
+-- top_ops.lua 把生成物包装成契约(dtype 字符串→枚举、IntArray 标量→表、
+-- argrule 表调用),第一批 15 个(创建/逻辑/归约/基础);其余随消费者补齐。
+local top_ops = require "paddle.top_ops"
+for name, fn in pairs(top_ops) do
+  M[name] = fn
+end
+
 -- ---- P5 place constructors (dtype-device.md sec.1.2) -----------------
 M.CPUPlace = device.CPUPlace
 M.CUDAPlace = device.CUDAPlace
