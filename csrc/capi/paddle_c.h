@@ -544,6 +544,62 @@ pd_status  pd_trace_save(pd_trace t, const char* path_prefix);
  */
 int pd_load_op_meta_info(const char* dso_path, char* names, int cap);
 
+/* ------------------------------------------------------------------ */
+/* Group 14: custom op EXECUTION (P16, 16-cpp-extension.md)           */
+/* ------------------------------------------------------------------ */
+
+/* Attribute value kinds a custom op can carry (op_meta_info.h attrs_).
+ * Values map 1:1 to the Paddle attribute type strings in
+ * static_api_run_custom_op (manual_static_op_function.h:672-810):
+ *   bool / int / float / double / int64_t / std::string /
+ *   std::vector<int> / std::vector<float> / std::vector<int64_t> /
+ *   std::vector<std::string>. */
+typedef enum {
+  PD_ATTR_BOOL = 0,      /* value -> const int*    (0/1)               */
+  PD_ATTR_INT,           /* value -> const int*                        */
+  PD_ATTR_FLOAT,         /* value -> const float*                      */
+  PD_ATTR_DOUBLE,        /* value -> const double*                     */
+  PD_ATTR_INT64,         /* value -> const int64_t*                    */
+  PD_ATTR_STRING,        /* value -> const char**  (C string)          */
+  PD_ATTR_VEC_INT,       /* value -> const int*    (len elements)      */
+  PD_ATTR_VEC_FLOAT,     /* value -> const float*  (len elements)      */
+  PD_ATTR_VEC_INT64,     /* value -> const int64_t*(len elements)      */
+  PD_ATTR_VEC_STRING     /* value -> const char**  (len C strings)     */
+} pd_attr_type;
+
+/* Run a loaded custom op (registered by pd_load_op_meta_info) in PIR
+ * inference mode and return its outputs. No struct in the ABI (01-c-abi
+ * sec.4 坑④): inputs and attrs are parallel arrays, attrs follow the
+ * op's attrs_ declaration ORDER (manual_static_op_function.h:672-810).
+ *
+ *   op_type:  op name WITHOUT the custom_op. prefix ("custom_relu")
+ *   inputs:   ninputs pd_tensor handles, one per non-vector input in the
+ *             op's inputs_ declaration order (duplicable / vector inputs
+ *             are NOT supported yet -- error).
+ *   attrs:    one entry per op attr, in declaration order. attr_types[i]
+ *             is the pd_attr_type; attr_values[i] points to the typed
+ *             value (see the enum comment); attr_lens[i] is the element
+ *             count (1 for scalars/strings, N for vectors). attrs may be
+ *             NULL when the op has no attrs (nattrs == 0).
+ *   outs:     receives nout NEW pd_tensor handles the caller owns (free
+ *             each). Returns the produced count (== outs of the op); -1
+ *             on error with pd_last_error set.
+ *
+ * Execution blueprint (static_api_run_custom_op,
+ * manual_static_op_function.h:561-966):
+ *   OpMetaInfoMap lookup -> inputs/attrs/outputs/inplace_map
+ *   -> pir_op_name = "custom_op." + op_type (+ "_" if inplace)
+ *   -> OpInfo lookup -> OperationArgument -> input feeds (pd_op.data)
+ *   -> attrs as pir attributes -> RunInferShape/RunInferDtype
+ *   -> output DenseTensorType -> Build -> shadow_output per fetch
+ *   -> run_program_ad_func (inference: empty backward + is_test).
+ */
+int pd_custom_op_run(const char* op_type,
+                     const pd_tensor* inputs, int ninputs,
+                     const int* attr_types, const void* const* attr_values,
+                     const int* attr_lens, int nattrs,
+                     pd_tensor* outs, int nout);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif

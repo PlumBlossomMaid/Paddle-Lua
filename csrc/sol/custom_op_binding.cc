@@ -1,13 +1,18 @@
-// custom_op_binding.cc -- core.load_custom_op(dso) (P16, 16-cpp-extension.md).
+// custom_op_binding.cc -- custom-op C ABI face (P16, 16-cpp-extension.md).
 // This TU touches paddle_c.h ONLY (02-binding.md sec.2).
 //
 //   core.load_custom_op(absolute_dso_path) -> { <op_name> = true, ... }
+//     Loading registers every op in the DLL into the PIR dialect (custom_op.
+//     prefix) AND the legacy fluid OpInfo table (custom_operator.cc:1279-1315).
+//     The returned table lists the newly registered op names so the Lua
+//     cpp_extension face can build callables for each.
 //
-// Loading registers every op in the DLL into the PIR dialect (custom_op.
-// prefix) AND the legacy fluid OpInfo table (custom_operator.cc:1279-1315).
-// The returned table lists the newly registered op names so the Lua
-// cpp_extension face can build callables for each (execution lands in the
-// C ABI's pd_custom_op_run, added in the P16 executor step).
+//   core.custom_op_run(op_type, {inputs...}, {attrs...}) -> {outputs...}
+//     Execute a loaded custom op in PIR inference mode (pd_custom_op_run,
+//     paddle_c.h Group 14). attrs is an optional array of
+//     { type = pd_attr_type, value = scalar-or-array, len = n } in the op's
+//     attrs_ declaration order (len only used for vector attrs; scalars and
+//     strings use 1).
 
 #include <cstring>
 #include <string>
@@ -50,6 +55,148 @@ void register_custom_op(lua_State* L, int module_index) {
           ops[names[i]] = true;
         }
         return sol::make_object(L, ops);
+      });
+
+  /* core.custom_op_run(op, inputs, attrs) -> table of output LuaTensors.
+   * attr entries: { type = <pd_attr_type int>, value = <number | string |
+   * array of number/string>, len = <int, vector only> }. Types map to the
+   * paddle_c.h PD_ATTR_* enum. Attr VALUES are marshalled into C-owned
+   * storage for the duration of the call. */
+  mod.set_function(
+      "custom_op_run",
+      [](sol::this_state L, const std::string& op_type, sol::table inputs,
+         sol::optional<sol::table> attrs_tbl) -> sol::object {
+        std::vector<pd_tensor> xs;
+        for (auto& kv : inputs) {
+          LuaTensor& t = kv.second.as<LuaTensor&>();
+          xs.push_back(t.h);
+        }
+        std::vector<int> attr_types;
+        std::vector<int> attr_lens;
+        std::vector<std::vector<int>> ints_buf;
+        std::vector<std::vector<float>> floats_buf;
+        std::vector<std::vector<double>> doubles_buf;
+        std::vector<std::vector<int64_t>> i64_buf;
+        std::vector<std::vector<std::string>> strs_buf;
+        std::vector<std::vector<const char*>> cstrs_buf;
+        std::vector<const void*> attr_values;
+        if (attrs_tbl) {
+          for (auto& kv : *attrs_tbl) {
+            sol::table a = kv.second.as<sol::table>();
+            int type = a["type"].get<int>();
+            attr_types.push_back(type);
+            int len = 1;
+            if (a["len"].valid()) len = a["len"].get<int>();
+            attr_lens.push_back(len);
+            switch (type) {
+              case PD_ATTR_BOOL:
+              case PD_ATTR_INT: {
+                ints_buf.emplace_back();
+                auto& v = ints_buf.back();
+                if (len > 1) {
+                  sol::table arr = a["value"].get<sol::table>();
+                  for (int i = 1; i <= len; ++i)
+                    v.push_back(arr[i].get<int>());
+                } else {
+                  v.push_back(a["value"].get<int>());
+                }
+                attr_values.push_back(v.data());
+                break;
+              }
+              case PD_ATTR_FLOAT: {
+                floats_buf.emplace_back();
+                auto& v = floats_buf.back();
+                if (len > 1) {
+                  sol::table arr = a["value"].get<sol::table>();
+                  for (int i = 1; i <= len; ++i)
+                    v.push_back(arr[i].get<float>());
+                } else {
+                  v.push_back(a["value"].get<float>());
+                }
+                attr_values.push_back(v.data());
+                break;
+              }
+              case PD_ATTR_DOUBLE: {
+                doubles_buf.emplace_back();
+                auto& v = doubles_buf.back();
+                if (len > 1) {
+                  sol::table arr = a["value"].get<sol::table>();
+                  for (int i = 1; i <= len; ++i)
+                    v.push_back(arr[i].get<double>());
+                } else {
+                  v.push_back(a["value"].get<double>());
+                }
+                attr_values.push_back(v.data());
+                break;
+              }
+              case PD_ATTR_INT64: {
+                i64_buf.emplace_back();
+                auto& v = i64_buf.back();
+                if (len > 1) {
+                  sol::table arr = a["value"].get<sol::table>();
+                  for (int i = 1; i <= len; ++i)
+                    v.push_back(arr[i].get<int64_t>());
+                } else {
+                  v.push_back(a["value"].get<int64_t>());
+                }
+                attr_values.push_back(v.data());
+                break;
+              }
+              case PD_ATTR_STRING: {
+                strs_buf.emplace_back();
+                auto& v = strs_buf.back();
+                v.push_back(a["value"].get<std::string>());
+                attr_values.push_back(
+                    static_cast<const void*>(v.front().c_str()));
+                break;
+              }
+              case PD_ATTR_VEC_STRING: {
+                strs_buf.emplace_back();
+                auto& v = strs_buf.back();
+                sol::table arr = a["value"].get<sol::table>();
+                for (int i = 1; i <= len; ++i)
+                  v.push_back(arr[i].get<std::string>());
+                cstrs_buf.emplace_back();
+                auto& cv = cstrs_buf.back();
+                for (size_t i = 0; i < v.size(); ++i)
+                  cv.push_back(v[i].c_str());
+                attr_values.push_back(cv.data());
+                break;
+              }
+              default:
+                throw sol::error("paddle: custom_op_run unsupported attr "
+                                 "type code");
+            }
+          }
+        }
+        int n = pd_custom_op_run(
+            op_type.c_str(), xs.empty() ? nullptr : xs.data(),
+            static_cast<int>(xs.size()), attr_types.empty() ? nullptr
+                                                            : attr_types.data(),
+            attr_values.empty() ? nullptr : attr_values.data(),
+            attr_lens.empty() ? nullptr : attr_lens.data(),
+            static_cast<int>(attr_types.size()), nullptr, 0);
+        pd::check();
+        if (n < 0) pd::throw_status();
+        std::vector<pd_tensor> outs(static_cast<size_t>(n), nullptr);
+        int got = pd_custom_op_run(
+            op_type.c_str(), xs.empty() ? nullptr : xs.data(),
+            static_cast<int>(xs.size()), attr_types.empty() ? nullptr
+                                                            : attr_types.data(),
+            attr_values.empty() ? nullptr : attr_values.data(),
+            attr_lens.empty() ? nullptr : attr_lens.data(),
+            static_cast<int>(attr_types.size()), outs.data(),
+            static_cast<int>(outs.size()));
+        pd::check();
+        if (got != n) {
+          throw sol::error("paddle: custom_op_run output count changed");
+        }
+        sol::state_view lv(L);
+        sol::table results = lv.create_table(0, n);
+        for (int i = 0; i < n; ++i) {
+          results[i + 1] = LuaTensor(outs[static_cast<size_t>(i)]);
+        }
+        return sol::make_object(L, results);
       });
 }
 
