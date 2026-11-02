@@ -225,6 +225,17 @@ M.stack = rule {
   return gen("stack")(x, axis)
 end)
 
+-- concat{x, axis} -- 沿 1-based 轴拼接张量列表(CatMetric 用)。x 是
+-- 1-based 张量数组,axis 标量 1-based(生成物负责 -1,默认第一维)。
+M.concat = rule {
+  { name = "x", type = argrule.List { Tensor },
+    doc = "1-based list of tensors to concatenate" },
+  { name = "axis", type = argrule.number, opt = true, default = nil,
+    doc = "1-based concat axis (omit = first dim)" },
+}(function(x, axis)
+  return gen("concat")(x, axis)
+end)
+
 -- ---------------------------------------------------------------------
 -- 第三批(4.4 metrics retrieval):unsqueeze + 比较算子对偶。
 -- AUC 用 rank 外积:unsqueeze(score, axis=2)→[n,1],广播 less_than →[n,n]。
