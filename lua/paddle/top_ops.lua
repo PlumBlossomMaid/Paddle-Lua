@@ -157,9 +157,72 @@ end
 una("abs")
 una("sqrt")
 una("square")
+una("log")
+una("log10")
 bin("subtract")
 bin("divide")
 bin("maximum")
 bin("minimum")
+bin("multiply")
+
+-- ---------------------------------------------------------------------
+-- 补充(4.4 metrics 第二批):索引/排序 top.md §2.4 —— argmax / argsort /
+-- topk。1-based 轴由生成物转;返回索引 tensor 的 ±1 语义在 C ABI 层
+-- (index_semantics 标注,argmax/argsort/topk 的 returns_index)。
+-- ---------------------------------------------------------------------
+
+-- argmax{x, axis, keepdims, flatten, dtype} -- axis 标量 int(1-based)
+M.argmax = rule {
+  { name = "x", type = Tensor, doc = "input tensor" },
+  { name = "axis", type = argrule.any, opt = true, default = nil,
+    doc = "1-based axis (omit for flatten->single index)" },
+  { name = "keepdims", type = argrule.boolean, opt = true, default = false,
+    doc = "keep reduced dims as size-1" },
+  { name = "flatten", type = argrule.boolean, opt = true, default = false,
+    doc = "flatten then argmax (single index)" },
+  { name = "dtype", type = argrule.string, opt = true, default = nil,
+    doc = "index dtype (default int64)" },
+}(function(x, axis, keepdims, flatten, d)
+  return gen("argmax")(x, axis, keepdims, flatten, pd_dtype(d))
+end)
+
+-- argsort{x, axis, descending, stable} -- 沿轴的排序索引(1-based 值)
+M.argsort = rule {
+  { name = "x", type = Tensor, doc = "input tensor" },
+  { name = "axis", type = argrule.any, opt = true, default = nil,
+    doc = "1-based axis (omit = last dim)" },
+  { name = "descending", type = argrule.boolean, opt = true, default = false,
+    doc = "sort descending" },
+  { name = "stable", type = argrule.boolean, opt = true, default = false,
+    doc = "stable sort" },
+}(function(x, axis, descending, stable)
+  return gen("argsort")(x, axis, descending, stable)
+end)
+
+-- topk{x, k, axis, largest, sorted} -> values, indices(1-based)
+M.topk = rule {
+  { name = "x", type = Tensor, doc = "input tensor" },
+  { name = "k", type = argrule.number, opt = true, default = 1,
+    doc = "top-k count" },
+  { name = "axis", type = argrule.any, opt = true, default = nil,
+    doc = "1-based axis (omit = last dim)" },
+  { name = "largest", type = argrule.boolean, opt = true, default = true,
+    doc = "largest (true) or smallest (false)" },
+  { name = "sorted", type = argrule.boolean, opt = true, default = true,
+    doc = "return sorted" },
+}(function(x, k, axis, largest, sorted)
+  return gen("topk")(x, k, axis, largest, sorted)
+end)
+
+-- stack{x = {t1, t2, ...}, axis} -- 沿 1-based 轴堆叠张量列表(confusion
+-- matrix / one-hot 构造用;x 是 1-based 张量数组)
+M.stack = rule {
+  { name = "x", type = argrule.List { Tensor },
+    doc = "1-based list of tensors to stack" },
+  { name = "axis", type = argrule.number, opt = true, default = 1,
+    doc = "1-based stack axis" },
+}(function(x, axis)
+  return gen("stack")(x, axis)
+end)
 
 return M
