@@ -42,6 +42,7 @@
 // a builder can look it up via IrContext::GetRegisteredOpInfo and run it
 // through run_program_ad_func exactly like a generated op.
 
+#include <algorithm>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -50,7 +51,13 @@
 #include <vector>
 
 #include "paddle/common/ddim.h"
+#include "paddle/fluid/eager/autograd_meta.h"
+#include "paddle/fluid/eager/api/utils/global_utils.h"
+#include "paddle/fluid/eager/backward.h"
+#include "paddle/fluid/eager/custom_operator/custom_operator_node.h"
+#include "paddle/fluid/eager/custom_operator/custom_operator_utils.h"
 #include "paddle/fluid/eager/to_static/run_program_func.h"
+#include "paddle/fluid/eager/utils.h"
 #include "paddle/fluid/framework/custom_operator.h"
 #include "paddle/fluid/framework/custom_operator_utils.h"
 #include "paddle/fluid/framework/scope.h"
@@ -119,6 +126,12 @@ int pd_load_op_meta_info(const char* dso_path, char* names, int cap) {
   if (names_list.empty()) {
     const auto& diff =
         paddle::framework::LoadOpMetaInfoAndRegisterOp(std::string(dso_path));
+    // The eager path reads the op map from egr::Controller, NOT from the
+    // global paddle::OpMetaInfoMap::Instance() -- upstream syncs it inside
+    // load_op_meta_info_and_register_op (pybind.cc:3344 MergeOpMetaInfoMap).
+    // Without this, pd_custom_op_eager_run's Controller lookup misses and
+    // backward (RunCustomOpNode) can never fire.
+    egr::Controller::Instance().MergeOpMetaInfoMap(diff);
     for (const auto& pair : diff) {
       names_list.push_back(pair.first);
     }
@@ -545,6 +558,305 @@ int pd_custom_op_meta(const char* op_type, char* buf, int cap) {
   if (n >= cap) n = cap - 1;  // keep room for the terminator
   std::memcpy(buf, schema.data(), static_cast<size_t>(n));
   buf[n] = '\0';
+  return n;
+  PD_GUARD_END(-1);
+}
+
+namespace {
+
+/* Build the forward slot map exactly like the pybind forward constructor
+ * (eager_functions.cc:367-443): GetCustomEdgesSlotMap()[op_type] grows a
+ * vector of 5-map blocks; block [0] is the forward map where
+ *   [0] grad_outputs[j]  -> grad slot of fwd input j
+ *   [1] grad_inputs[i]   -> grad slot of fwd output j  ("X@GRAD")
+ *   [2] grad_inputs[i]   -> fwd output slot j          (plain output name)
+ *   [3] grad_inputs[i]   -> fwd input slot j           (plain input name)
+ *   [4] grad_attrs[j]    -> fwd attr slot i
+ * The pybind twin is static in eager_functions.cc, so we replicate it
+ * here (pure string matching over OpMetaInfo names; no pybind). */
+void build_forward_slot_map(
+    const std::vector<paddle::OpMetaInfo>& vec_map,
+    const std::string& op_type,
+    std::unordered_map<std::string,
+                       std::vector<std::vector<std::unordered_map<int, int>>>>&
+        out_map) {
+  if (out_map.find(op_type) != out_map.end()) return;  // already built
+  auto inputs_names = paddle::OpMetaInfoHelper::GetInputs(vec_map[0]);
+  auto outputs_names = paddle::OpMetaInfoHelper::GetOutputs(vec_map[0]);
+  auto attrs_names = paddle::OpMetaInfoHelper::GetAttrs(vec_map[0]);
+  auto grad_outputs_names = paddle::OpMetaInfoHelper::GetOutputs(vec_map[1]);
+  auto grad_inputs_names = paddle::OpMetaInfoHelper::GetInputs(vec_map[1]);
+  auto grad_attrs_names = paddle::OpMetaInfoHelper::GetAttrs(vec_map[1]);
+  std::vector<std::unordered_map<int, int>> res(5);
+  out_map.insert({op_type, {res}});
+  auto& m = out_map[op_type][0];  // the forward 5-map block
+  // grad_outputs: "X@GRAD" names slot i in fwd input j
+  for (size_t i = 0; i < grad_outputs_names.size(); ++i) {
+    size_t end = grad_outputs_names[i].find("@GRAD");
+    for (size_t j = 0; j < inputs_names.size(); ++j) {
+      if (grad_outputs_names[i].substr(0, end) == inputs_names[j]) {
+        m[0][static_cast<int>(j)] = static_cast<int>(i);
+      }
+    }
+  }
+  // grad_inputs: "Y@GRAD" -> fwd output j; plain output name -> j;
+  // plain input name -> j
+  for (size_t i = 0; i < grad_inputs_names.size(); ++i) {
+    size_t end = grad_inputs_names[i].find("@GRAD");
+    if (end != std::string::npos) {
+      for (size_t j = 0; j < outputs_names.size(); ++j) {
+        if (grad_inputs_names[i].substr(0, end) == outputs_names[j]) {
+          m[1][static_cast<int>(j)] = static_cast<int>(i);
+        }
+      }
+    } else {
+      auto it = std::find(outputs_names.begin(), outputs_names.end(),
+                          grad_inputs_names[i]);
+      if (it != outputs_names.end()) {
+        for (size_t j = 0; j < outputs_names.size(); ++j) {
+          if (grad_inputs_names[i] == outputs_names[j]) {
+            m[2][static_cast<int>(j)] = static_cast<int>(i);
+          }
+        }
+      } else {
+        for (size_t j = 0; j < inputs_names.size(); ++j) {
+          if (grad_inputs_names[i] == inputs_names[j]) {
+            m[3][static_cast<int>(j)] = static_cast<int>(i);
+          }
+        }
+      }
+    }
+  }
+  // grad_attrs: same names as fwd attrs
+  for (size_t i = 0; i < grad_attrs_names.size(); ++i) {
+    for (size_t j = 0; j < attrs_names.size(); ++j) {
+      if (grad_attrs_names[i] == attrs_names[j]) {
+        m[4][static_cast<int>(j)] = static_cast<int>(i);
+      }
+    }
+  }
+}
+
+}  // namespace
+
+int pd_custom_op_eager_run(const char* op_type, const pd_tensor* inputs,
+                           int ninputs, const int* attr_types,
+                           const void* const* attr_values,
+                           const int* attr_lens, int nattrs,
+                           pd_tensor* outs, int nout) {
+  PD_GUARD_BEGIN;
+  if (op_type == nullptr || op_type[0] == '\0') {
+    pd_set_error(PD_INVALID_ARG, "pd_custom_op_eager_run: empty op_type");
+    return -1;
+  }
+  const auto& meta_info_map = egr::Controller::Instance().GetOpMetaInfoMap();
+  auto it = meta_info_map.find(op_type);
+  if (it == meta_info_map.end()) {
+    pd_set_error(PD_INVALID_ARG,
+                 ("pd_custom_op_eager_run: op '" + std::string(op_type)
+                  + "' not registered (load the dso first)")
+                     .c_str());
+    return -1;
+  }
+  const auto& vec_map = it->second;
+  const auto& inputs_meta = paddle::OpMetaInfoHelper::GetInputs(vec_map[0]);
+  const auto& attrs_meta = paddle::OpMetaInfoHelper::GetAttrs(vec_map[0]);
+  const auto& outputs_meta = paddle::OpMetaInfoHelper::GetOutputs(vec_map[0]);
+  const auto& inplace_map =
+      paddle::OpMetaInfoHelper::GetInplaceMap(vec_map[0]);
+  if (static_cast<size_t>(ninputs) != inputs_meta.size()) {
+    pd_set_error(PD_INVALID_ARG,
+                 ("pd_custom_op_eager_run: op '" + std::string(op_type)
+                  + "' expects " + std::to_string(inputs_meta.size())
+                  + " inputs, got " + std::to_string(ninputs) + ")")
+                     .c_str());
+    return -1;
+  }
+  if (static_cast<size_t>(nattrs) != attrs_meta.size()) {
+    pd_set_error(PD_INVALID_ARG,
+                 ("pd_custom_op_eager_run: op '" + std::string(op_type)
+                  + "' expects " + std::to_string(attrs_meta.size())
+                  + " attrs, got " + std::to_string(nattrs) + ")")
+                     .c_str());
+    return -1;
+  }
+  // vector (duplicable) inputs/attrs are NOT supported yet -- the same
+  // limitation pd_custom_op_run has; error loudly instead of mis-slicing.
+  for (const auto& in : inputs_meta) {
+    if (paddle::framework::detail::IsDuplicableVar(in)) {
+      pd_set_error(PD_INVALID_ARG,
+                   ("pd_custom_op_eager_run: vector input '" + std::string(in)
+                    + "' not supported yet").c_str());
+      return -1;
+    }
+  }
+
+  // ---- fill CustomOpKernelContext (eager_functions.cc:596-693) ----
+  paddle::CustomOpKernelContext ctx;
+  for (int i = 0; i < ninputs; ++i) {
+    const paddle::Tensor& t =
+        reinterpret_cast<const pd_tensor_t*>(inputs[i])->value;
+    ctx.EmplaceBackInput(t);
+  }
+  for (int i = 0; i < nattrs; ++i) {
+    // Translating raw C ABI pointers -> paddle::any, mirroring the pd
+    // runtime attr kinds (pd_custom_op_run's add_attr uses the same codes).
+    const char* type_str =
+        paddle::ParseAttrStr(attrs_meta.at(static_cast<size_t>(i)))[1]
+            .c_str();
+    auto add = [&](paddle::any v) { ctx.EmplaceBackAttr(v); };
+    if (attr_types[i] == PD_ATTR_BOOL) {
+      add(static_cast<const int*>(attr_values[i])[0] != 0);
+    } else if (attr_types[i] == PD_ATTR_INT) {
+      add(static_cast<const int*>(attr_values[i])[0]);
+    } else if (attr_types[i] == PD_ATTR_FLOAT) {
+      add(static_cast<const float*>(attr_values[i])[0]);
+    } else if (attr_types[i] == PD_ATTR_DOUBLE) {
+      add(static_cast<const double*>(attr_values[i])[0]);
+    } else if (attr_types[i] == PD_ATTR_INT64) {
+      add(static_cast<const int64_t*>(attr_values[i])[0]);
+    } else if (attr_types[i] == PD_ATTR_STRING) {
+      const char* s = *static_cast<const char* const*>(attr_values[i]);
+      add(std::string(s ? s : ""));
+    } else if (attr_types[i] == PD_ATTR_VEC_INT) {
+      const int* arr = static_cast<const int*>(attr_values[i]);
+      add(std::vector<int>(arr, arr + attr_lens[i]));
+    } else if (attr_types[i] == PD_ATTR_VEC_FLOAT) {
+      const float* arr = static_cast<const float*>(attr_values[i]);
+      add(std::vector<float>(arr, arr + attr_lens[i]));
+    } else if (attr_types[i] == PD_ATTR_VEC_INT64) {
+      const int64_t* arr = static_cast<const int64_t*>(attr_values[i]);
+      add(std::vector<int64_t>(arr, arr + attr_lens[i]));
+    } else if (attr_types[i] == PD_ATTR_VEC_STRING) {
+      const char* const* arr =
+          static_cast<const char* const*>(attr_values[i]);
+      std::vector<std::string> v;
+      for (int k = 0; k < attr_lens[i]; ++k)
+        v.emplace_back(arr[k] ? arr[k] : "");
+      add(v);
+    } else {
+      pd_set_error(PD_INVALID_ARG,
+                   ("pd_custom_op_eager_run: attr '" + std::string(type_str)
+                    + "' unmapped type code").c_str());
+      return -1;
+    }
+  }
+  for (size_t i = 0; i < outputs_meta.size(); ++i) {
+    // Kernel-allocated output with a fresh AutogradMeta -- mirrors the
+    // pybind InitializedEmptyTensor (eager_functions.cc:535-552); WITHOUT
+    // the meta the eager path's unsafe_autograd_meta dies (utils.cc:119).
+    paddle::Tensor t;
+    t.set_name(egr::Controller::Instance().GenerateUniqueName(
+        "custom_op_out"));
+    auto* meta = egr::EagerUtils::autograd_meta(&t);
+    meta->SetPersistable(false);
+    std::shared_ptr<phi::Allocation> alloc = nullptr;
+    t.set_impl(std::make_shared<phi::DenseTensor>(
+        alloc, phi::DenseTensorMeta(phi::DataType::FLOAT32,
+                                    phi::make_ddim({0}))));
+    ctx.EmplaceBackOutput(std::move(t));
+  }
+
+  // ---- run the user kernel (custom_operator_utils.cc:786) ----
+  ctx.ConstructInplaceIndex(inputs_meta, outputs_meta, inplace_map);
+  egr::run_custom_op_impl(vec_map[0], true, false, ctx);
+
+  // ---- wrap outputs (eager_functions.cc:747-768) ----
+  std::vector<paddle::Tensor> out;
+  for (size_t i = 0; i < ctx.OutputRange().size(); ++i) {
+    auto pair = ctx.OutputRangeAt(i);
+    auto between = ctx.OutputsBetween(pair.first, pair.second);
+    if (between.empty()) {
+      pd_set_error(PD_INVALID_ARG,
+                   ("pd_custom_op_eager_run: op '" + std::string(op_type)
+                    + "' output " + std::to_string(i) + " uninitialized")
+                       .c_str());
+      return -1;
+    }
+    out.insert(out.end(), between.begin(), between.end());
+  }
+
+  // ---- autograd (eager_functions.cc:800-918) ----
+  std::vector<egr::AutogradMeta*> ins_meta =
+      egr::EagerUtils::nullable_autograd_meta(*ctx.AllMutableInput());
+  std::vector<egr::AutogradMeta*> outs_meta =
+      egr::EagerUtils::unsafe_autograd_meta(out);
+  bool require_any_grad = false;
+  for (auto* m : ins_meta) {
+    require_any_grad =
+        require_any_grad ||
+        egr::EagerUtils::ComputeRequireGrad(true, m);  // trace_backward=true
+  }
+  if (require_any_grad && vec_map.size() > 1) {
+    auto& slot_map = egr::Controller::Instance().GetCustomEdgesSlotMap();
+    build_forward_slot_map(vec_map, op_type, slot_map);
+    for (auto* om : outs_meta) {
+      egr::EagerUtils::PassStopGradient(false, om);
+    }
+    auto grad_node = std::make_shared<egr::RunCustomOpNode>(
+        ctx.OutputRange().size(), ctx.InputRange().size(), op_type);
+    const auto& sm = slot_map.at(op_type);
+    // sm is vector<vector<map>>: one block per grad level; [0] is the
+    // forward map (eager_functions.cc:388 in_out_map[op_type][0]).
+    const auto& fwd = sm[0];
+    // grad outputs: slot_ins_num entries, one per fwd input
+    // (eager_functions.cc:846-857)
+    size_t slot_ins_num = ctx.InputRange().size();
+    size_t no_grad_cnt = 0;
+    for (size_t i = 0; i < slot_ins_num; ++i) {
+      std::vector<paddle::Tensor> in_tensors =
+          ctx.InputsBetween(ctx.InputRangeAt(i).first,
+                            ctx.InputRangeAt(i).second);
+      if (fwd[0].find(static_cast<int>(i)) != fwd[0].end()) {
+        grad_node->SetGradOutMeta(in_tensors,
+                                  fwd[0].at(static_cast<int>(i)));
+      } else {
+        grad_node->SetGradOutMeta(
+            in_tensors, slot_ins_num - 1 - no_grad_cnt);
+        ++no_grad_cnt;
+      }
+    }
+    // grad inputs: grad of fwd outputs (eager_functions.cc:858-870)
+    for (size_t i = 0; i < ctx.OutputRange().size(); ++i) {
+      auto pair = ctx.OutputRangeAt(i);
+      std::vector<paddle::Tensor> out_tensors =
+          ctx.OutputsBetween(pair.first, pair.second);
+      for (size_t j = pair.first; j < pair.second; ++j) {
+        outs_meta[j]->SetSingleOutRankWithSlot(
+            i, j - pair.first);
+        egr::EagerUtils::SetHistory(outs_meta[j], grad_node);
+      }
+      grad_node->SetGradInMeta(out_tensors, i);
+    }
+    // fwd outputs/inputs that the grad op needs (slot map fwd[2]/fwd[3])
+    for (auto item : fwd[2]) {
+      grad_node->fwd_outs[item.second] =
+          egr::RunCustomOpNode::ConstructTensorWrapper(
+              ctx.OutputsBetween(ctx.OutputRangeAt(item.first).first,
+                                 ctx.OutputRangeAt(item.first).second));
+    }
+    for (auto item : fwd[3]) {
+      grad_node->fwd_ins[item.second] =
+          egr::RunCustomOpNode::ConstructTensorWrapper(
+              ctx.InputsBetween(ctx.InputRangeAt(item.first).first,
+                                ctx.InputRangeAt(item.first).second));
+    }
+    // attrs the grad op needs (slot map fwd[4])
+    const std::vector<paddle::any>& res_attrs = ctx.Attrs();
+    std::vector<paddle::any> attrs(res_attrs.size());
+    for (auto item : fwd[4]) {
+      attrs[item.second] = res_attrs[item.first];
+    }
+    grad_node->SetAttrs(attrs);
+  }
+
+  // ---- return outputs ----
+  int n = static_cast<int>(out.size());
+  int write = n < nout ? n : nout;
+  for (int i = 0; i < write; ++i) {
+    outs[i] = reinterpret_cast<pd_tensor>(
+        new pd_tensor_t{std::move(out[static_cast<size_t>(i)])});
+  }
   return n;
   PD_GUARD_END(-1);
 }

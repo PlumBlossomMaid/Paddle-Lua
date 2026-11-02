@@ -391,11 +391,11 @@ local core
 local function op_run(op_type, inputs, attr_types, attr_values, attr_lens)
   if not core then core = require "paddle_core" end
   if #attr_types == 0 then
-    return core.custom_op_run(op_type, inputs)
+    return core.custom_op_eager_run(op_type, inputs)
   end
-  return core.custom_op_run(op_type, inputs,
-                            build_attr_table(attr_types, attr_values,
-                                             attr_lens))
+  return core.custom_op_eager_run(op_type, inputs,
+                                  build_attr_table(attr_types, attr_values,
+                                                   attr_lens))
 end
 
 -- Map a paddle attr type string ("bool", "int", "int64_t", "float",

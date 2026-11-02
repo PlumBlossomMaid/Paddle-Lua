@@ -124,18 +124,27 @@ Python 版提供两条路:`setup()`(预编译)和 `load()`(JIT 编译)。
 
 ## 5. 验收
 
-- [ ] 一个自定义 relu 算子(CPU),`load()` 后前向正确
-- [ ] 同一个算子的反向正确,能参与 `backward()`
-- [ ] CUDA 版本同上
-- [ ] 第二次 `load()` 命中缓存,耗时 < 100ms
-- [ ] 改一行源码后 `load()`,缓存正确失效
-- [ ] 用不匹配的编译器构建的 .so,`load()` 时**报错而不是崩溃**
-- [ ] Python 版 Paddle 的自定义算子示例代码零改动可用
-- [ ] Linux 与 Windows 各验一遍
+- [x] 一个自定义 relu 算子(CPU),`load()` 后前向正确
+      —— **2026-11-02 `smoke_cpp_extension.lua` PASS**(relu(-1)=0 / relu(0.5)=0.5 逐字节;
+      另 custom_simple_slice 位置/具名 attrs 双形态)
+- [x] 同一个算子的反向正确,能参与 `backward()`
+      —— **2026-11-02 `smoke_custom_backward.lua` PASS**(官方 custom_linear_op.cc 源码零改动,
+      `paddle.autograd.grad` 反向 gX/gW/gB 与手算一致;`pd_custom_op_eager_run`)
+- [ ] CUDA 版本同上 —— 未做(本机无 GPU;cl.exe JIT 已按平台分支骨架)
+- [x] 第二次 `load()` 命中缓存,耗时 < 100ms
+      —— **2026-11-02 smoke 断言**(sources 哈希缓存,命中直接复用 DLL 不重编)
+- [ ] 改一行源码后 `load()`,缓存正确失效 —— 已实现(哈希含源码),待独立验收断言
+- [ ] 用不匹配的编译器构建的 .so,`load()` 时**报错而不是崩溃** —— 未做(见 §4 坑①)
+- [x] Python 版 Paddle 的自定义算子示例代码零改动可用
+      —— **2026-11-02**:custom_relu / custom_simple_slice / custom_linear 三个官方例子全部零改动
+- [ ] Linux 与 Windows 各验一遍 —— 未做(本机仅 Windows;Lua 侧已按平台分支)
 
 ---
 
 ## 6. 未解问题
 
-- Q-07 `WITH_PYTHON=OFF` 下 `OpProtoHolder` 链是否存活(M0 第 15 项)——
-  决定是自动查询签名还是要用户手工声明
+- ~~Q-07 `WITH_PYTHON=OFF` 下 `OpProtoHolder` 链是否存活(M0 第 15 项)~~
+  已关闭(T-M0-15):签名查询走 `OpMetaInfoHelper::GetInputs/GetOutputs/GetAttrs`(op_meta_info.h:1080-1084),
+  no-Python 下可直接查,无需手工声明
+- eager 反向的 double-grad map(`ConstructFwdAndBwdMap` custom_operator_node.cc:28)
+  —— 留待有 double-grad op 的冒烟出现时在 C ABI 侧补齐

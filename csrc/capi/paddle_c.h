@@ -610,6 +610,30 @@ int pd_custom_op_run(const char* op_type,
  * op reads and which named attrs it accepts. */
 int pd_custom_op_meta(const char* op_type, char* buf, int cap);
 
+/* Run a loaded custom op in EAGER mode (autograd-tracked) and return its
+ * outputs. Unlike pd_custom_op_run (PIR inference, no graph), this path
+ * mirrors eager_api_run_custom_op (eager_functions.cc:552-930): it fills
+ * a CustomOpKernelContext, runs the user kernel via egr::run_custom_op_impl
+ * (custom_operator_utils.cc:786) WITHOUT any static-graph program, and --
+ * when any input requires grad and a grad op is registered (vec_map.size()
+ * > 1) -- creates an egr::RunCustomOpNode (custom_operator_node.h) and
+ * hooks it to the outputs via EagerUtils::SetHistory, so a later
+ * pd_backward/pd_grad can run the user's PD_BUILD_GRAD_OP kernel.
+ *
+ * The node's slot map (grad_outputs/grad_inputs <-> fwd inputs/outputs)
+ * is built here from OpMetaInfo maps exactly like the pybind forward-BF
+ * ConstructFwdAndBwdMap (eager_functions.cc:367-443); the double-grad
+ * builder (custom_operator_node.cc:28) remains out of scope on the C
+ * ABI until a double-grad op shows up in a smoke.
+ *
+ * Same attrs layout as pd_custom_op_run (paddle_c.h Group 14). Returns
+ * the number of produced outputs, or -1 with pd_last_error set. */
+int pd_custom_op_eager_run(const char* op_type,
+                           const pd_tensor* inputs, int ninputs,
+                           const int* attr_types, const void* const* attr_values,
+                           const int* attr_lens, int nattrs,
+                           pd_tensor* outs, int nout);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif

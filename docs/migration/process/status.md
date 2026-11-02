@@ -25,9 +25,9 @@ G3  ✅ 已通过(2026-10-31)  M2 验收:CIFAR + 吞吐 3×(P12 acc > 0.78 判�
 
 | | |
 |---|---|
-| 阶段 | **M3 进行中(2026-11-02)** —— 4.2 P16 cpp_extension:**加载链 + 执行链 + `load{}` Lua face + 签名查询全通,`load{}` E2E 13 断言 PASS**;P15 已验收(P15-B 判后续可选项) |
+| 阶段 | **M3 进行中(2026-11-02)** —— 4.2 P16 cpp_extension:**加载链 + 执行链 + `load{}` Lua face + 签名查询 + EAGER 反向全通,forward/backward smoke 全 PASS**;P15 已验收(P15-B 判后续可选项) |
 | 工程树位置 | `WORKPLAN.md` 节点 **4. M3**(🔵;3. M2 ✅ G3 已开 2026-10-31) |
-| 下一个动作 | **P16 签名查询落地(2026-11-02):`load{}` E2E 13 断言 PASS** —— C ABI `pd_custom_op_meta`(schema 三行 inputs/outputs/attrs)+ sol `core.custom_op_meta` + Lua `op_callable` args-aware:官方 custom_relu(0 attr)+ custom_simple_slice(2×int64_t attrs)位置/具名双形态调用全过、缺 attr 可操作报错。**余项**:① 反向验收(PD_BUILD_GRAD_OP 参与 backward —— 评估 eager backward 路径,若需 C++ autograd 接线记 open-question);② 16-cpp-extension.md 验收记录回填;③ CUDA 路径。P15-B(训练态 trace)为后续可选项,不阻塞。 |
+| 下一个动作 | **P16 EAGER 反向落地(2026-11-02):`backward` smoke 11 断言 PASS,16-cpp-extension.md 验收①②达成** —— `pd_custom_op_eager_run` 复刻 eager_api_run_custom_op:CustomOpKernelContext + `egr::run_custom_op_impl` 直跑用户 kernel + 建 RunCustomOpNode 挂图;官方 custom_linear(PD_BUILD_GRAD_OP)forward `y=X@W+B` 逐字节正确 + `paddle.autograd.grad` 反向 gX/gW/gB 与手算一致。**余项**:① 16-cpp-extension.md 验收记录回填;② CUDA 路径;③ double-grad map 留待冒烟。P15-B(训练态 trace)为后续可选项,不阻塞。 |
 | 人点名的三件调研 | **① Q-22** phi 层有没有不依赖 pybind 的 DLPack 通道(决定 Insight7 内存协议怎么定);**② 数出「跑通 MNIST 训练,Insight7 至少要哪些函数」**(从上游代码里数,不凭感觉 —— 已知 `python/paddle` 全层只用 132 个 `np.*` 符号、真函数约 15 个,见 `research/ecosystem.md` §5.1);**③ Q-23** Array API Standard 是否如记忆所述(要走代理核实)。三件都**不阻塞** `WORKPLAN` 主线 |
 | 全部 ⛔ 阻塞节点 | `WORKPLAN.md` 4.3 distributed —— 无多卡环境(待拍板 P2) |
 | 待人拍板 | 剩余待拍板:P3 / P4 / P6 / P7(改写)+ 1.7 的 P9(Penlight 分发)与 luarocks 占位 —— 见 `process/decisions.md` §3 §4 |
