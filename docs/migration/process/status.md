@@ -27,7 +27,7 @@ G3  ✅ 已通过(2026-10-31)  M2 验收:CIFAR + 吞吐 3×(P12 acc > 0.78 判�
 |---|---|
 | 阶段 | **M3 进行中(2026-11-02)** —— 4.2 P16 cpp_extension:**本机范围 DONE**(加载链 + 执行链 + `load{}` Lua face + 签名查询 + EAGER 反向 + 缓存失效 + ABI 守卫全通,smoke 18+11 断言 PASS);P15 已验收(P15-B 判后续可选项) |
 | 工程树位置 | `WORKPLAN.md` 节点 **4. M3**(🔵;3. M2 ✅ G3 已开 2026-10-31) |
-| 下一个动作 | **4.4(2026-11-02)**:metrics-lua **五批完成**(含 Bleu,METRICS_SMOKE 40 断言 PASS,SSIM 评估留后需 conv2d);ocean-lua **双模式全部实证**(Lightning MNIST acc>0.95 + Keras 全链路 6 断言,OCEAN_SMOKE 26;三仓库切分 D11 落地)。**下一步 = 4.4 收尾(三仓库 rockspec 一致性 + WORKPLAN 4.4 节点)或结转 M3 余项**。**P16 余项**(环境缺):CUDA / Linux / double-grad map |
+| 下一个动作 | **4.4 收尾完成(2026-11-02)**:WORKPLAN 4.x 节点状态回填(4.1/4.2/4.4 ✅,仅 4.3 distributed ⛔ 阻塞)。metrics-lua 五批 40 断言;ocean-lua 双模式全实证。**M3 实质完成**:仅 distributed(环境缺,待 P2)+ SSIM 结转(需 conv2d 公开 API,生成物存在但包装成本中等,单指标价值边际)。**下一步 = M3 收尾汇报 / 待用户定 M4 或 P2 distributed**。**P16 余项**(环境缺):CUDA / Linux / double-grad map |
 | 人点名的三件调研 | **① Q-22** phi 层有没有不依赖 pybind 的 DLPack 通道(决定 Insight7 内存协议怎么定);**② 数出「跑通 MNIST 训练,Insight7 至少要哪些函数」**(从上游代码里数,不凭感觉 —— 已知 `python/paddle` 全层只用 132 个 `np.*` 符号、真函数约 15 个,见 `research/ecosystem.md` §5.1);**③ Q-23** Array API Standard 是否如记忆所述(要走代理核实)。三件都**不阻塞** `WORKPLAN` 主线 |
 | 全部 ⛔ 阻塞节点 | `WORKPLAN.md` 4.3 distributed —— 无多卡环境(待拍板 P2) |
 | 待人拍板 | 剩余待拍板:P3 / P4 / P6 / P7(改写)+ 1.7 的 P9(Penlight 分发)与 luarocks 占位 —— 见 `process/decisions.md` §3 §4 |

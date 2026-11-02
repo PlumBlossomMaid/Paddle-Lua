@@ -180,11 +180,11 @@
  |    +-- [✅] 3.4 M2 验收:CIFAR + 吞吐 3×  -> plan/roadmap.md §1   ★ 2026-10-31 全部通过。**P12**(ResNet18 CIFAR-10 10-epoch acc > 判据):四跑 0.7905/0.7943/0.7559/0.7886 全 < 0.80;Python 官方 Paddle 3.5.0.dev 同配方参考仅 0.7613 → 证明 0.80 对无预训练 ImageNet 结构 ResNet18(conv1 7×7 s2,32×32→8×8)本身不可达;**用户拍板判据放宽到 0.78**,第四跑 0.7886 ≥ 0.78 达标。cifar10.lua 断言改 0.78 + 加 CIFAR_TP_ONLY 逃生门(跳过 3.7h 重训直达 P13)。**P13**(nw=4 吞吐 ≥ 3× nw=0):两处真实 bug 修复后达标 —— ① io.lua `_WORKER_STOP_TIMEOUT` 5→120s(worker 冷启动构造 Cifar10 ~7s > 5s 超时致 `worker lane timed out`);② `OMP_NUM_THREADS=1`(Insight7 backends/cpu/kernels 大量 `#pragma omp parallel for`,4 Lanes worker × 每 kernel OMP 线程 = 线程风暴,4 worker 反比 1 worker 慢;OMP=1 让 Lanes 成为唯一并行层)→ **nw=0=4.5 / nw=4=13.8 = 3.07x ≥ 3x 达标**。探针根因(三组交叉验证):纯 Lua 与 pd_op_full 在 1/2/4 lane 完美线性,唯独 Cifar10:get 路径(Insight DLPack+permute+ToTensor)不伸缩 → OMP=1 修了 OpenMP 线程风暴主因。Momentum 优化器作为 API 补齐落地(optimizer.lua + optimizer_smoke 25 断言),保留为正确 API 但非 CIFAR 验收配方。**下一步 = 4. M3(静态图 trace / cpp_extension / distributed⛔ / metrics-ocean)** |
  |
  +-- [🔵] 4. M3 完整                         前置:3
- |    +-- [⬜] 4.1 静态图 trace              -> plan/modules/15-to-static.md
- |    +-- [⬜] 4.2 cpp_extension             -> plan/modules/16-cpp-extension.md
+ |    +-- [✅] 4.1 静态图 trace              -> plan/modules/15-to-static.md   ★ 2026-11-02 验收完成:ResNet18 trace 前向逐位一致 + Python jit.load 读回一致(atol 1e-5)+ item 门 + trace 3 根因修复(feed UAF / value_of impl-key / batch_norm_ 录制)。P15-B(训练态)判后续可选。见 tasks T-M3-01
+ |    +-- [✅] 4.2 cpp_extension             -> plan/modules/16-cpp-extension.md   ★ 2026-11-02 本机范围验收:加载链/执行链/load{} Lua face/签名查询/EAGER 反向/缓存失效/ABI 守卫全通(18+11 断言);余 CUDA/Linux/double-grad map(环境缺)。见 tasks T-M3-02
  |    +-- [⛔] 4.3 distributed               -> plan/modules/17-distributed.md
  |    |         阻塞:无多卡环境(待拍板 P2),写得了测不了
- |    +-- [⬜] 4.4 metrics-lua / ocean-lua   独立仓库
+ |    +-- [✅] 4.4 metrics-lua / ocean-lua   独立仓库   ★ 2026-11-02 完成(三仓库切分 D11 落地):metrics-lua **五批 20 指标**(Accuracy/P/R/F1/AUROC/AP/ConfusionMatrix/MAE/MSE/RMSE/R2/Pearson/PSNR/MRR/NDCG/BLEU/MetricCollection/Mean/Sum/Cat,METRICS_SMOKE **40 断言** PASS;仅 SSIM 留后 —— 需 Gaussian 卷积,公开 API 无 conv2d,边际成本高,M3 结转)。ocean-lua **双模式全实证**(Lightning:MNIST 2 epoch acc 0.9810>0.95,public-API 管线;Keras:prepare+fit{loader,epochs,val_loader} 全链路,val metric 上报;OCEAN_SMOKE 26 断言)+ 8 callback + 3 logger + Accelerator/Strategy/Precision 三层。两仓库只调 paddle-lua 公开 API(overview §1)。见 tasks T-M3-03
  |
  +-- [⬜] 5. M4 更远                         前置:4
       +-- [⬜] 5.1 script 模式(AST)        -> plan/modules/18-script.md
