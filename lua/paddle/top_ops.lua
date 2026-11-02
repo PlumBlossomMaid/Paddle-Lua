@@ -225,4 +225,34 @@ M.stack = rule {
   return gen("stack")(x, axis)
 end)
 
+-- ---------------------------------------------------------------------
+-- 第三批(4.4 metrics retrieval):unsqueeze + 比较算子对偶。
+-- AUC 用 rank 外积:unsqueeze(score, axis=2)→[n,1],广播 less_than →[n,n]。
+-- ---------------------------------------------------------------------
+
+-- unsqueeze{x, axis} -- axis 标量或轴表(1-based);生成物只转 1-based 不
+-- 包标量为 IntArray 表,这里补 intarray(与 sum/mean 的 axis 同款包装)
+M.unsqueeze = rule {
+  { name = "x", type = Tensor, doc = "input tensor" },
+  { name = "axis", type = argrule.any, opt = true, default = nil,
+    doc = "1-based axis (scalar or list) to insert as size-1" },
+}(function(x, axis)
+  local ax = axis
+  if type(ax) == "number" then ax = { ax } end
+  return gen("unsqueeze")(x, ax)
+end)
+
+M.less_than = rule(equal_rule)(function(x, y)
+  return gen("less_than")(x, y)
+end)
+M.greater_equal = rule(equal_rule)(function(x, y)
+  return gen("greater_equal")(x, y)
+end)
+M.less_equal = rule(equal_rule)(function(x, y)
+  return gen("less_equal")(x, y)
+end)
+M.not_equal = rule(equal_rule)(function(x, y)
+  return gen("not_equal")(x, y)
+end)
+
 return M
