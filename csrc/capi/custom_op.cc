@@ -502,4 +502,51 @@ int pd_custom_op_run(const char* op_type, const pd_tensor* inputs,
   PD_GUARD_END(-1);
 }
 
+int pd_custom_op_meta(const char* op_type, char* buf, int cap) {
+  PD_GUARD_BEGIN;
+  if (op_type == nullptr || op_type[0] == '\0') {
+    pd_set_error(PD_INVALID_ARG, "pd_custom_op_meta: empty op_type");
+    return -1;
+  }
+  const auto& meta_info_map = paddle::OpMetaInfoMap::Instance().GetMap();
+  auto it = meta_info_map.find(op_type);
+  if (it == meta_info_map.end()) {
+    pd_set_error(PD_INVALID_ARG,
+                 ("pd_custom_op_meta: op '" + std::string(op_type)
+                  + "' not registered (load the dso first)")
+                     .c_str());
+    return -1;
+  }
+  const auto& vec_map = it->second;
+  // Schema: three newline-terminated lines, each a comma-joined list:
+  //   line 1: inputs  (names, in declaration order)
+  //   line 2: outputs (names, in declaration order)
+  //   line 3: attrs   ("name:type", in declaration order; type strings
+  //                    are ParseAttrStr's second field, op_meta_info.h)
+  // Values carry no NULs or newlines (PD_BUILD_OP identifiers), so the
+  // Lua side splits on ',' / '\n' safely.
+  auto join = [](const std::vector<std::string>& v) {
+    std::string out;
+    for (size_t i = 0; i < v.size(); ++i) {
+      if (i) out += ",";
+      out += v[i];
+    }
+    out += "\n";
+    return out;
+  };
+  std::string schema;
+  schema += join(paddle::OpMetaInfoHelper::GetInputs(vec_map[0]));
+  schema += join(paddle::OpMetaInfoHelper::GetOutputs(vec_map[0]));
+  schema += join(paddle::OpMetaInfoHelper::GetAttrs(vec_map[0]));
+  if (cap <= 0 || buf == nullptr) {
+    return static_cast<int>(schema.size());
+  }
+  int n = static_cast<int>(schema.size());
+  if (n >= cap) n = cap - 1;  // keep room for the terminator
+  std::memcpy(buf, schema.data(), static_cast<size_t>(n));
+  buf[n] = '\0';
+  return n;
+  PD_GUARD_END(-1);
+}
+
 }  // extern "C"

@@ -368,28 +368,159 @@ end
 -- 4. load{} face
 -- ---------------------------------------------------------------------
 
+-- Build the sol-layer attr table ({ type = code, value = .., len = .. })
+-- from the parallel arrays. Value must be a Lua NUMBER/string (the sol
+-- binding converts by type code); vector attrs pass a 1-based Lua array.
+-- Declared BEFORE op_run -- Lua locals bind from their declaration
+-- onward (measured 2026-11-02).
+local function build_attr_table(attr_types, attr_values, attr_lens)
+  local t = {}
+  for i = 1, #attr_types do
+    t[i] = { type = attr_types[i], value = attr_values[i],
+             len = attr_lens[i] }
+  end
+  return t
+end
+
 -- core.custom_op_run is resolvable only after paddle is initialized; do
 -- it lazily so require "paddle.utils.cpp_extension" never forces the
 -- runtime up. NOTE: must be declared BEFORE op_callable below -- a local
 -- is only visible from its declaration onward (Lua scoping), and a
 -- function defined earlier would see the GLOBAL op_run instead.
 local core
-local function op_run(op_type, inputs)
+local function op_run(op_type, inputs, attr_types, attr_values, attr_lens)
   if not core then core = require "paddle_core" end
-  return core.custom_op_run(op_type, inputs)
+  if #attr_types == 0 then
+    return core.custom_op_run(op_type, inputs)
+  end
+  return core.custom_op_run(op_type, inputs,
+                            build_attr_table(attr_types, attr_values,
+                                             attr_lens))
 end
 
--- Build a callable for one registered op. Positional tensors today
--- (custom_relu reads inputs by declaration order); attr-aware signatures
--- land with the per-op signature query (16-cpp-extension.md sec 3.2
--- step 5, next tick). One output -> Tensor; many -> array (matches
--- layer:forward).
+-- Map a paddle attr type string ("bool", "int", "int64_t", "float",
+-- "double", "std::string", "std::vector<int>", ...) to the pd_attr_type
+-- code it needs (paddle_c.h Group 14 enum order).
+local ATTR_CODE = {
+  ["bool"] = 0,               -- PD_ATTR_BOOL
+  ["int"] = 1,                -- PD_ATTR_INT
+  ["float"] = 2,              -- PD_ATTR_FLOAT
+  ["double"] = 3,             -- PD_ATTR_DOUBLE
+  ["int64_t"] = 4,            -- PD_ATTR_INT64
+  ["std::string"] = 5,        -- PD_ATTR_STRING
+  ["std::vector<int>"] = 6,   -- PD_ATTR_VEC_INT
+  ["std::vector<float>"] = 7, -- PD_ATTR_VEC_FLOAT
+  ["std::vector<int64_t>"] = 8, -- PD_ATTR_VEC_INT64
+  ["std::vector<std::string>"] = 9, -- PD_ATTR_VEC_STRING
+}
+
+-- Attr -> one (code, value, len) triple. Vector attrs pass a 1-based
+-- Lua array; everything else a plain number/string (sol converts).
+local function attr_triple(a, v, op_type)
+  -- ParseAttrStr hands back " int64_t" (leading space survives the
+  -- split on ':') -- trim before the type map lookup.
+  local atype = a.type:gsub("^%s+", ""):gsub("%s+$", "")
+  local code = ATTR_CODE[atype]
+  if code == nil then
+    error("paddle.utils.cpp_extension: attr '" .. a.name
+          .. "' of op '" .. op_type .. "' has unsupported type '"
+          .. a.type .. "'", 4)
+  end
+  local len = 1
+  if code >= 6 then  -- vector attrs
+    if type(v) ~= "table" then
+      error("paddle.utils.cpp_extension: attr '" .. a.name .. "' of op '"
+            .. op_type .. "' needs a Lua array (1-based) for type '"
+            .. a.type .. "'", 4)
+    end
+    len = #v
+  end
+  return code, v, len
+end
+
+local function attr_names(meta)
+  local names = {}
+  for _, a in ipairs(meta.attrs) do names[#names + 1] = a.name end
+  return table.concat(names, ", ")
+end
+
+-- Named-attrs path: t has attr_name keys. Missing attrs error here with
+-- the full op signature (actionable, mirrors the C ABI error text).
+local function collect_named_attrs(meta, t, op_type)
+  local types, values, lens = {}, {}, {}
+  for _, a in ipairs(meta.attrs) do
+    local v = t[a.name]
+    if v == nil then
+      error("paddle.utils.cpp_extension: op '" .. op_type
+            .. "' missing required attr '" .. a.name .. "' ("
+            .. a.type .. ")", 4)
+    end
+    local code, val, len = attr_triple(a, v, op_type)
+    types[#types + 1] = code
+    values[#values + 1] = val
+    lens[#lens + 1] = len
+  end
+  return types, values, lens
+end
+
+-- Positional-attrs path: attrs arrive after the inputs, in declaration
+-- order (mirrors the upstream C++ call signature).
+local function collect_positional_attrs(meta, args, start, op_type)
+  local types, values, lens = {}, {}, {}
+  for i, a in ipairs(meta.attrs) do
+    local v = args[start + i - 1]
+    if v == nil then
+      error("paddle.utils.cpp_extension: op '" .. op_type
+            .. "' expects " .. #meta.inputs .. " input(s) and "
+            .. #meta.attrs .. " attr(s) in order (" .. attr_names(meta)
+            .. ")", 4)
+    end
+    local code, val, len = attr_triple(a, v, op_type)
+    types[#types + 1] = code
+    values[#values + 1] = val
+    lens[#lens + 1] = len
+  end
+  return types, values, lens
+end
+
+-- Build a callable for one registered op. The signature comes from
+-- core.custom_op_meta(op_type) (paddle_c.h Group 14): the first N args
+-- are positional tensors (schema inputs, declaration order), the rest
+-- bind the op's attrs. Two call forms (D15 _wrap three-mode):
+--   ops.op(x1, .., xn, attr1, .., attrm)   positional attrs
+--   ops.op{ x1, .., xn, attr_name = v.. }  named attrs (single table)
+-- Attr values are marshalled into C ABI arrays; vector attrs take a Lua
+-- array (1-based). One output -> Tensor; many -> array (layer:forward).
+-- NOTE: declared AFTER all helpers -- a local is only visible from its
+-- declaration onward, and helpers referenced in this closure would read
+-- as globals otherwise (measured 2026-11-02).
+local op_meta_cache = {}
 local function op_callable(op_type)
   return function(...)
-    local n = select("#", ...)
+    if not core then core = require "paddle_core" end
+    local meta = op_meta_cache[op_type]
+    if not meta then
+      meta = core.custom_op_meta(op_type)
+      op_meta_cache[op_type] = meta
+    end
+    local n_inputs = #meta.inputs
+    local args = { ... }
+    if type(args[1]) == "table" then
+      -- named-attrs form: ops.op{ x1, .., xn, attr = v, .. }
+      local t = args[1]
+      local inputs = {}
+      for i = 1, n_inputs do inputs[i] = t[i] end
+      local at, av, al = collect_named_attrs(meta, t, op_type)
+      local out = op_run(op_type, inputs, at, av, al)
+      if #out == 1 then return out[1] end
+      return out
+    end
+    -- positional-attrs form: ops.op(x1, .., xn, a1, .., am)
     local inputs = {}
-    for i = 1, n do inputs[i] = select(i, ...) end
-    local out = op_run(op_type, inputs)
+    for i = 1, n_inputs do inputs[i] = args[i] end
+    local at, av, al = collect_positional_attrs(meta, args, n_inputs + 1,
+                                                op_type)
+    local out = op_run(op_type, inputs, at, av, al)
     if #out == 1 then return out[1] end
     return out
   end

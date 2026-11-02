@@ -44,6 +44,16 @@ if not f then
 end
 f:close()
 
+-- Official simple_slice op (two int64_t attrs) -- the attr marshalling
+-- path (positional AND named, plus a missing-attr error check).
+local SLICE = "E:\\code\\Paddle\\test\\custom_op\\custom_simple_slice_op.cc"
+local sf = io.open(SLICE, "rb")
+if not sf then
+  print("SMOKE SKIP: official custom_simple_slice_op.cc not found")
+  os.exit(77)
+end
+sf:close()
+
 -- 1. compile + load (first call: real cl.exe run, ~30-60s)
 local ops = cpp_extension.load{
   name = "cpp_ext_relu",
@@ -82,6 +92,29 @@ check(#inc > 10, "get_include_paths returns a full list")
 local flags = cpp_extension.get_link_flags()
 check(#flags == 2, "get_link_flags returns phi + paddle_core")
 
-print(("SMOKE PASS: cpp_extension load/call/cache OK (%d assertions)"
-       ):format(ntests))
+-- ---- attr-aware op: official custom_simple_slice (2 int64_t attrs) ----
+local slice_ops = cpp_extension.load{
+  name = "cpp_ext_slice",
+  sources = { SLICE },
+}
+check(type(slice_ops.custom_simple_slice) == "function",
+      "simple_slice callable registered")
+
+-- positional attrs: slice(x, begin, end) -- x.slice(begin, end)
+local xs = full({ 8, 4 }, 1.0)
+local ys = slice_ops.custom_simple_slice(xs, 2, 5)
+check(ys:shape()[1] == 3, "positional attrs slice rows 2..5 -> 3 rows")
+-- named attrs: slice{ xs, begin_index = 2, end_index = 5 }
+local ys2 = slice_ops.custom_simple_slice{ xs, begin_index = 2,
+                                           end_index = 5 }
+check(ys2:shape()[1] == 3, "named attrs slice rows 2..5 -> 3 rows")
+-- missing attr -> actionable Lua error (not a marshalling crash)
+local ok, err = pcall(function()
+  return slice_ops.custom_simple_slice(xs, 2)
+end)
+check(not ok and tostring(err):find("attr", 1, true) ~= nil,
+      "missing attr errors with an actionable message")
+
+print(("SMOKE PASS: cpp_extension load/call/cache/attrs OK "
+       .. "(%d assertions)"):format(ntests))
 os.exit(0)

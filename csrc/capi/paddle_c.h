@@ -600,6 +600,16 @@ int pd_custom_op_run(const char* op_type,
                      const int* attr_lens, int nattrs,
                      pd_tensor* outs, int nout);
 
+/* Query a loaded custom op's schema (inputs / outputs / attrs names, in
+ * declaration order). Serialized into `buf` as three newline-terminated
+ * lines of comma-joined names; the attrs line carries "name:type" entries
+ * (ParseAttrStr's second field). Returns the byte count (cap <= 0 or
+ * buf == NULL asks for the size only) or -1 with pd_last_error set. The
+ * Lua cpp_extension face uses this to build argument-aware callables
+ * (16-cpp-extension.md sec 3.2 step 5): how many positional tensors the
+ * op reads and which named attrs it accepts. */
+int pd_custom_op_meta(const char* op_type, char* buf, int cap);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif

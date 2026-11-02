@@ -57,6 +57,86 @@ void register_custom_op(lua_State* L, int module_index) {
         return sol::make_object(L, ops);
       });
 
+  /* core.custom_op_meta(op_type) -> { inputs = {..}, outputs = {..},
+   * attrs = { {name=.., type=..}, .. } } -- the op schema in Lua types
+   * (paddle_c.h Group 14). The cpp_extension face builds arg-aware
+   * callables from this: how many positional tensors and which named
+   * attrs. */
+  mod.set_function(
+      "custom_op_meta",
+      [](sol::this_state L, const std::string& op_type) -> sol::object {
+        int n = pd_custom_op_meta(op_type.c_str(), nullptr, 0);
+        pd::check();
+        if (n < 0) pd::throw_status();
+        std::vector<char> buf(static_cast<size_t>(n) + 1, '\0');
+        int got = pd_custom_op_meta(op_type.c_str(), buf.data(),
+                                    static_cast<int>(buf.size()));
+        pd::check();
+        if (got < 0) pd::throw_status();
+        std::string schema(buf.data());
+        // split on '\n' into 3 lines, then ',' into names
+        auto split_lines = [](const std::string& s) {
+          std::vector<std::string> lines;
+          size_t start = 0;
+          while (true) {
+            size_t p = s.find('\n', start);
+            if (p == std::string::npos) break;
+            lines.emplace_back(s.substr(start, p - start));
+            start = p + 1;
+          }
+          return lines;
+        };
+        auto split_comma = [](const std::string& line) {
+          std::vector<std::string> parts;
+          size_t start = 0;
+          while (true) {
+            size_t p = line.find(',', start);
+            if (p == std::string::npos) {
+              if (start < line.size()) parts.emplace_back(line.substr(start));
+              break;
+            }
+            parts.emplace_back(line.substr(start, p - start));
+            start = p + 1;
+          }
+          return parts;
+        };
+        auto lines = split_lines(schema);
+        sol::state_view lv(L);
+        auto make_list = [&](const std::vector<std::string>& v) {
+          sol::table t = lv.create_table(0, static_cast<int>(v.size()));
+          for (size_t i = 0; i < v.size(); ++i) {
+            t[static_cast<int>(i) + 1] = v[i];  // 1-based (C4)
+          }
+          return t;
+        };
+        sol::table result = lv.create_table();
+        result["inputs"] = make_list(lines.size() > 0
+                                         ? split_comma(lines[0])
+                                         : std::vector<std::string>{});
+        result["outputs"] = make_list(lines.size() > 1
+                                          ? split_comma(lines[1])
+                                          : std::vector<std::string>{});
+        // attrs: "name:type" strings -> { {name, type}, .. }
+        auto attr_parts = lines.size() > 2 ? split_comma(lines[2])
+                                           : std::vector<std::string>{};
+        sol::table attrs = lv.create_table(0, static_cast<int>(attr_parts.size()));
+        for (size_t i = 0; i < attr_parts.size(); ++i) {
+          const std::string& at = attr_parts[i];
+          size_t colon = at.find(':');
+          sol::table a = lv.create_table();
+          if (colon != std::string::npos) {
+            a["name"] = at.substr(0, colon);
+            a["type"] = at.substr(colon + 1);
+          } else {
+            a["name"] = at;
+            a["type"] = "";
+          }
+          attrs[static_cast<int>(i) + 1] = a;
+        }
+        result["attrs"] = attrs;
+        return sol::make_object(L, result);
+      });
+
   /* core.custom_op_run(op, inputs, attrs) -> table of output LuaTensors.
    * attr entries: { type = <pd_attr_type int>, value = <number | string |
    * array of number/string>, len = <int, vector only> }. Types map to the
