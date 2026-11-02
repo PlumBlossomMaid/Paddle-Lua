@@ -27,7 +27,7 @@ G3  ✅ 已通过(2026-10-31)  M2 验收:CIFAR + 吞吐 3×(P12 acc > 0.78 判�
 |---|---|
 | 阶段 | **M3 进行中(2026-11-02)** —— 4.2 P16 cpp_extension:**本机范围 DONE**(加载链 + 执行链 + `load{}` Lua face + 签名查询 + EAGER 反向 + 缓存失效 + ABI 守卫全通,smoke 18+11 断言 PASS);P15 已验收(P15-B 判后续可选项) |
 | 工程树位置 | `WORKPLAN.md` 节点 **4. M3**(🔵;3. M2 ✅ G3 已开 2026-10-31) |
-| 下一个动作 | **P16 验收补全(2026-11-02):①② 达成** —— ① 改源码后缓存失效:缓存键加编译器标识 + 源码 md5,改一行 → 重编(行为/DLL 路径变,stale 清理);② 不匹配编译器 ABI 守卫:load 前读产物 PE `MajorLinkerVersion` 与宿主对比,家族不同 → 可操作 Lua error 而非 LoadLibrary 崩;编译管线改 .cmd 脚本(修 vcvars 嵌套引号断裂)。smoke_cpp_extension 18 断言 + smoke_custom_backward 11 + smoke_custom_relu 2 + regen_diff + lint 全绿。**P16 余项**:③ CUDA(无 GPU)/⑧ Linux(无环境)/double-grad map(留待冒烟)。**下一步 = 4.4 metrics-lua / ocean-lua 开工** |
+| 下一个动作 | **4.4 metrics-lua / ocean-lua 开工(2026-11-02 范围已判断,见 T-M3-03)**:独立仓库三切分(D11),`metrics-lua` 先行 —— 20 指标(classification 7 + regression 5 + image 2 + retrieval 2 + text BLEU + 其它 4)+ `MetricCollection`(Ocean `log_dict` 对接点),`add_state` 声明式状态机(学 torchmetrics/PaddleMetrics),纯 Lua 零编译、pl.class 基座、argrule 包装;paddle-lua 公开 API 已覆盖全部基础算子(cast/equal/greater_than/sum/zeros/numel 已核实)。`ocean-lua` 后做(双模式 Trainer + 8 callback + 3 logger)。**下一步 = 创建 `E:\code\metrics-lua` 仓库 + 骨架**。**P16 余项**(环境缺):CUDA / Linux / double-grad map |
 | 人点名的三件调研 | **① Q-22** phi 层有没有不依赖 pybind 的 DLPack 通道(决定 Insight7 内存协议怎么定);**② 数出「跑通 MNIST 训练,Insight7 至少要哪些函数」**(从上游代码里数,不凭感觉 —— 已知 `python/paddle` 全层只用 132 个 `np.*` 符号、真函数约 15 个,见 `research/ecosystem.md` §5.1);**③ Q-23** Array API Standard 是否如记忆所述(要走代理核实)。三件都**不阻塞** `WORKPLAN` 主线 |
 | 全部 ⛔ 阻塞节点 | `WORKPLAN.md` 4.3 distributed —— 无多卡环境(待拍板 P2) |
 | 待人拍板 | 剩余待拍板:P3 / P4 / P6 / P7(改写)+ 1.7 的 P9(Penlight 分发)与 luarocks 占位 —— 见 `process/decisions.md` §3 §4 |
