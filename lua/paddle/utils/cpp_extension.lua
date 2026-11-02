@@ -259,8 +259,20 @@ local function paddle_version()
   return _core_version
 end
 
+-- The host compiler identity, folded into the cache key (16-cpp-extension
+-- sec 4 pit 1): a DLL built by one compiler can ABI-mismatch the host, so
+-- a DIFFERENT compiler must never hit the same cache slot as an older one.
+-- find_vcvars() is vswhere-probed (slow), so memoize it.
+local _vcvars
+local function compiler_id()
+  if _vcvars == nil then
+    _vcvars = find_vcvars()
+  end
+  return _vcvars
+end
+
 local function cache_key(name, sources, toolchain)
-  local parts = { name, paddle_version(), toolchain }
+  local parts = { name, paddle_version(), toolchain, compiler_id() }
   for _, p in ipairs(sources) do
     local content = read_file(p)
     if not content then
@@ -270,6 +282,58 @@ local function cache_key(name, sources, toolchain)
   end
   for _, d in ipairs(paddle_defines()) do parts[#parts + 1] = d end
   return md5.sumhexa(table.concat(parts))
+end
+
+-- PE header MajorLinkerVersion of a DLL (offset: MZ@0, e_lfanew u32 @
+-- 0x3C, PE sig 4, COFF 20, OptionalHeader Magic u16 -> byte +26). MSVC
+-- link.exe -> 14; MinGW ld -> 2. Returns nil for a non-PE file.
+local function pe_linker_major(path)
+  local f = io.open(path, "rb")
+  if not f then return nil end
+  local head = f:read(0x40)
+  if not head or head:sub(1, 2) ~= "MZ" then
+    f:close()
+    return nil
+  end
+  local b1, b2, b3, b4 = head:byte(0x3D, 0x40)
+  local ne = b1 + b2 * 256 + b3 * 65536 + b4 * 16777216
+  f:seek("set", ne + 4 + 20 + 2)
+  local mj = f:read(1)
+  f:close()
+  if not mj then return nil end
+  return mj:byte()
+end
+
+-- The host's own linker major (paddle_core.dll IS the in-process Paddle).
+-- This is the ABI baseline every loaded extension DLL must match.
+local _host_linker
+local function host_linker_major()
+  if _host_linker == nil then
+    local host = extension_dir() .. "\\paddle_core.dll"
+    _host_linker = pe_linker_major(host)
+  end
+  return _host_linker
+end
+
+-- Reject a product DLL whose linker family differs from the host BEFORE
+-- LoadLibrary -- a mismatched toolchain crashes with no clue otherwise
+-- (16-cpp-extension sec 4 pit 1). Only the family (major) is compared:
+-- MSVC minor bumps stay ABI-compatible, so 14.29 vs 14.50 must pass.
+local function abi_check(dll)
+  local host = host_linker_major()
+  local prod = pe_linker_major(dll)
+  if prod == nil then
+    error("paddle.utils.cpp_extension: " .. dll
+          .. " is not a PE DLL (cannot verify ABI)", 3)
+  end
+  if host ~= nil and prod ~= host then
+    error("paddle.utils.cpp_extension: " .. dll
+          .. " was built with linker major " .. prod
+          .. " but the host Paddle (paddle_core.dll) uses linker major "
+          .. host .. " -- different compiler toolchain. Rebuild it with "
+          .. "the same MSVC as the host, or clear the extension cache.",
+          3)
+  end
 end
 
 -- ---------------------------------------------------------------------
@@ -302,7 +366,9 @@ local function compile(name, sources, extra_cxx_cflags, verbose)
                          .. "_*.dll 2>nul")
   if stale then
     for line in stale:lines() do
-      os.remove(out_dir .. "\\" .. line)
+      -- dir /b lines carry a trailing \r (CRLF); os.remove would then
+      -- look for a filename with a stray CR and silently fail
+      os.remove(out_dir .. "\\" .. line:gsub("\r$", ""))
     end
     stale:close()
   end
@@ -325,13 +391,17 @@ local function compile(name, sources, extra_cxx_cflags, verbose)
   -- The SAME recipe build_test_custom_relu.cmd uses (measured): vcvars
   -- for the MSVC env (std headers/CRT), each source .cc -> .obj, then
   -- link the .objs into one DLL. /Fo cannot be shared across multiple
-  -- sources (D8036), so per-source .obj paths.
-  local vc = 'call "' .. vcvars .. '" >nul 2>nul && '
-  local compile_lines = {}
+  -- sources (D8036), so per-source .obj paths. The whole thing is a
+  -- temp .cmd file run with cmd /c: chaining multi-line commands with
+  -- "&&" inside one quoted cmd /c string breaks on the nested quotes of
+  -- vcvars64.bat's path (measured 2026-11-02 -- later commands escape
+  -- the outer quote and run without the MSVC env, exit 255, empty log).
+  local vc = 'call "' .. vcvars .. '" >nul 2>nul'
+  local script_lines = { "@echo off", vc }
   for _, p in ipairs(sources) do
     local base = p:match("([^/\\]+)$"):gsub("%.", "_")
-    compile_lines[#compile_lines + 1] =
-      vc .. "cl /nologo /c /O2 /EHsc /std:c++17 /MT /bigobj "
+    script_lines[#script_lines + 1] =
+      "cl /nologo /c /O2 /EHsc /std:c++17 /MT /bigobj "
       .. defs .. " " .. table.concat(inc_args, " ")
       .. cflags_extra .. " " .. p
       .. ' /Fo:' .. obj_prefix .. "_" .. base .. ".obj"
@@ -341,16 +411,21 @@ local function compile(name, sources, extra_cxx_cflags, verbose)
     local base = p:match("([^/\\]+)$"):gsub("%.", "_")
     objs[#objs + 1] = obj_prefix .. "_" .. base .. ".obj"
   end
-  local out_cmd = (table.concat(compile_lines, " && ")
-    .. " && " .. vc .. "cl /nologo /LD "
+  script_lines[#script_lines + 1] =
+    "cl /nologo /LD "
     .. table.concat(objs, " ")
-    .. ' /Fe:"' .. dll .. '" ' .. table.concat(lib_args, " "))
-  local wrapped = 'cmd /c "' .. out_cmd .. ' 1>"' .. log .. '" 2>&1"'
+    .. ' /Fe:"' .. dll .. '" ' .. table.concat(lib_args, " ")
+  local script = out_dir .. "\\" .. name .. "_" .. key:sub(1, 12) .. ".cmd"
+  local sf = io.open(script, "w")
+  sf:write(table.concat(script_lines, "\r\n"))
+  sf:close()
+  local wrapped = 'cmd /c "' .. script .. ' 1>"' .. log .. '" 2>&1"'
   if verbose then
     print("paddle.utils.cpp_extension: compiling " .. #sources
           .. " source(s) -> " .. dll)
   end
   local rc = os.execute(wrapped)
+  os.remove(script)
   if rc ~= 0 and rc ~= true then
     local tail = read_file(log) or ""
     -- last ~1.5KB of the log is the actionable part
@@ -544,6 +619,9 @@ M.load = rule {
   call = function(name, sources, extra_cxx_cflags, verbose)
     local dll, err = compile(name, sources, extra_cxx_cflags, verbose)
     if not dll then error("paddle.utils.cpp_extension: " .. err, 3) end
+    -- reject a product built by a different toolchain BEFORE LoadLibrary
+    -- (it would otherwise crash with no clue, 16-cpp-extension sec 4 pit 1)
+    abi_check(dll)
     if not core then core = require "paddle_core" end
     local ops = core.load_custom_op(dll)
     local out = {}
@@ -577,6 +655,16 @@ function M.get_link_flags()
     flags[#flags + 1] = l
   end
   return flags
+end
+
+-- Testing surface for the smoke suite (not part of the public contract):
+-- drives abi_check directly on an arbitrary DLL path. The smoke cannot
+-- patch a product in place -- a loaded DLL is open without
+-- FILE_SHARE_DELETE/WRITE on Windows, so it builds a patched COPY and
+-- checks that. load{} runs the SAME function on every product before
+-- LoadLibrary, so the guard is verified both here and end-to-end.
+function M._check_abi(dll)
+  return abi_check(dll)
 end
 
 return M

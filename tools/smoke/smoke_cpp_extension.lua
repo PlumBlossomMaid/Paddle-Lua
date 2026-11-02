@@ -115,6 +115,104 @@ end)
 check(not ok and tostring(err):find("attr", 1, true) ~= nil,
       "missing attr errors with an actionable message")
 
+-- ---- 16-cpp-extension.md acceptance: cache INVALIDATION ----
+-- Changing ONE line of a source must invalidate the hash cache: the new
+-- load recompiles (different DLL path, different behavior) and drops the
+-- stale DLL. We use a throwaway scale op whose constant we flip.
+local tmp_cc = "build-test/cache_probe.cc"
+-- opname differs per compile so two different-DLL builds (the cache
+-- invalidation case) do not double-register the same op -- the point
+-- here is the cache key/behavior change, not re-registration. The
+-- timestamp comment makes every run recompile (a previous run's products
+-- would otherwise satisfy the cache and skip the stale-cleanup path).
+local function write_scale(k, opname, ts)
+  local fw = io.open(tmp_cc, "w")
+  fw:write([[
+#include "paddle/extension.h"
+// probe ]], tostring(ts), [[
+
+std::vector<paddle::Tensor> ScaleKernel(const paddle::Tensor& x) {
+  auto out = paddle::empty_like(x);
+  auto* op = out.mutable_data<float>(x.place());
+  auto* ip = x.data<float>();
+  const float k = ]], k, [[;
+  for (int64_t i = 0; i < x.numel(); ++i) op[i] = ip[i] * k;
+  return {out};
+}
+
+PD_BUILD_OP(]], opname, [[)
+    .Inputs({"X"})
+    .Outputs({"Out"})
+    .SetKernelFn(PD_KERNEL(ScaleKernel));
+]])
+  fw:close()
+end
+local function exists(p)
+  local fe = io.open(p, "rb")
+  if fe then fe:close() return true end
+  return false
+end
+
+local ts = os.time()
+write_scale("2.0f", "cache_probe_a", ts)
+local p1 = cpp_extension.load{ name = "cpp_ext_cacheprobe",
+                               sources = { tmp_cc } }
+local d1 = p1._dll
+local xp = full({ 2, 2 }, 4.0)
+local y1 = p1.cache_probe_a(xp)
+local b1 = y1:to_host_bytes()
+
+-- A never-loaded stale product must be dropped by the recompile cleanup.
+-- (The ALREADY-loaded d1 cannot be deleted while mapped -- Windows keeps
+-- modules open without FILE_SHARE_DELETE -- so stale removal is only
+-- asserted on this fake, load-free entry.)
+local fake = "build-test/cpp_ext_cacheprobe_fakestale.dll"
+local ff = io.open(fake, "wb")
+ff:write("stale")
+ff:close()
+
+write_scale("3.0f", "cache_probe_b", ts)  -- one line changed -> key changes
+local p2 = cpp_extension.load{ name = "cpp_ext_cacheprobe",
+                               sources = { tmp_cc } }
+local d2 = p2._dll
+local y2 = p2.cache_probe_b(xp)
+local b2 = y2:to_host_bytes()
+check(d2 ~= d1, "source change -> new cache key / DLL path")
+check(b2 ~= b1, "source change -> recompiled (behavior differs)")
+check(not exists(fake), "stale (never-loaded) DLL removed after recompile")
+os.remove(tmp_cc)
+
+-- ---- 16-cpp-extension.md acceptance: ABI guard for a MISMATCHED
+-- toolchain (sec 4 pit 1) ----
+-- A product built by a different compiler family (MinGW linker major 2
+-- vs MSVC 14) must be REJECTED with an actionable error instead of being
+-- handed to LoadLibrary (which would crash with no clue). The smoke can
+-- only patch a COPY: a loaded DLL is open read-only on Windows, so the
+-- in-place patch is impossible -- we build a patched copy and drive the
+-- same abi_check load{} runs before every LoadLibrary.
+local ev_dll = ops2._dll
+local rf = io.open(ev_dll, "rb")
+local all = rf:read("*a")
+rf:close()
+local e1, e2, e3, e4 = all:byte(0x3D, 0x40)  -- e_lfanew u32 @ 0x3C
+local ne = e1 + e2 * 256 + e3 * 65536 + e4 * 16777216
+local major_off = ne + 4 + 20 + 2  -- PE sig(4) + COFF(20) + Magic(2)
+local patched = all:sub(1, major_off) .. string.char(2)
+                .. all:sub(major_off + 2)
+local copy = "build-test/cpp_ext_relu_patched.dll"
+local wf = io.open(copy, "wb")
+wf:write(patched)
+wf:close()
+-- the same MSVC-built original passes the check; the patched one fails
+check(cpp_extension._check_abi(ev_dll) == nil,
+      "MSVC-built DLL passes the ABI check")
+local okb, errb = pcall(function()
+  return cpp_extension._check_abi(copy)
+end)
+check(not okb and tostring(errb):find("linker major", 1, true) ~= nil,
+      "mismatched toolchain DLL rejected with an actionable error")
+os.remove(copy)
+
 print(("SMOKE PASS: cpp_extension load/call/cache/attrs OK "
        .. "(%d assertions)"):format(ntests))
 os.exit(0)

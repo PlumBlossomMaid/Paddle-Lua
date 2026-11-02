@@ -133,8 +133,16 @@ Python 版提供两条路:`setup()`(预编译)和 `load()`(JIT 编译)。
 - [ ] CUDA 版本同上 —— 未做(本机无 GPU;cl.exe JIT 已按平台分支骨架)
 - [x] 第二次 `load()` 命中缓存,耗时 < 100ms
       —— **2026-11-02 smoke 断言**(sources 哈希缓存,命中直接复用 DLL 不重编)
-- [ ] 改一行源码后 `load()`,缓存正确失效 —— 已实现(哈希含源码),待独立验收断言
-- [ ] 用不匹配的编译器构建的 .so,`load()` 时**报错而不是崩溃** —— 未做(见 §4 坑①)
+- [x] 改一行源码后 `load()`,缓存正确失效
+      —— **2026-11-02 `smoke_cpp_extension.lua` 断言**(同一 throwaway scale op 的常数 2.0f→3.0f,
+      改一行后重新编译:DLL 路径变 + 行为变 + 从未加载的 stale DLL 被清理;
+      注意:已被本进程 LoadLibrary 的 DLL 在 Windows 上无法删除——FILE_SHARE 无 DELETE,stale 断言只针对未加载产物)
+- [x] 用不匹配的编译器构建的 .so,`load()` 时**报错而不是崩溃**
+      —— **2026-11-02 双防线**:① **缓存键含编译器标识**(vcvars 路径),换编译器自动重编,
+      杜绝跨工具链复用缓存;② **load 前 ABI 校验**:读产物 DLL 的 PE `MajorLinkerVersion`
+      (MSVC link.exe=14 / MinGW ld=2,偏移 = e_lfanew+26),与宿主 `paddle_core.dll` 对比,
+      家族不同 → 可操作 Lua error(`linker major` 提示),不交给 LoadLibrary
+      (smoke:patch 副本 14→2 后 `_check_abi` 拒绝;未 patch 原样通过)
 - [x] Python 版 Paddle 的自定义算子示例代码零改动可用
       —— **2026-11-02**:custom_relu / custom_simple_slice / custom_linear 三个官方例子全部零改动
 - [ ] Linux 与 Windows 各验一遍 —— 未做(本机仅 Windows;Lua 侧已按平台分支)
